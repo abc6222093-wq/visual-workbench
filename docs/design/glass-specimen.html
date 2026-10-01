@@ -38,23 +38,29 @@
         specular: 0.04,
 
         // 贴边的细投影（库自带，只在玻璃外 20px 内，开大会出现方形切边）
-        contactShadow: 0.22,
-        // 投影深浅：玻璃下方又大又软的投影
-        shadowOpacity: 0.22,
-        // 投影模糊（像素）
-        shadowBlur: 22,
-        // 投影往下偏多少（像素）
-        shadowOffsetY: 16,
+        contactShadow: 0.18,
 
-        // 投影里透出的彩光：光穿过玻璃落在底面上的那一片（0 = 没有）
-        causticStrength: 0.75,
-        // 彩光往右下偏多少（像素）
-        causticOffsetX: 8,
-        causticOffsetY: 18,
+        // —— 投影（照 P2）：光从左上方斜着照下来，投影是玻璃形状的「复印件」，往右下方错开 ——
+        // 投影往右、往下错开多少（按玻璃短边的比例；P2 大约是 0.25 和 0.5）
+        shadowShiftX: 0.22,
+        shadowShiftY: 0.45,
+        // 错开距离的上限（像素），大面板不会错得太远
+        shadowShiftMax: 70,
+        // 投影深浅（小控件）
+        shadowOpacity: 0.5,
+        // 大玻璃（面板、大圆）的投影深浅：大玻璃透过自己能看到投影，太深会显脏
+        shadowOpacityLarge: 0.28,
+        // 投影边缘的柔和程度（像素）；P2 的投影形状看得清，不要太糊
+        shadowBlur: 9,
+        // 投影中间变亮多少：光穿过透明玻璃会照亮投影中间，只剩边缘一圈深（0 = 实心投影）
+        shadowHollow: 0.5,
+
+        // 投影里透出的彩光：光穿过玻璃后带着颜色落在投影里
+        causticStrength: 0.85,
+        // 彩光往投影远端（右下）集中的程度：0 = 均匀铺满投影，1 = 只在远端一边
+        causticFar: 0.5,
         // 彩光模糊程度（像素）
-        causticBlur: 12,
-        // 玻璃正下方的彩光挖掉多少（1 = 玻璃里看不到彩光，0 = 全部透出来）
-        causticInside: 0.85,
+        causticBlur: 10,
 
         // 带色玻璃（「放映」按钮）的颜色浓度
         tint: 0.62,
@@ -319,7 +325,7 @@
           saturation: G.saturation,
           opacity: 1,
           shadowOpacity: G.contactShadow,
-          shadowSpread: 6,
+          shadowSpread: 5,
           shadowOffsetY: 2,
           bevelMode: 0,
         };
@@ -342,6 +348,12 @@
           ctx.beginPath();
           ctx.roundRect(x, y, w, h, Math.min(w, h) / 2);
         }
+        // 每块玻璃投影里透出的颜色：无色玻璃 = 粉→紫→蓝；「放映」= 粉紫
+        const LIGHT = {
+          "btn-tint": ["rgba(247,168,208,1)", "rgba(196,160,255,1)", "rgba(183,162,255,1)"],
+        };
+        const LIGHT_DEFAULT = ["rgba(247,168,208,1)", "rgba(183,162,255,1)", "rgba(143,193,255,1)"];
+
         function paintCaustics(canvas, ids) {
           canvas.width = innerWidth * dpr;
           canvas.height = innerHeight * dpr;
@@ -349,40 +361,49 @@
           ctx.scale(dpr, dpr);
           for (const id of ids) {
             const r = document.getElementById(id).getBoundingClientRect();
-            // 单独画在一张小画布上：先画彩光，再把玻璃正下方挖掉一部分，
-            // 让彩光主要落在玻璃外侧的投影里，玻璃里面只透出一点
-            const pad = Math.max(G.causticBlur, G.shadowBlur) * 3 + Math.max(G.causticOffsetX, G.causticOffsetY, G.shadowOffsetY);
+            const short = Math.min(r.width, r.height);
+            const dx = Math.min(short * G.shadowShiftX, G.shadowShiftMax * 0.5),
+              dy = Math.min(short * G.shadowShiftY, G.shadowShiftMax);
+            const blur = G.shadowBlur * (short > 200 ? 2 : 1);
+            const pad = blur * 3 + G.causticBlur * 3 + Math.max(dx, dy);
             const off = document.createElement("canvas");
             off.width = (r.width + pad * 2) * dpr;
             off.height = (r.height + pad * 2) * dpr;
             const o = off.getContext("2d");
             o.scale(dpr, dpr);
-            const x = pad + G.causticOffsetX,
-              y = pad + G.causticOffsetY,
+            const x = pad + dx,
+              y = pad + dy,
               w = r.width,
               h = r.height;
-            // 投影：灰紫色、又大又软
-            o.filter = `blur(${G.shadowBlur}px)`;
-            o.fillStyle = `rgba(70,60,110,${G.shadowOpacity / G.causticStrength})`;
-            pill(o, pad + 4, pad + G.shadowOffsetY, w - 8, h);
-            o.fill();
-            const g = o.createLinearGradient(x, y, x + w, y + h);
-            g.addColorStop(0, "rgba(247,168,208,0.15)");
-            g.addColorStop(0.35, "rgba(247,168,208,1)");
-            g.addColorStop(0.6, "rgba(183,162,255,1)");
-            g.addColorStop(0.85, "rgba(143,193,255,1)");
-            g.addColorStop(1, "rgba(143,193,255,0.4)");
-            o.filter = `blur(${G.causticBlur}px)`;
-            o.fillStyle = g;
+
+            // 1) 投影：玻璃形状往右下错开
+            o.filter = `blur(${blur}px)`;
+            o.fillStyle = `rgba(52,46,80,${short > 200 ? G.shadowOpacityLarge : G.shadowOpacity})`;
             pill(o, x, y, w, h);
             o.fill();
-            o.filter = `blur(${G.causticBlur * 0.6}px)`;
+
+            // 2) 中间被透过来的光照亮：挖掉一部分，只剩边缘一圈深
+            const inset = short * 0.3;
             o.globalCompositeOperation = "destination-out";
-            o.fillStyle = `rgba(0,0,0,${G.causticInside})`;
-            const inset = G.causticBlur * 0.4;
-            pill(o, pad + inset, pad + inset, w - inset * 2, h - inset * 2);
+            o.filter = `blur(${Math.max(blur, short * 0.12)}px)`;
+            o.fillStyle = `rgba(0,0,0,${G.shadowHollow})`;
+            pill(o, x + inset, y + inset, w - inset * 2, h - inset * 2);
             o.fill();
-            ctx.globalAlpha = G.causticStrength;
+
+            // 3) 彩光：只染在投影上（source-atop），往投影远端（右下）集中
+            o.globalCompositeOperation = "source-atop";
+            o.filter = `blur(${G.causticBlur}px)`;
+            const c = LIGHT[id] || LIGHT_DEFAULT;
+            const g = o.createLinearGradient(x, y, x + w, y + h);
+            g.addColorStop(0, c[0]);
+            g.addColorStop(0.5, c[1]);
+            g.addColorStop(1, c[2]);
+            o.fillStyle = g;
+            o.globalAlpha = G.causticStrength;
+            const far = G.causticFar * short * 0.35;
+            pill(o, x + far * 0.6, y + far, w, h);
+            o.fill();
+
             ctx.drawImage(off, r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
           }
         }
