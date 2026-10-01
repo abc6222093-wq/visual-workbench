@@ -60,9 +60,12 @@ export const GLASS = {
   // 投影深浅（小控件）
   shadowOpacity: 0.34,
   // 大玻璃（侧栏、弹窗）的投影深浅
-  shadowOpacityLarge: 0.26,
+  shadowOpacityLarge: 0.2,
   // 投影边缘的柔和程度（像素）
   shadowBlur: 8,
+  // 大玻璃（面板）的投影：更软、更淡，不出现生硬的边
+  largeShadowBlur: 26,
+  largeShadowShift: 10,
   // 玻璃正下方的投影透出来多少（太大玻璃会发灰）
   shadowUnderGlass: 0.2,
 
@@ -70,9 +73,9 @@ export const GLASS = {
   // 磨砂程度：0 = 不糊，1 = 最糊
   frostBlur: 0.8,
   // 磨砂玻璃加多少白
-  frostWhiteness: 0.2,
+  frostWhiteness: 0.3,
   // 磨砂玻璃里的颜色淡一点（-1 = 黑白）
-  frostSaturation: -0.35,
+  frostSaturation: -0.5,
 
   // —— 带色按钮（「放映」）的颜色浓度 ——
   tint: 0.62,
@@ -151,6 +154,12 @@ function ensureLayer() {
   };
   addEventListener("resize", again);
   new ResizeObserver(again).observe(document.documentElement);
+  // 字体、图片晚加载时界面会挪一点：每隔一会儿核对一次位置（只量几块玻璃的位置，几乎不费力），
+  // 挪了就重画投影，免得投影和玻璃对不齐、露出生硬的边
+  setInterval(() => {
+    if (lastScope && !layer.hidden && document.visibilityState === "visible") syncGlass(lastScope);
+  }, 400);
+  document.fonts?.ready.then(again);
 }
 
 /* 投影：玻璃形状往右下稍微错开，单一颜色；玻璃正下方的大部分挖掉 */
@@ -172,9 +181,11 @@ function paintShadows(canvas, rects, veil = 0) {
   for (const { rect: r, radius } of rects) {
     const short = Math.min(r.width, r.height);
     const large = short > 120;
-    const dx = Math.min(short * GLASS.shadowShiftX, GLASS.shadowShiftMax * 0.45),
-      dy = Math.min(short * GLASS.shadowShiftY, GLASS.shadowShiftMax);
-    const blur = GLASS.shadowBlur * (large ? 1.8 : 1);
+    const dx = large
+        ? GLASS.largeShadowShift * 0.4
+        : Math.min(short * GLASS.shadowShiftX, GLASS.shadowShiftMax * 0.45),
+      dy = large ? GLASS.largeShadowShift : Math.min(short * GLASS.shadowShiftY, GLASS.shadowShiftMax);
+    const blur = large ? GLASS.largeShadowBlur : GLASS.shadowBlur;
     const pad = blur * 4 + Math.max(dx, dy) + 10;
     const off = document.createElement("canvas");
     off.width = Math.max(1, Math.round((r.width + pad * 2) * dpr));
@@ -186,7 +197,7 @@ function paintShadows(canvas, rects, veil = 0) {
     shape(o, pad + dx, pad + dy, r.width, r.height, radius);
     o.fill();
     o.globalCompositeOperation = "destination-out";
-    o.filter = `blur(${Math.max(2, blur * 0.35)}px)`;
+    o.filter = `blur(${Math.max(2, blur * 0.25)}px)`;
     o.fillStyle = `rgba(0,0,0,${1 - GLASS.shadowUnderGlass})`;
     shape(o, pad + 1, pad + 1, r.width - 2, r.height - 2, Math.max(0, radius - 1));
     o.fill();
