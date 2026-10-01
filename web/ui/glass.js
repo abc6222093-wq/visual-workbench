@@ -10,7 +10,8 @@
  * 界面本身（文字、按钮、输入框）是另一层，叠在玻璃层上面，背景透明。
  * 界面上写了 data-glass="名字" 的元素，玻璃层就在它正下方垫一块同样大小、同样圆角的玻璃：
  *   data-glass-layer="panel"   直接放在背景上的玻璃（侧栏、操作条、工具条、导航条）
- *   data-glass-layer="control" 放在别的玻璃上面的玻璃（「放映」、加页面）
+ *   data-glass-layer="control" 放在别的玻璃上面的玻璃
+ *   data-glass-frost           磨砂玻璃（中间画布那一块）：糊一点、白一点
  * 玻璃的圆角跟着界面元素自己的 border-radius 走：方形面板、胶囊、圆形都可以。
  *
  * 参数全部在下面的 GLASS 里，数值和样张一致，统一在这里微调。
@@ -18,9 +19,13 @@
 import { LiquidGlass } from "../vendor/liquidglass.esm.js";
 
 export const GLASS = {
-  // —— 玻璃本身（和样张 window.GLASS 相同） ——
+  // —— 背景 ——
+  // 背景上蒙一层白：让整体偏白底（0 = 原图，越大越白）
+  backgroundVeil: 0.22,
+
+  // —— 两侧和顶部的透明玻璃（和样张 window.GLASS 相同，只多加了一点白） ——
   // 通透：0 = 完全透明不加白
-  whiteness: 0.0,
+  whiteness: 0.04,
   // 变亮：默认背景本来就很亮，超过 0.02 玻璃里就会一片死白
   brightness: 0.0,
   // 饱和度：玻璃里的颜色稍微浓一点
@@ -61,7 +66,15 @@ export const GLASS = {
   // 玻璃正下方的投影透出来多少（太大玻璃会发灰）
   shadowUnderGlass: 0.2,
 
-  // —— 带色玻璃（「放映」按钮）的颜色浓度 ——
+  // —— 中间的磨砂玻璃（画布那一大块） ——
+  // 磨砂程度：0 = 不糊，1 = 最糊
+  frostBlur: 0.8,
+  // 磨砂玻璃加多少白
+  frostWhiteness: 0.2,
+  // 磨砂玻璃里的颜色淡一点（-1 = 黑白）
+  frostSaturation: -0.35,
+
+  // —— 带色按钮（「放映」）的颜色浓度 ——
   tint: 0.62,
 };
 
@@ -83,7 +96,7 @@ let lastScope = null;
 let lastRects = "";
 const lastPlateRect = new Map(); // 名字 -> 上次的位置，用来只重画动过的玻璃
 
-function libConfig(radius) {
+function libConfig(radius, frost = false) {
   return {
     refraction: GLASS.refraction,
     zRadius: Math.min(GLASS.thickness, radius),
@@ -91,9 +104,9 @@ function libConfig(radius) {
     edgeHighlight: GLASS.edgeHighlight,
     fresnel: GLASS.fresnel,
     specular: GLASS.specular,
-    blurAmount: GLASS.blur,
-    brightness: GLASS.brightness + GLASS.whiteness,
-    saturation: GLASS.saturation,
+    blurAmount: frost ? GLASS.frostBlur : GLASS.blur,
+    brightness: GLASS.brightness + (frost ? GLASS.frostWhiteness : GLASS.whiteness),
+    saturation: frost ? GLASS.frostSaturation : GLASS.saturation,
     opacity: 1,
     shadowOpacity: GLASS.contactShadow,
     shadowSpread: 5,
@@ -145,12 +158,17 @@ function shape(ctx, x, y, w, h, radius) {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, Math.min(radius, Math.min(w, h) / 2));
 }
-function paintShadows(canvas, rects) {
+function paintShadows(canvas, rects, veil = 0) {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(innerWidth * dpr);
   canvas.height = Math.round(innerHeight * dpr);
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // 背景上的白纱（画在最底下的投影画布上，玻璃能直接读到，不额外费力）
+  if (veil > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${veil})`;
+    ctx.fillRect(0, 0, innerWidth, innerHeight);
+  }
   for (const { rect: r, radius } of rects) {
     const short = Math.min(r.width, r.height);
     const large = short > 120;
@@ -215,7 +233,7 @@ export function syncGlass(scope = document) {
     const radius = radiusOf(t, r);
     const style = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;border-radius:${radius}px`;
     if (plate.getAttribute("style") !== style) plate.setAttribute("style", style);
-    const cfg = JSON.stringify(libConfig(radius));
+    const cfg = JSON.stringify(libConfig(radius, "glassFrost" in t.dataset));
     if (plate.dataset.config !== cfg) plate.dataset.config = cfg;
     (isControl ? upperRects : floorRects).push({ rect: r, radius });
     const one = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)},${Math.round(radius)}`;
@@ -234,7 +252,7 @@ export function syncGlass(scope = document) {
   if (sig !== lastRects) {
     const sizeChanged = !lastRects.endsWith(sig.slice(sig.lastIndexOf("|")));
     lastRects = sig;
-    paintShadows(floor, floorRects);
+    paintShadows(floor, floorRects, GLASS.backgroundVeil);
     paintShadows(upper, upperRects);
     // 只让动过的玻璃重画；窗口大小变了才全部重画
     if (sizeChanged) instance?.markChanged();
@@ -300,7 +318,7 @@ export async function openModalGlass(sheet) {
   );
   plate.dataset.config = JSON.stringify(libConfig(radius));
   modalLayer.append(plate);
-  paintShadows(made.floor, [{ rect: r, radius }]);
+  paintShadows(made.floor, [{ rect: r, radius }], GLASS.backgroundVeil);
   await made.img.decode().catch(() => {});
   if (token !== modalToken) return;
   try {
