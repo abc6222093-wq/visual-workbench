@@ -134,6 +134,7 @@ function renderElement(project, element, options, fontMap, assetMap) {
     node.style.textAlign = element.align || 'left';
   } else if (element.type === 'image') {
     const image = document.createElement('img');
+    image.decoding = 'sync'; // 拖动时画面每一步都会重画：同步解码，Safari 里图片不会闪一下空白
     image.src = assetUrl(options.assetBase, assetMap.get(element.asset)?.file || '');
     image.alt = element.name || '';
     image.draggable = false;
