@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visual-workbench.local/schema/project.schema.json",
+  "title": "视觉工作台 · 项目文件格式 v1",
+  "description": "一个项目 = 一个画板尺寸 + 若干页面；每页由带稳定编号的元素组成；动效挂在元素编号上，只用相对当前状态的变化描述。人类可读说明见 docs/format.md。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "id", "name", "createdAt", "updatedAt", "artboard", "assets", "fonts", "pages"],
+  "properties": {
+    "format": { "const": "visual-workbench/project" },
+    "formatVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/projectId" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string" },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "updatedAt": { "$ref": "#/$defs/timestamp" },
+    "artboard": { "$ref": "#/$defs/artboard" },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
+    "fonts": { "type": "array", "items": { "$ref": "#/$defs/font" } },
+    "pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/page" } }
+  },
+
+  "$defs": {
+    "projectId": {
+      "description": "项目编号，同时是项目文件夹名。小写字母、数字、连字符。",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+    },
+    "timestamp": {
+      "description": "ISO 8601 时间，例如 2026-10-01T12:00:00.000Z",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "elementId": { "type": "string", "pattern": "^el_[a-z0-9_]{4,32}$" },
+    "pageId": { "type": "string", "pattern": "^page_[a-z0-9_]{4,32}$" },
+    "assetId": { "type": "string", "pattern": "^asset_[a-z0-9_]{4,32}$" },
+    "fontId": { "type": "string", "pattern": "^font_[a-z0-9_]{4,32}$" },
+    "stepId": { "type": "string", "pattern": "^step_[a-z0-9_]{4,32}$" },
+
+    "color": {
+      "description": "#RRGGBB 或 #RRGGBBAA",
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+    },
+    "gradient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "stops"],
+      "properties": {
+        "type": { "enum": ["linear", "radial"] },
+        "angle": { "type": "number", "minimum": 0, "maximum": 360, "description": "linear 用：角度，0 = 从下到上，90 = 从左到右（与 CSS 相同）" },
+        "stops": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["offset", "color"],
+            "properties": {
+              "offset": { "type": "number", "minimum": 0, "maximum": 1 },
+              "color": { "$ref": "#/$defs/color" }
+            }
+          }
+        }
+      }
+    },
+    "fill": { "oneOf": [{ "$ref": "#/$defs/color" }, { "$ref": "#/$defs/gradient" }] },
+
+    "artboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset", "width", "height"],
+      "properties": {
+        "preset": {
+          "description": "slide-16x9 课件 1920×1080；web-desktop 电脑网页 1440 宽；web-mobile 手机网页 390 宽；poster-a4 2480×3508；poster-a3 3508×4961；custom 自定",
+          "enum": ["slide-16x9", "web-desktop", "web-mobile", "poster-a4", "poster-a3", "custom"]
+        },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "file", "pendingLayout", "addedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/assetId" },
+        "kind": { "enum": ["image"] },
+        "file": { "type": "string", "pattern": "^assets/[^/\\\\]+$", "description": "相对项目文件夹的路径，必须在 assets/ 下" },
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "pendingLayout": { "type": "boolean", "description": "true = 待排版：エイ 新拖进来、还没被 agent 排进页面的素材" },
+        "addedAt": { "$ref": "#/$defs/timestamp" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["upload", "library", "copied-from-project"] },
+            "from": { "type": "string", "description": "library：素材库里的文件名；copied-from-project：来源项目编号/素材编号" }
+          }
+        }
+      }
+    },
+
+    "font": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family", "file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/fontId" },
+        "family": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "pattern": "^fonts/[^/\\\\]+$", "description": "相对项目文件夹的路径，必须在 fonts/ 下" },
+        "weight": {
+          "description": "固定字重 100–900，或 variable（可变字体）",
+          "oneOf": [{ "type": "integer", "minimum": 100, "maximum": 900 }, { "const": "variable" }]
+        },
+        "style": { "enum": ["normal", "italic"], "default": "normal" },
+        "license": { "type": "string", "description": "许可证说明或许可证文件相对路径" }
+      }
+    },
+
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "background", "elements", "steps"],
+      "properties": {
+        "id": { "$ref": "#/$defs/pageId" },
+        "name": { "type": "string" },
+        "notes": { "type": "string", "description": "给 agent 或 エイ 的备注，不渲染" },
+        "background": { "$ref": "#/$defs/fill" },
+        "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
+      }
+    },
+
+    "elementBase": {
+      "type": "object",
+      "required": ["id", "type", "x", "y", "width", "height", "zIndex"],
+      "properties": {
+        "id": { "$ref": "#/$defs/elementId" },
+        "type": { "enum": ["text", "image", "shape", "group"] },
+        "name": { "type": "string" },
+        "x": { "type": "number", "description": "左上角 x（分组内的子元素相对分组左上角）" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 },
+        "rotation": { "type": "number", "minimum": -360, "maximum": 360, "default": 0, "description": "顺时针角度，绕元素中心" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "zIndex": { "type": "integer", "description": "层级，大的在上" },
+        "locked": { "type": "boolean", "default": false },
+        "effects": { "$ref": "#/$defs/effects" }
+      }
+    },
+    "element": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/elementBase" },
+        {
+          "oneOf": [
+            { "$ref": "#/$defs/textProps" },
+            { "$ref": "#/$defs/imageProps" },
+            { "$ref": "#/$defs/shapeProps" },
+            { "$ref": "#/$defs/groupProps" }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "textProps": {
+      "type": "object",
+      "required": ["type", "text", "fontSize", "color"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" },
+        "font": { "oneOf": [{ "$ref": "#/$defs/fontId" }, { "type": "null" }], "description": "引用 fonts[].id；null = 系统默认字体" },
+        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
+        "fontWeight": { "type": "integer", "minimum": 100, "maximum": 900, "default": 400 },
+        "lineHeight": { "type": "number", "exclusiveMinimum": 0, "default": 1.4, "description": "行高倍数" },
+        "letterSpacing": { "type": "number", "default": 0 },
+        "align": { "enum": ["left", "center", "right"], "default": "left" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "imageProps": {
+      "type": "object",
+      "required": ["type", "asset"],
+      "properties": {
+        "type": { "const": "image" },
+        "asset": { "$ref": "#/$defs/assetId" },
+        "fit": { "enum": ["cover", "contain", "fill"], "default": "cover" }
+      }
+    },
+    "shapeProps": {
+      "type": "object",
+      "required": ["type", "shape"],
+      "properties": {
+        "type": { "const": "shape" },
+        "shape": { "enum": ["rect", "ellipse", "line", "polygon"] },
+        "fill": { "oneOf": [{ "$ref": "#/$defs/fill" }, { "type": "null" }] },
+        "stroke": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["color", "width"],
+              "properties": {
+                "color": { "$ref": "#/$defs/color" },
+                "width": { "type": "number", "minimum": 0 }
+              }
+            }
+          ]
+        },
+        "cornerRadius": { "type": "number", "minimum": 0, "default": 0 },
+        "points": { "$ref": "#/$defs/percentPoints", "description": "polygon 用：顶点，按元素框的百分比" }
+      },
+      "if": { "properties": { "shape": { "const": "polygon" } } },
+      "then": { "properties": { "points": { "$ref": "#/$defs/percentPoints" } }, "required": ["points"] }
+    },
+    "groupProps": {
+      "type": "object",
+      "required": ["type", "children"],
+      "properties": {
+        "type": { "const": "group" },
+        "children": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/element" } }
+      }
+    },
+
+    "percentPoints": {
+      "description": "顶点列表，每个点 [x, y]，取值 0–100，表示元素框宽高的百分比。相对元素框，所以移动/缩放元素不用改。",
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "blendMode": { "enum": ["normal", "multiply", "screen", "overlay", "darken", "lighten", "difference", "soft-light", "hard-light"] },
+    "filterName": { "enum": ["grayscale", "sepia", "blur", "brightness", "contrast", "saturate"] },
+    "filters": {
+      "description": "grayscale/sepia 0–1；brightness/contrast/saturate 倍数，1 = 原样；blur 像素",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grayscale": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sepia": { "type": "number", "minimum": 0, "maximum": 1 },
+        "blur": { "type": "number", "minimum": 0 },
+        "brightness": { "type": "number", "minimum": 0 },
+        "contrast": { "type": "number", "minimum": 0 },
+        "saturate": { "type": "number", "minimum": 0 }
+      }
+    },
+    "gradientMask": {
+      "description": "渐变遮罩：stops 里的 opacity 1 = 完全显示，0 = 完全遮住",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "stops"],
+      "properties": {
+        "type": { "enum": ["linear", "radial"] },
+        "angle": { "type": "number", "minimum": 0, "maximum": 360 },
+        "stops": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["offset", "opacity"],
+            "properties": {
+              "offset": { "type": "number", "minimum": 0, "maximum": 1 },
+              "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "polygonClip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "points"],
+      "properties": {
+        "type": { "const": "polygon" },
+        "points": { "$ref": "#/$defs/percentPoints" }
+      }
+    },
+    "effects": {
+      "description": "视觉效果（只由 agent 写，エイ 不碰）：混合模式、滤镜、渐变遮罩、多边形裁切",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blend": { "$ref": "#/$defs/blendMode" },
+        "filters": { "$ref": "#/$defs/filters" },
+        "mask": { "$ref": "#/$defs/gradientMask" },
+        "clip": { "$ref": "#/$defs/polygonClip" }
+      }
+    },
+
+    "step": {
+      "description": "一个步骤 = 一次触发后一起执行的若干轨道。click：点击才开始；auto：上一步结束后自动开始（连续推进）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "trigger", "tracks"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stepId" },
+        "name": { "type": "string" },
+        "trigger": { "enum": ["click", "auto"] },
+        "delay": { "type": "number", "minimum": 0, "default": 0, "description": "毫秒，触发后再等多久" },
+        "tracks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/track" } }
+      }
+    },
+    "track": {
+      "description": "一条轨道 = 对一个元素（按编号）做一组相对当前状态的变化",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "change"],
+      "properties": {
+        "target": { "$ref": "#/$defs/elementId" },
+        "delay": { "type": "number", "minimum": 0, "default": 0, "description": "毫秒，相对步骤开始" },
+        "duration": { "type": "number", "minimum": 0, "default": 400, "description": "毫秒；0 = 瞬间" },
+        "easing": { "enum": ["linear", "ease", "ease-in", "ease-out", "ease-in-out"], "default": "ease-out" },
+        "change": { "$ref": "#/$defs/change" }
+      }
+    },
+    "by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by"],
+      "properties": { "by": { "type": "number" } }
+    },
+    "change": {
+      "description": "只允许相对变化：几何用 by（加减），scale 用 times（倍数），滤镜用 by；外观类（颜色、混合、遮罩、裁切）用 to，因为它们不含任何位置/大小信息。",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "appear": { "const": true, "description": "从隐藏变为显示（淡入）。页面开始时，第一次可见性变化是 appear 的元素默认隐藏。" },
+        "disappear": { "const": true, "description": "从显示变为隐藏（淡出）" },
+        "x": { "$ref": "#/$defs/by" },
+        "y": { "$ref": "#/$defs/by" },
+        "width": { "$ref": "#/$defs/by" },
+        "height": { "$ref": "#/$defs/by" },
+        "rotation": { "$ref": "#/$defs/by" },
+        "opacity": { "$ref": "#/$defs/by" },
+        "scale": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["times"],
+          "properties": { "times": { "type": "number", "exclusiveMinimum": 0 } }
+        },
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["to"],
+          "properties": { "to": { "$ref": "#/$defs/color" } },
+          "description": "文字颜色 / 形状填充色变为 to"
+        },
+        "blend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["to"],
+          "properties": { "to": { "$ref": "#/$defs/blendMode" } }
+        },
+        "filters": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "grayscale": { "$ref": "#/$defs/by" },
+            "sepia": { "$ref": "#/$defs/by" },
+            "blur": { "$ref": "#/$defs/by" },
+            "brightness": { "$ref": "#/$defs/by" },
+            "contrast": { "$ref": "#/$defs/by" },
+            "saturate": { "$ref": "#/$defs/by" }
+          }
+        },
+        "mask": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["to"],
+          "properties": { "to": { "oneOf": [{ "$ref": "#/$defs/gradientMask" }, { "type": "null" }] } }
+        },
+        "clip": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["to"],
+          "properties": { "to": { "oneOf": [{ "$ref": "#/$defs/polygonClip" }, { "type": "null" }] } }
+        }
+      },
+      "not": {
+        "description": "同一条轨道不能同时 appear 和 disappear",
+        "properties": { "appear": { "const": true }, "disappear": { "const": true } },
+        "required": ["appear", "disappear"]
+      }
+    }
+  }
+}
