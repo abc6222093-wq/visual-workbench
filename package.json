@@ -1,0 +1,20 @@
+{
+  "name": "visual-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "视觉工作台 · 本地运行的设计项目格式、数据目录、校验与工具脚本",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "validate": "node src/cli/validate.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "init-data": "node src/cli/init-data.js",
+    "save-version": "node src/cli/save-version.js",
+    "copy-pages": "node src/cli/copy-pages.js"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  }
+}

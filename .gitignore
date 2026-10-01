@@ -1,0 +1,13 @@
+# 依赖
+node_modules/
+
+# 用户数据目录（项目、素材库、版本）永远不进 git
+visual-workbench-data/
+*.vwdata/
+
+# 测试与脚本的临时输出
+tmp/
+.tmp/
+
+# 系统文件
+.DS_Store
