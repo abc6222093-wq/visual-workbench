@@ -102,7 +102,7 @@ function shell(active, body) {
   stopLoops();
   closeModalGlass();
   if (glass) {
-    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo" title="视觉工作台">${mascot({ size: 40, badge: true, label: "视觉工作台" })}</div><nav class="ed-dock">${ibtn("home", "grid", "项目总览")}${ibtn("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${ibtn("home", "grid", "项目总览")}${ibtn("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
     return;
   }
   hideGlass();
@@ -215,7 +215,7 @@ function layers(items, depth = 0) {
 }
 function property() {
   if (!S.selected.length)
-    return `<div class="ed-empty">${mascot({ size: 56, badge: true })}<span>未选择元素</span></div>`;
+    return `<div class="ed-empty"><span class="g-disc-badge g-disc-badge--lg">${mascot({ size: 46, disc: true })}</span><span>未选择元素</span></div>`;
   const e = findElement(page(), S.selected[0])?.element;
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
@@ -227,7 +227,7 @@ const agentUI = { until: 0, timer: null };
 const AGENT_AWAKE_MS = 15000;
 function agentChip() {
   const awake = Date.now() < agentUI.until;
-  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip">${mascot({ pose: awake ? "awake" : "sleep", size: 20, badge: true })}<span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
+  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip"><span class="g-disc-badge g-disc-badge--sm">${mascot({ pose: awake ? "awake" : "sleep", size: 17, disc: true })}</span><span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
 }
 function refreshAgentChip() {
   const chip = $("#agent-chip");

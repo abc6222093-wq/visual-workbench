@@ -261,6 +261,49 @@ html.glass-mode [data-glass] {
   color: #a49bb3;
 }
 
+/* ---------- 小兔的白色圆钮（标志、agent 状态、空状态）：和「放映」同一套做法 ---------- */
+.g-disc-badge {
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background:
+    var(--g-disc-fill) padding-box,
+    var(--g-disc-stroke) border-box;
+  box-shadow: var(--g-disc-shadow);
+}
+.g-disc-badge::before {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--g-disc-glow);
+  filter: blur(9px);
+  opacity: 0.9;
+}
+.g-disc-badge .g-mascot {
+  filter: drop-shadow(0 1px 0 #fff);
+}
+.g-disc-badge--lg {
+  width: 72px;
+  height: 72px;
+}
+.g-disc-badge--sm {
+  width: 22px;
+  height: 22px;
+  border-width: 1.5px;
+  box-shadow: 1px 2px 4px -1px rgba(60, 55, 85, 0.3);
+}
+.g-disc-badge--sm::before {
+  display: none;
+}
+
 /* ---------- 状态小圆点 ---------- */
 .g-dot {
   width: 7px;
@@ -763,14 +806,7 @@ html.glass-mode #toast {
   padding: 18px 0 18px 12px;
 }
 .ed-logo {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.75),
-    2px 5px 10px -4px rgba(60, 52, 92, 0.45);
+  margin-top: 2px;
 }
 .ed-dock {
   display: flex;
@@ -1334,10 +1370,8 @@ html.glass-mode .resize-handle {
   font-size: 12px;
   font-weight: 600;
 }
-.ed-empty .g-mascot {
-  box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.75),
-    2px 6px 10px -5px rgba(60, 52, 92, 0.45);
+.ed-empty .g-disc-badge {
+  margin-bottom: 4px;
 }
 .ed-assets {
   display: grid;

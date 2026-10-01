@@ -5,17 +5,19 @@
  *
  * 只用在三处：左上角标志、顶栏 agent 状态、右侧没选中元素时的空状态。
  *
- * mascot({ pose, size, badge, label })
+ * mascot({ pose, size, badge, disc, label })
  *   pose:  "awake" 醒着 | "sleep" 睡着（眯眼、耳朵耷拉、冒小圆泡）| "happy" 开心（^ ^）
  *   badge: true 时垫一个浅浅的粉紫蓝圆底（白底界面上用，不然白色剪影看不见）
+ *   disc:  true 时是放在「白色圆钮」上的版本（编辑器里用）：小兔浅灰紫、上浅下深，眼睛深一点；
+ *          外面的白色圆钮用 CSS 的 .g-disc-badge 包
  * 返回 SVG 字符串。眨眼、呼吸交给 ui/motion.js。
  */
 let seq = 0;
 
 const WHITE = "#ffffff";
-const EYE = "#6a55c8";
+const EYE_DEFAULT = "#6a55c8";
 
-function eyes(pose, y, l, r) {
+function eyes(pose, y, l, r, EYE = EYE_DEFAULT) {
   if (pose === "sleep")
     return `<g class="m-eyes" stroke="${EYE}" stroke-width="2.2" stroke-linecap="round"><path d="M${l - 2.4} ${y}h4.8M${r - 2.4} ${y}h4.8"/></g>`;
   if (pose === "happy")
@@ -29,7 +31,7 @@ function ear(cx, baseY, h, tilt) {
   return `<rect class="m-ear" x="${cx - w / 2}" y="${baseY - h}" width="${w}" height="${h + 6}" rx="${w / 2}" transform="rotate(${tilt} ${cx} ${baseY + 2})"/>`;
 }
 
-export function mascot({ pose = "awake", size = 48, badge = false, label = "" } = {}) {
+export function mascot({ pose = "awake", size = 48, badge = false, disc = false, label = "" } = {}) {
   const id = `mq${++seq}`;
   const sleep = pose === "sleep";
   // 画在 64×64 里
@@ -42,11 +44,15 @@ export function mascot({ pose = "awake", size = 48, badge = false, label = "" } 
     tiltR = sleep ? 42 : 24;
   const earL = ear(hx - hr * 0.42, hy - hr * 0.55, earH, tiltL),
     earR = ear(hx + hr * 0.42, hy - hr * 0.55, sleep ? earH : earH * 0.86, tiltR);
-  const fig = `<g class="m-figure" fill="${WHITE}">${earL}${earR}<circle class="m-head" cx="${hx}" cy="${hy}" r="${hr}"/>${eyes(pose, hy + 1.5, hx - hr * 0.44, hx + hr * 0.44)}</g>`;
+  const fill = disc ? `url(#${id}-d)` : WHITE;
+  const eye = disc ? "#958ea6" : EYE_DEFAULT;
+  const fig = `<g class="m-figure" fill="${fill}">${earL}${earR}<circle class="m-head" cx="${hx}" cy="${hy}" r="${hr}"/>${eyes(pose, hy + 1.5, hx - hr * 0.44, hx + hr * 0.44, eye)}</g>`;
   const zz = sleep
-    ? `<g class="m-zz" fill="${badge ? WHITE : "#b7a2ff"}"><circle cx="${hx + hr + 6}" cy="${hy - hr + 1}" r="2.3"/><circle cx="${hx + hr + 11}" cy="${hy - hr - 5}" r="1.7"/><circle cx="${hx + hr + 14}" cy="${hy - hr - 10}" r="1.2"/></g>`
+    ? `<g class="m-zz" fill="${disc ? "#cdc6d6" : badge ? WHITE : "#b7a2ff"}"><circle cx="${hx + hr + 6}" cy="${hy - hr + 1}" r="2.3"/><circle cx="${hx + hr + 11}" cy="${hy - hr - 5}" r="1.7"/><circle cx="${hx + hr + 14}" cy="${hy - hr - 10}" r="1.2"/></g>`
     : "";
   const a11y = label ? `role="img" aria-label="${label}"` : 'aria-hidden="true"';
+  if (disc)
+    return `<svg class="g-mascot is-${pose} is-disc" width="${size}" height="${size}" viewBox="0 0 64 64" ${a11y}><defs><linearGradient id="${id}-d" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ede8f2"/><stop offset="1" stop-color="#d0c8da"/></linearGradient></defs>${fig}${zz}</svg>`;
   if (!badge)
     return `<svg class="g-mascot is-${pose}" width="${size}" height="${size}" viewBox="0 0 64 64" ${a11y}>${fig}${zz}</svg>`;
   // 圆底：浅浅的粉→紫→蓝，小兔缩进圆里
