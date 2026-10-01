@@ -14,6 +14,11 @@ import {
   rootSelection,
   resizeGroup,
 } from "./editor.js";
+// 玻璃界面组件（第 2 轮视觉）
+import { icon } from "./ui/icons.js";
+import { mascot } from "./ui/mascot.js";
+import { liven, hop, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
+import { mountAmbient } from "./ui/ambient.js";
 const $ = (s) => document.querySelector(s),
   app = $("#app"),
   toast = $("#toast");
@@ -64,15 +69,31 @@ function notice(m) {
 function btn(a, t, c = "", extra = "") {
   return `<button class="btn ${c}" data-action="${a}" ${extra}>${t}</button>`;
 }
+function gbtn(a, label, { icon: name, cls = "", extra = "" } = {}) {
+  return `<button class="g-btn ${cls}" data-action="${a}" ${extra}>${name ? icon(name, 17) : ""}${label}</button>`;
+}
+function round(a, name, title, cls = "", extra = "") {
+  return `<button class="g-round ${cls}" data-action="${a}" title="${title}" aria-label="${title}" ${extra}>${icon(name, 18)}</button>`;
+}
+const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group" };
 function shell(active, body) {
+  const glass = active === "editor";
+  document.documentElement.classList.toggle("glass-mode", glass);
+  stopLoops();
+  if (glass) {
+    mountAmbient();
+    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-round g-round--lg" title="视觉工作台">${mascot({ size: 46, badge: true, label: "视觉工作台" })}</div>${round("home", "grid", "项目总览")}${round("library", "library", "公共素材库")}<div class="ed-rail__spacer"></div><div class="ed-avatar g-round g-round--sm">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+    return;
+  }
   app.innerHTML = `<div class="shell"><aside class="rail"><div class="brand-mark">✦</div><button class="rail-btn ${active === "home" ? "active" : ""}" data-action="home" title="项目总览">▦</button><button class="rail-btn ${active === "library" ? "active" : ""}" data-action="library" title="公共素材库">◇</button><div class="rail-spacer"></div><div class="rail-dot">E</div></aside><main class="main">${body}</main></div><div id="modal-root"></div>`;
 }
-function head(name, section, actions = "") {
-  return `<header class="top"><div><p class="eyebrow">VISUAL WORKBENCH <span>/ ${section}</span></p><h1>${esc(name)}</h1></div><div class="top-actions">${actions}</div></header>`;
+function head(name, actions = "") {
+  return `<header class="top"><div><h1>${esc(name)}</h1></div><div class="top-actions">${actions}</div></header>`;
 }
 function modal(html) {
-  $("#modal-root").innerHTML =
-    `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
+  $("#modal-root").innerHTML = document.documentElement.classList.contains("glass-mode")
+    ? `<div class="modal-backdrop g-backdrop"><div class="g-sheet" role="dialog" aria-modal="true">${html}</div></div>`
+    : `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
   $(".modal-backdrop").onpointerdown = (e) => {
     if (e.target === e.currentTarget) closeModal();
   };
@@ -104,7 +125,7 @@ async function home() {
   const list = await api("/api/projects");
   shell(
     "home",
-    `${head("项目总览页", "PROJECTS", btn("new", "＋ 新建项目", "primary"))}<div class="overview-head"><div><h2>最近的项目</h2><p>继续你的创作，所有修改会自动保存在本机。</p></div><span class="count">${list.length} 个项目</span></div><div class="projects-grid">${list.map((item, i) => `<button class="project-card" data-action="open" data-id="${esc(item.id)}"><div class="project-thumb" data-thumb="${i}"></div><div class="project-info"><span class="project-type">${esc(item.project.artboard.preset)}</span><h3>${esc(item.name)}</h3><p>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</p></div><span class="card-arrow">↗</span></button>`).join("")}<button class="project-card add-card" data-action="new"><span class="add-orb">＋</span><strong>开启新项目</strong><small>为想法留出空间</small></button></div>`,
+    `${head("项目总览页", btn("new", "＋ 新建项目", "primary"))}<div class="overview-head"><div><h2>最近的项目</h2></div><span class="count">${list.length} 个项目</span></div><div class="projects-grid">${list.map((item, i) => `<button class="project-card" data-action="open" data-id="${esc(item.id)}"><div class="project-thumb" data-thumb="${i}"></div><div class="project-info"><span class="project-type">${esc(item.project.artboard.preset)}</span><h3>${esc(item.name)}</h3><p>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</p></div><span class="card-arrow">↗</span></button>`).join("")}<button class="project-card add-card" data-action="new"><span class="add-orb">＋</span><strong>开启新项目</strong></button></div>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
 }
@@ -157,36 +178,90 @@ async function open(id, data) {
   renderEditor();
 }
 function pageItem(p, i) {
-  return `<div class="page-item ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="page-check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="page-open" data-action="switch" data-id="${p.id}"><span class="page-preview" data-preview="${p.id}"></span><span class="page-label"><b>${String(i + 1).padStart(2, "0")}</b> ${esc(p.name)}</span></button></div>`;
+  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${i + 1}</b><i>${esc(p.name)}</i></span></button></div>`;
 }
 function layers(items, depth = 0) {
   return [...items]
     .sort((a, b) => b.zIndex - a.zIndex)
     .map(
       (e) =>
-        `<button class="layer ${S.selected.includes(e.id) ? "selected" : ""}" data-action="select" data-id="${e.id}" style="padding-left:${14 + depth * 16}px"><span class="layer-glyph">${{ text: "T", image: "▧", shape: "◯", group: "▣" }[e.type]}</span><span>${esc(e.name || e.text || e.type)}</span>${e.locked ? "<small>锁定</small>" : ""}</button>${e.children ? layers(e.children, depth + 1) : ""}`,
+        `<button class="g-row ${S.selected.includes(e.id) ? "selected" : ""}" data-action="select" data-id="${e.id}" style="padding-left:${6 + depth * 18}px"><span class="g-row__icon">${icon(TYPE_ICON[e.type], 15)}</span><span class="g-row__text">${esc(e.name || e.text || e.type)}</span>${e.locked ? `<span class="g-row__meta">${icon("lock", 13)}锁定</span>` : ""}</button>${e.children ? layers(e.children, depth + 1) : ""}`,
     )
     .join("");
 }
 function property() {
   if (!S.selected.length)
-    return `<div class="empty-properties"><span>✦</span><h3>选择一个元素</h3><p>在画布或图层中点选，即可调整位置、大小和样式。</p></div>`;
+    return `<div class="ed-empty">${mascot({ size: 104, body: true, badge: true })}<span>未选择元素</span></div>`;
   const e = findElement(page(), S.selected[0])?.element;
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
-    `<label class="property-field">${label}<input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
-  return `<div class="panel-section"><div class="selection-heading"><span class="selection-icon">${{ text: "T", image: "▧", shape: "◯", group: "▣" }[e.type]}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><div class="property-grid">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></div>${e.type === "text" ? `<div class="panel-section"><h3>文字</h3><label class="property-field full">内容<textarea data-prop="text" rows="4">${esc(e.text)}</textarea></label><div class="property-grid">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="property-field">字体<select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></div>` : ""}${e.type === "shape" ? `<div class="panel-section"><h3>形状</h3><div class="property-grid">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></div>` : ""}<div class="panel-section"><h3>排列</h3><div class="property-grid">${field("zIndex", "层级")}</div><div class="inline-actions">${btn("duplicate", "复制")}${btn("delete", "删除")}</div></div>`;
+    `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
+  return `<div class="ed-selected"><span class="g-round g-round--sm">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${gbtn("duplicate", "复制", { icon: "copy", cls: "g-btn--sm" })}${gbtn("delete", "删除", { icon: "trash", cls: "g-btn--sm g-btn--danger" })}</div></section>`;
+}
+// agent 状态：发现 agent 改过文件后醒来一阵，之后睡着
+const agentUI = { until: 0, timer: null };
+const AGENT_AWAKE_MS = 15000;
+function agentChip() {
+  const awake = Date.now() < agentUI.until;
+  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip">${mascot({ pose: awake ? "awake" : "sleep", size: 24, badge: true })}<span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
+}
+function refreshAgentChip() {
+  const chip = $("#agent-chip");
+  if (!chip) return;
+  chip.outerHTML = agentChip();
+  liven($("#agent-chip"));
+}
+function agentWake() {
+  agentUI.until = Date.now() + AGENT_AWAKE_MS;
+  clearTimeout(agentUI.timer);
+  agentUI.timer = setTimeout(refreshAgentChip, AGENT_AWAKE_MS + 50);
+}
+function inspectorBody(p) {
+  if (S.tab === "library") {
+    const list = S.libraryChoices || [];
+    return `<div class="ed-assets">${list.length ? list.map((a, i) => `<button class="g-row g-row--tall" data-action="library-copy" data-index="${i}" draggable="true" data-library-file="${esc(a.file)}"><img class="g-row__thumb" src="${esc(a.url)}" alt=""><span class="g-row__text">${esc(a.name)}</span></button>`).join("") : `<p class="ed-note">公共素材库里还没有素材</p>`}</div>`;
+  }
+  if (S.tab === "assets")
+    return `${gbtn("browse-library", "公共素材库", { icon: "library", cls: "g-btn--sm g-btn--wide" })}<div class="ed-assets">${S.project.assets.map((a) => `<button class="g-row g-row--tall" data-action="place" data-id="${a.id}" draggable="true" data-asset="${a.id}"><img class="g-row__thumb" src="${base()}/${a.file}" alt=""><span class="g-row__text">${esc(a.name || a.file)}</span>${a.pendingLayout ? `<span class="g-chip g-chip--quiet g-chip--pink">待排版</span>` : ""}</button>`).join("")}</div>`;
+  return `<div class="ed-layers ed-scroll">${layers(p.elements)}</div><h3 class="ed-heading ed-heading--main">基础编辑</h3><div class="ed-props">${property()}</div>`;
 }
 function renderEditor() {
   if (!S.project) return;
   const p = page();
+  const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `${head(S.project.name, "EDITOR", `${btn("undo", "↶", "icon-btn", S.history.canUndo ? 'aria-label="撤销" title="撤销"' : 'disabled aria-label="撤销" title="撤销"')}${btn("redo", "↷", "icon-btn", S.history.canRedo ? 'aria-label="重做" title="重做"' : 'disabled aria-label="重做" title="重做"')}<span id="save-status" class="save-status">${S.conflict ? "保存冲突" : "已保存"}</span>${btn("version", "◈ 存一版")}${btn("versions", "版本列表")}${btn("play", "▶ 放映", "primary")}`)}<div class="editor-layout"><aside class="pages-panel panel"><div class="panel-title"><span>页面栏 <em>${S.project.pages.length}</em></span>${btn("add-page", "＋", "round-btn", 'title="添加页面"')}</div><div class="page-list">${S.project.pages.map(pageItem).join("")}</div><div class="page-panel-footer">${btn("copy", "▣ 复制到新项目", "wide subtle")}${btn("reference", "⧉ 选中复制引用", "wide subtle")}</div></aside><section class="workspace"><div class="workspace-toolbar"><span class="crumb">${esc(p.name)}</span><div class="toolbar-actions">${btn("add-text", "T 文字", "subtle")}${btn("add-shape", "◯ 形状", "subtle")}${btn("import", "⇧ 素材导入", "subtle")}<span class="zoom-label" id="zoom-label"></span></div></div><div class="canvas-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="workspace-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}<span class="foot-right">拖拽移动 · Shift 多选 · 右下角缩放</span></div></section><aside class="inspector panel"><div class="inspector-tabs"><button data-action="tab-layers" class="tab ${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="tab ${S.tab === "assets" ? "active" : ""}">素材</button><button data-action="versions" class="tab">版本</button></div>${S.tab === "library" ? `<div class="asset-list"><p class="muted">拖到画布，或点击放入当前页面。</p>${(S.libraryChoices || []).map((a, i) => `<button class="asset-row" data-action="library-copy" data-index="${i}" draggable="true" data-library-file="${esc(a.file)}"><img src="${esc(a.url)}" alt=""><span>${esc(a.name)}</span></button>`).join("")}</div>` : S.tab === "assets" ? `<div class="asset-list">${btn("browse-library", "◇ 公共素材库", "wide subtle")}${S.project.assets.map((a) => `<button class="asset-row" data-action="place" data-id="${a.id}" draggable="true" data-asset="${a.id}"><img src="${base()}/${a.file}" alt=""><span>${esc(a.name || a.file)}${a.pendingLayout ? "<small>待排版</small>" : ""}</span></button>`).join("")}</div>` : `<div class="layer-list">${layers(p.elements)}</div><div class="properties"><h3 class="basic-heading">基础编辑</h3>${property()}</div>`}</aside></div>`,
+    `<header class="ed-top g-glass"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}<div class="ed-spacer"></div>${round("undo", "undo", "撤销", "g-round--sm", S.history.canUndo ? "" : "disabled")}${round("redo", "redo", "重做", "g-round--sm", S.history.canRedo ? "" : "disabled")}<span class="g-chip ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${gbtn("version", "存一版", { icon: "bookmark" })}${gbtn("versions", "版本列表", { icon: "history" })}${gbtn("play", "放映", { icon: "play", cls: "g-btn--prism" })}</header><div class="ed-grid"><aside class="ed-col ed-pages"><div class="ed-col-head"><h2>页面</h2><span class="g-chip g-chip--quiet">${S.project.pages.length}</span><div class="ed-spacer"></div>${round("add-page", "plus", "添加页面", "g-round--sm g-round--blue")}</div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${gbtn("copy", "复制到新项目", { icon: "copyPlus", cls: "g-btn--wide" })}${gbtn("reference", "复制引用", { icon: "link", cls: "g-btn--wide" })}</div></aside><section class="ed-work"><div class="ed-toolbar g-glass"><span class="ed-crumb">${esc(p.name)}</span>${gbtn("add-text", "文字", { icon: "type", cls: "g-btn--sm" })}${gbtn("add-shape", "形状", { icon: "shapes", cls: "g-btn--sm" })}${gbtn("import", "素材导入", { icon: "imagePlus", cls: "g-btn--sm" })}<span class="ed-sep"></span><span class="g-chip g-chip--quiet ed-zoom" id="zoom-label"></span></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector"><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">${icon("layers", 15)}图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">${icon("images", 15)}素材</button><button data-action="versions">${icon("history", 15)}版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
   );
   renderBoard();
   S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
   bindDrag();
+  decorateEditor();
+}
+// 画面上的小反馈：小兔动起来、保存状态的小圆点跟着文字变
+function decorateEditor() {
+  liven(app);
+  const status = $("#save-status");
+  if (status) new MutationObserver(() => onSaveText(status)).observe(status, { childList: true });
+}
+function onSaveText(status) {
+  const chip = $("#save-chip");
+  if (!chip || !chip.contains(status)) return;
+  const text = status.textContent;
+  const state = text === "已保存" ? "ok" : text === "正在保存…" ? "busy" : "warn";
+  const mark = chip.firstElementChild;
+  if (state !== "ok") {
+    mark.outerHTML = `<i class="g-dot g-dot--${state}"></i>`;
+    return;
+  }
+  // 保存成功：小圆点换成开心的小兔，跳一下，再变回小圆点
+  mark.outerHTML = `<span class="ed-save__bunny">${mascot({ pose: "happy", size: 20, badge: true })}</span>`;
+  const bunny = chip.firstElementChild;
+  hop(bunny, 5);
+  clearTimeout(onSaveText.t);
+  onSaveText.t = setTimeout(() => {
+    if (bunny.isConnected) bunny.outerHTML = `<i class="g-dot"></i>`;
+  }, 1400);
 }
 function renderBoard() {
   const holder = $("#artboard-holder");
@@ -342,7 +417,7 @@ async function flush() {
 
 function conflictDialog() {
   modal(
-    `<p class="eyebrow">SAVE CONFLICT</p><h2>项目已在别处更新</h2><p class="muted">本地修改与磁盘版本不同。请选择要保留的内容。</p><div class="modal-actions">${btn("export-local", "下载本地副本")}${btn("reload", "载入磁盘版本")}${btn("keep", "保留本地修改", "primary")}</div>`,
+    `<h2>项目已在别处更新</h2><p class="g-sheet__note">本地修改和磁盘上的版本不一致</p><div class="g-sheet__actions">${gbtn("export-local", "下载本地副本")}${gbtn("reload", "载入磁盘版本")}${gbtn("keep", "保留本地修改", { cls: "g-btn--prism" })}</div>`,
   );
 }
 function bindDrag() {
@@ -503,7 +578,7 @@ async function library() {
   const assets = await api("/api/library");
   shell(
     "library",
-    `${head("公共素材库", "ASSET LIBRARY", btn("upload-library", "⇧ 上传素材", "primary"))}<div class="overview-head"><div><h2>随时取用的灵感</h2><p>公共素材会在使用时复制到项目中。</p></div><span class="count">${assets.length} 个素材</span></div><div class="library-grid">${assets.map((a) => `<div class="library-card"><img src="${esc(a.url)}" alt="${esc(a.name)}"><div><strong>${esc(a.name)}</strong><small>${a.width} × ${a.height}</small></div></div>`).join("")}</div>`,
+    `${head("公共素材库", btn("upload-library", "⇧ 上传素材", "primary"))}<div class="overview-head"><div><h2>随时取用的灵感</h2><p>公共素材会在使用时复制到项目中。</p></div><span class="count">${assets.length} 个素材</span></div><div class="library-grid">${assets.map((a) => `<div class="library-card"><img src="${esc(a.url)}" alt="${esc(a.name)}"><div><strong>${esc(a.name)}</strong><small>${a.width} × ${a.height}</small></div></div>`).join("")}</div>`,
   );
 }
 async function browseLibrary() {
@@ -516,12 +591,12 @@ async function versions() {
   await flush();
   const list = await api(`${path()}/versions`);
   modal(
-    `<p class="eyebrow">SAVED VERSIONS</p><h2>版本列表</h2><p class="muted">手动保存的项目快照。</p><div class="version-list">${list.length ? list.map((v) => `<div class="version-row"><span class="version-dot">◈</span><div><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(v.savedAt || v.createdAt || v.timestamp || "")}</small></div></div>`).join("") : '<p class="muted">还没有手动保存的版本。</p>'}</div><div class="modal-actions">${btn("close", "关闭")}${btn("version", "＋ 存一版", "primary")}</div>`,
+    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(v.savedAt || v.createdAt || v.timestamp || "")}</small></span></div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
   );
 }
 function versionDialog() {
   modal(
-    `<p class="eyebrow">SAVE A VERSION</p><h2>存一版</h2><p class="muted">给这一刻的设计留一份完整快照。</p><form id="version-form"><label>版本备注<input name="note" maxlength="200" required placeholder="例如：调整了封面布局" autofocus></label><div class="modal-actions">${btn("versions", "版本列表")}${btn("close", "取消")}<button class="btn primary" type="submit">保存版本</button></div></form>`,
+    `<h2>存一版</h2><form id="version-form"><label class="g-field g-field--stack"><span>版本备注</span><input name="note" maxlength="200" required placeholder="例如：调整了封面布局" autofocus></label><div class="g-sheet__actions">${gbtn("versions", "版本列表", { icon: "history" })}${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("bookmark", 17)}保存版本</button></div></form>`,
   );
   $("#version-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -542,7 +617,7 @@ function copyDialog() {
     return;
   }
   modal(
-    `<p class="eyebrow">COPY PAGES</p><h2>复制到新项目</h2><p class="muted">已选 ${ids.length} 页，相关素材和字体会一起复制。</p><form id="copy-form"><label>新项目名称<input name="name" required autofocus placeholder="例如：课程精选页"></label><label>项目编号<input name="id" pattern="[a-z0-9][a-z0-9-]{1,63}" required placeholder="例如：course-highlights"></label><div class="modal-actions">${btn("close", "取消")}<button class="btn primary" type="submit">创建副本</button></div></form>`,
+    `<h2>复制到新项目</h2><p class="g-sheet__note">已选 ${ids.length} 页 · 素材和字体一起复制</p><form id="copy-form"><label class="g-field g-field--stack"><span>新项目名称</span><input name="name" required autofocus placeholder="例如：课程精选页"></label><label class="g-field g-field--stack"><span>项目编号</span><input name="id" pattern="[a-z0-9][a-z0-9-]{1,63}" required placeholder="例如：course-highlights"></label><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("copyPlus", 17)}创建副本</button></div></form>`,
   );
   $("#copy-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -560,8 +635,35 @@ function copyDialog() {
 }
 function play() {
   S.view = "play";
-  app.innerHTML = `<div class="player"><div id="player-stage"></div><div class="player-controls"><button data-action="stop">← 返回编辑</button><span>${esc(S.project.name)} · <b id="player-page"></b></span><button data-action="prev">上一页</button><button data-action="next">下一页 →</button></div></div>`;
-  showPage(S.pageId);
+  stopLoops();
+  app.innerHTML = `<div class="player g-player"><div id="player-stage"></div><div class="g-player-bar"><button data-action="stop">${icon("arrowLeft", 16)}返回编辑</button><span class="g-player-bar__page">${esc(S.project.name)}<b id="player-page"></b></span><button class="is-round" data-action="prev" title="上一页" aria-label="上一页">${icon("chevronLeft", 18)}</button><button class="is-round" data-action="next" title="下一页" aria-label="下一页">${icon("chevronRight", 18)}</button></div></div>`;
+  playLoader(() => showPage(S.pageId));
+}
+// 放映开始前的加载画面（约 1 秒）；期间按键不生效，按 Esc 直接退出
+function playLoader(done) {
+  const el = document.createElement("div");
+  el.className = "g-loader";
+  el.innerHTML = `<div class="g-loader__stage"><span class="g-loader__glow"></span><span class="g-loader__halo"></span><span class="g-loader__shadow"></span><span class="g-loader__bunny">${mascot({ size: 86, body: true })}</span></div><span>准备放映</span>`;
+  $(".player").append(el);
+  const loops = loaderLoop(el);
+  const finish = () => {
+    clearTimeout(timer);
+    window.removeEventListener("keydown", block, true);
+    fadeOut(el, () => {
+      loops.forEach((a) => a.cancel());
+      el.remove();
+    });
+  };
+  const block = (e) => {
+    if (e.key === "Escape") return finish();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  window.addEventListener("keydown", block, true);
+  const timer = setTimeout(() => {
+    if (S.view === "play") done();
+    finish();
+  }, 1100);
 }
 function showPage(id) {
   S.playback?.destroy();
@@ -879,6 +981,7 @@ setInterval(async () => {
       S.revision = d.revision;
       S.history.replace(d.project);
       S.selected = [];
+      agentWake();
       renderEditor();
       notice("已载入 agent 的最新修改");
     }
