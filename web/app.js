@@ -18,6 +18,14 @@ import {
 import { icon } from "./ui/icons.js";
 import { mascot } from "./ui/mascot.js";
 import { liven, hop, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
+import {
+  syncGlass,
+  hideGlass,
+  openModalGlass,
+  closeModalGlass,
+  setBackgroundFile,
+  resetBackground,
+} from "./ui/glass.js";
 const $ = (s) => document.querySelector(s),
   app = $("#app"),
   toast = $("#toast");
@@ -68,21 +76,36 @@ function notice(m) {
 function btn(a, t, c = "", extra = "") {
   return `<button class="btn ${c}" data-action="${a}" ${extra}>${t}</button>`;
 }
-function gbtn(a, label, { icon: name, cls = "", extra = "" } = {}) {
-  return `<button class="g-btn ${cls}" data-action="${a}" ${extra}>${name ? icon(name, 17) : ""}${label}</button>`;
+// glass：在这个按钮下面垫一块真玻璃（见 ui/glass.js）。"panel" = 直接放在背景上，"control" = 放在别的玻璃上
+function glassAttr(glass) {
+  if (!glass) return "";
+  const [key, layer = "control"] = glass.split(":");
+  return `data-glass="${key}" data-glass-layer="${layer}"`;
 }
-function round(a, name, title, cls = "", extra = "") {
-  return `<button class="g-round ${cls}" data-action="${a}" title="${title}" aria-label="${title}" ${extra}>${icon(name, 18)}</button>`;
+function gbtn(a, label, { icon: name, cls = "", extra = "", glass = "" } = {}) {
+  return `<button class="g-btn ${glass ? "g-on-glass" : ""} ${cls}" data-action="${a}" ${glassAttr(glass)} ${extra}>${name ? icon(name, 17) : ""}${label}</button>`;
+}
+function round(a, name, title, cls = "", extra = "", glass = "") {
+  return `<button class="g-round ${glass ? "g-on-glass" : ""} ${cls}" data-action="${a}" title="${title}" aria-label="${title}" ${glassAttr(glass)} ${extra}>${icon(name, 18)}</button>`;
+}
+// 不垫玻璃的普通按钮：只有图标 / 只有文字，放在玻璃上或背景上
+function ibtn(a, name, title, extra = "") {
+  return `<button class="ed-ibtn" data-action="${a}" title="${title}" aria-label="${title}" ${extra}>${icon(name, 18)}</button>`;
+}
+function tbtn(a, label, name, cls = "", extra = "") {
+  return `<button class="ed-tbtn ${cls}" data-action="${a}" title="${label}" ${extra}>${name ? icon(name, 16) : ""}<span>${label}</span></button>`;
 }
 const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group" };
 function shell(active, body) {
   const glass = active === "editor";
   document.documentElement.classList.toggle("glass-mode", glass);
   stopLoops();
+  closeModalGlass();
   if (glass) {
-    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-round g-round--lg" title="视觉工作台">${mascot({ size: 46, badge: true, label: "视觉工作台" })}</div>${round("home", "grid", "项目总览")}${round("library", "library", "公共素材库")}<div class="ed-rail__spacer"></div><div class="ed-avatar g-round g-round--sm">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo" title="视觉工作台">${mascot({ size: 40, badge: true, label: "视觉工作台" })}</div><nav class="ed-dock" ${glassAttr("dock:panel")}>${ibtn("home", "grid", "项目总览")}${ibtn("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
     return;
   }
+  hideGlass();
   app.innerHTML = `<div class="shell"><aside class="rail"><div class="brand-mark">✦</div><button class="rail-btn ${active === "home" ? "active" : ""}" data-action="home" title="项目总览">▦</button><button class="rail-btn ${active === "library" ? "active" : ""}" data-action="library" title="公共素材库">◇</button><div class="rail-spacer"></div><div class="rail-dot">E</div></aside><main class="main">${body}</main></div><div id="modal-root"></div>`;
 }
 function head(name, actions = "") {
@@ -95,8 +118,11 @@ function modal(html) {
   $(".modal-backdrop").onpointerdown = (e) => {
     if (e.target === e.currentTarget) closeModal();
   };
+  // 编辑器里的弹窗：下面垫一层玻璃
+  if (document.documentElement.classList.contains("glass-mode")) openModalGlass($(".g-sheet"));
 }
 function closeModal() {
+  closeModalGlass();
   $("#modal-root")?.replaceChildren();
 }
 function thumb(project, p) {
@@ -176,7 +202,7 @@ async function open(id, data) {
   renderEditor();
 }
 function pageItem(p, i) {
-  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${i + 1}</b><i>${esc(p.name)}</i></span></button></div>`;
+  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
 }
 function layers(items, depth = 0) {
   return [...items]
@@ -194,14 +220,14 @@ function property() {
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
     `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
-  return `<div class="ed-selected"><span class="g-round g-round--sm">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${gbtn("duplicate", "复制", { icon: "copy", cls: "g-btn--sm" })}${gbtn("delete", "删除", { icon: "trash", cls: "g-btn--sm g-btn--danger" })}</div></section>`;
+  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
 }
 // agent 状态：发现 agent 改过文件后醒来一阵，之后睡着
 const agentUI = { until: 0, timer: null };
 const AGENT_AWAKE_MS = 15000;
 function agentChip() {
   const awake = Date.now() < agentUI.until;
-  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip">${mascot({ pose: awake ? "awake" : "sleep", size: 24, badge: true })}<span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
+  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip">${mascot({ pose: awake ? "awake" : "sleep", size: 20, badge: true })}<span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
 }
 function refreshAgentChip() {
   const chip = $("#agent-chip");
@@ -220,7 +246,7 @@ function inspectorBody(p) {
     return `<div class="ed-assets">${list.length ? list.map((a, i) => `<button class="g-row g-row--tall" data-action="library-copy" data-index="${i}" draggable="true" data-library-file="${esc(a.file)}"><img class="g-row__thumb" src="${esc(a.url)}" alt=""><span class="g-row__text">${esc(a.name)}</span></button>`).join("") : `<p class="ed-note">公共素材库里还没有素材</p>`}</div>`;
   }
   if (S.tab === "assets")
-    return `${gbtn("browse-library", "公共素材库", { icon: "library", cls: "g-btn--sm g-btn--wide" })}<div class="ed-assets">${S.project.assets.map((a) => `<button class="g-row g-row--tall" data-action="place" data-id="${a.id}" draggable="true" data-asset="${a.id}"><img class="g-row__thumb" src="${base()}/${a.file}" alt=""><span class="g-row__text">${esc(a.name || a.file)}</span>${a.pendingLayout ? `<span class="g-chip g-chip--quiet g-chip--pink">待排版</span>` : ""}</button>`).join("")}</div>`;
+    return `${tbtn("browse-library", "公共素材库", "library", "ed-tbtn--block")}<div class="ed-assets">${S.project.assets.map((a) => `<button class="g-row g-row--tall" data-action="place" data-id="${a.id}" draggable="true" data-asset="${a.id}"><img class="g-row__thumb" src="${base()}/${a.file}" alt=""><span class="g-row__text">${esc(a.name || a.file)}</span>${a.pendingLayout ? `<span class="g-chip g-chip--quiet g-chip--pink">待排版</span>` : ""}</button>`).join("")}</div>`;
   return `<div class="ed-layers ed-scroll">${layers(p.elements)}</div><h3 class="ed-heading ed-heading--main">基础编辑</h3><div class="ed-props">${property()}</div>`;
 }
 function renderEditor() {
@@ -229,12 +255,13 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top g-glass"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}<div class="ed-spacer"></div>${round("undo", "undo", "撤销", "g-round--sm", S.history.canUndo ? "" : "disabled")}${round("redo", "redo", "重做", "g-round--sm", S.history.canRedo ? "" : "disabled")}<span class="g-chip ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${gbtn("version", "存一版", { icon: "bookmark" })}${gbtn("versions", "版本列表", { icon: "history" })}${gbtn("play", "放映", { icon: "play", cls: "g-btn--prism" })}</header><div class="ed-grid"><aside class="ed-col ed-pages"><div class="ed-col-head"><h2>页面</h2><span class="g-chip g-chip--quiet">${S.project.pages.length}</span><div class="ed-spacer"></div>${round("add-page", "plus", "添加页面", "g-round--sm g-round--blue")}</div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${gbtn("copy", "复制到新项目", { icon: "copyPlus", cls: "g-btn--wide" })}${gbtn("reference", "复制引用", { icon: "link", cls: "g-btn--wide" })}</div></aside><section class="ed-work"><div class="ed-toolbar g-glass"><span class="ed-crumb">${esc(p.name)}</span>${gbtn("add-text", "文字", { icon: "type", cls: "g-btn--sm" })}${gbtn("add-shape", "形状", { icon: "shapes", cls: "g-btn--sm" })}${gbtn("import", "素材导入", { icon: "imagePlus", cls: "g-btn--sm" })}<span class="ed-sep"></span><span class="g-chip g-chip--quiet ed-zoom" id="zoom-label"></span></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector"><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">${icon("layers", 15)}图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">${icon("images", 15)}素材</button><button data-action="versions">${icon("history", 15)}版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}<button class="ed-play" data-action="play" ${glassAttr("play")}>${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")}><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面" ${glassAttr("add-page")}>${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work"><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools" ${glassAttr("tools:panel")}>${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")}><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
   );
   renderBoard();
   S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
   bindDrag();
   decorateEditor();
+  syncGlass(app);
 }
 // 画面上的小反馈：小兔眨眼呼吸、保存状态的小圆点跟着文字变
 function decorateEditor() {
@@ -608,6 +635,29 @@ function versionDialog() {
     }
   };
 }
+// 更换背景：选自己电脑上的图片，或换回默认
+function backgroundDialog() {
+  modal(
+    `<h2>背景</h2><div class="g-sheet__actions g-sheet__actions--start">${gbtn("bg-pick", "选择图片", { icon: "imagePlus", cls: "g-btn--prism" })}${gbtn("bg-default", "恢复默认")}${gbtn("close", "关闭")}</div>`,
+  );
+}
+function pickBackground() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      await setBackgroundFile(file);
+      closeModal();
+      notice("背景已更换");
+    } catch (err) {
+      notice("这张图片用不了：" + err.message);
+    }
+  };
+  input.click();
+}
 function copyDialog() {
   const ids = [...S.checked];
   if (!ids.length) {
@@ -634,6 +684,7 @@ function copyDialog() {
 function play() {
   S.view = "play";
   stopLoops();
+  hideGlass();
   app.innerHTML = `<div class="player g-player"><div id="player-stage"></div><div class="g-player-bar"><button data-action="stop">${icon("arrowLeft", 16)}返回编辑</button><span class="g-player-bar__page">${esc(S.project.name)}<b id="player-page"></b></span><button class="is-round" data-action="prev" title="上一页" aria-label="上一页">${icon("chevronLeft", 18)}</button><button class="is-round" data-action="next" title="下一页" aria-label="下一页">${icon("chevronRight", 18)}</button></div></div>`;
   playLoader(() => showPage(S.pageId));
 }
@@ -812,6 +863,17 @@ app.addEventListener("click", async (e) => {
         break;
       case "copy":
         copyDialog();
+        break;
+      case "background":
+        backgroundDialog();
+        break;
+      case "bg-pick":
+        pickBackground();
+        break;
+      case "bg-default":
+        await resetBackground();
+        closeModal();
+        notice("已换回默认背景");
         break;
       case "reference": {
         const refs = [...S.checked].map((id) => {
