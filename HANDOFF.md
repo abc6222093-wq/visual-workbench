@@ -7,19 +7,21 @@
 分支 `design/round2-visual`，基于 `codex/round2-ui`。只动了 `web/` 和文档，功能逻辑、本地服务、格式、测试都没改。
 
 ### 做了什么
-- **编辑器整页换成薄玻璃界面**：白底 + 很淡的粉蓝紫背景光；顶栏、工具栏、按钮、输入框、标签页、图层行都是透明的胶囊或圆形玻璃，边缘一圈细细的粉蓝紫色散光；「放映」是唯一的彩色玻璃按钮（粉紫，下方投同色淡影）。画布区是不透明的中性浅灰，作品缩略图也不透明。
+- **编辑器整页换成玻璃界面**（参考 P3）：浅灰底，不放彩色背景光；顶栏、工具栏、按钮、输入框、标签页、选中的图层行都是几乎透明的胶囊或圆形玻璃，靠厚一点的亮白边 + 两端粉蓝紫虹彩 + 下方柔和投影出玻璃感。整块上色的只有「放映」紫色按钮和加页面的蓝色小圆钮（都带同色投影）。画布区是不透明的中性灰，作品缩略图也不透明。
 - **弹窗**（存一版、版本列表、复制到新项目、保存冲突）和**放映控制条**一起换了。
 - **文字**：删掉「VISUAL WORKBENCH / EDITOR」等装饰英文、口号和解释句；按钮只留功能名（「页面栏」→「页面」，「选中复制引用」→「复制引用」）。
 - **图标**：▧ ◯ ▣ ↶ ▶ 这类符号全部换成统一线宽的线性图标（Lucide）。
-- **小兔**（原创几何小动物，扁平白色剪影 + 圆点眼睛，圆脑袋 + 胶囊耳朵 + 圆角三角身体）出现在：左上角标志、右侧未选元素时的空状态、顶栏 agent 状态（agent 改过文件后醒着约 15 秒，之后睡着）、保存成功（状态胶囊里的小圆点变成开心的小兔跳一下）、放映前约 1 秒的加载画面。
+- **小兔**（原创几何小动物，扁平白色剪影 + 圆点眼睛，只有脑袋：圆脑袋 + 胶囊耳朵，垫浅浅的粉紫蓝圆底）按エイ要求只用三处：左上角标志、顶栏 agent 状态（agent 改过文件后醒着约 15 秒，之后睡着）、右侧未选元素时的空状态。
+- **保存成功**：状态胶囊里的小圆点变成紫色小对勾轻轻跳一下。**放映前**约 1 秒的加载画面：深色底上一个粉蓝紫光圈在转。
 - **动画**一律用 anime.js（`web/vendor/`，MIT），没有手写逐帧动画；系统开了「减少动态效果」时不跑循环动画。
+- 液态玻璃开源项目评估：nikdelvin/liquid-glass（MIT，CSS+SVG 滤镜）、dashersw/liquid-glass-js（MIT，WebGL，需整页截图）、Mael-667/Liquid-Glass-CSS（GPL-3.0）都是「折射玻璃后面的内容」，在浅灰底上几乎看不出，本轮没引入；亮白边写法借鉴 nikdelvin。以后要在图片上方做真折射，优先用 nikdelvin 的 SVG 滤镜。
 - 顺手：`web/app.js`、`web/index.html` 先整理成正常分行格式（单独一个提交）。
 
 ### 视觉组件在哪
 | 组件 | 文件 | 类名 / 函数 |
 |---|---|---|
-| 颜色、色散边、玻璃底色等变量 | `web/glass.css` 开头 `:root` | `--g-pink` `--g-blue` `--g-violet` `--g-edge` `--g-glass` … |
-| 薄玻璃表面（胶囊） | `web/glass.css` | `.g-glass` |
+| 颜色、玻璃底色、亮白边、虹彩边、投影等变量 | `web/glass.css` 开头 `:root` | `--g-page` `--g-glass` `--g-rim` `--g-iris` `--g-drop` … |
+| 玻璃表面（胶囊） | `web/glass.css` | `.g-glass` |
 | 胶囊按钮 / 彩色玻璃按钮 / 透明按钮 | `web/glass.css` | `.g-btn` `.g-btn--prism` `.g-btn--ghost` `.g-btn--sm` `.g-btn--wide` |
 | 圆形按钮（细白高光 + 柔光） | `web/glass.css` | `.g-round` `.g-round--sm/--lg` `.g-round--blue` `.is-active` |
 | 状态小胶囊、小圆点 | `web/glass.css` | `.g-chip` `.g-chip--quiet/--pink` `.g-dot` |
@@ -27,20 +29,20 @@
 | 列表行（图层、素材、版本） | `web/glass.css` | `.g-row` `.g-row__icon` `.g-row__text` `.g-row__thumb` |
 | 输入胶囊、多行文字、圆形勾选框 | `web/glass.css` | `.g-field` `.g-field--stack` `.g-area` `.g-check` |
 | 弹窗 | `web/glass.css` | `.g-backdrop` `.g-sheet` |
-| 背景光 + 装饰玻璃片 | `web/ui/ambient.js` + `web/glass.css` | `mountAmbient()`，`.g-ambient` |
 | 线性图标 | `web/ui/icons.js` | `icon("play", 18)` |
-| 小兔 | `web/ui/mascot.js` | `mascot({ pose, size, body, badge })` |
-| 动画（呼吸、眨眼、跳一下、加载、背景漂移） | `web/ui/motion.js` | `liven()` `hop()` `loaderLoop()` `drift()` `stopLoops()` |
+| 小兔 | `web/ui/mascot.js` | `mascot({ pose, size, badge })` |
+| 动画（呼吸、眨眼、跳一下、加载光圈） | `web/ui/motion.js` | `liven()` `hop()` `loaderLoop()` `stopLoops()` |
 | 编辑器自己的布局 | `web/glass.css` 后半 | `.ed-*` |
 | 写界面的小工具 | `web/app.js` | `gbtn()` `round()` `TYPE_ICON` |
 
-整套只在 `<html class="glass-mode">` 时显示背景光、换字体和提示条样式。`shell("editor", …)` 会自动加上这个类，`shell("home"/"library", …)` 会去掉。
+整套只在 `<html class="glass-mode">` 时换浅灰底、字体和提示条样式。`shell("editor", …)` 会自动加上这个类，`shell("home"/"library", …)` 会去掉。
 
 ### 下一轮怎么套用到其他页面
 1. 在 `shell()` 里把 `glass` 的条件放宽到 `home`、`library`（左侧栏已经是玻璃版）。
 2. 用 `.g-*` 组件重写 `home()`、`library()`、`newDialog()` 的标记；旧的 `style.css` 规则在全部页面换完后可以删掉。
-3. 项目卡片、素材卡片是作品缩略图，按编辑器的做法保持不透明，只给外面的名称做胶囊。
-4. 还没删的装饰英文 / 口号在其他页面：新建项目弹窗的「NEW PROJECT」「选择画板尺寸，开始一份新的设计。」、素材库的「随时取用的灵感」「公共素材会在使用时复制到项目中。」。
+3. 小兔不要再加新位置（エイ 要求收敛）。
+4. 项目卡片、素材卡片是作品缩略图，按编辑器的做法保持不透明，只给外面的名称做胶囊。
+5. 还没删的装饰英文 / 口号在其他页面：新建项目弹窗的「NEW PROJECT」「选择画板尺寸，开始一份新的设计。」、素材库的「随时取用的灵感」「公共素材会在使用时复制到项目中。」。
 
 ### 需要エイ拍板的
 见本轮报告第 6 节。
