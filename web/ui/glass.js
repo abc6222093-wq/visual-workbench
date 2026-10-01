@@ -11,7 +11,7 @@
  * 界面上写了 data-glass="名字" 的元素，玻璃层就在它正下方垫一块同样大小、同样圆角的玻璃：
  *   data-glass-layer="panel"   直接放在背景上的玻璃（侧栏、操作条、工具条、导航条）
  *   data-glass-layer="control" 放在别的玻璃上面的玻璃
- *   data-glass-frost           磨砂玻璃（中间画布那一块）：糊一点、白一点
+ *   data-glass-frost           磨砂玻璃（中间画布那一块、左右两侧面板）：糊一点、白一点
  * 玻璃的圆角跟着界面元素自己的 border-radius 走：方形面板、胶囊、圆形都可以。
  *
  * 参数全部在下面的 GLASS 里，数值和样张一致，统一在这里微调。
@@ -69,13 +69,13 @@ export const GLASS = {
   // 玻璃正下方的投影透出来多少（太大玻璃会发灰）
   shadowUnderGlass: 0.2,
 
-  // —— 中间的磨砂玻璃（画布那一大块） ——
+  // —— 磨砂玻璃（中间画布那一块，和左右两侧面板） ——
   // 磨砂程度：0 = 不糊，1 = 最糊
   frostBlur: 0.8,
   // 磨砂玻璃加多少白
-  frostWhiteness: 0.3,
+  frostWhiteness: 0.2,
   // 磨砂玻璃里的颜色淡一点（-1 = 黑白）
-  frostSaturation: -0.5,
+  frostSaturation: -0.35,
 
   // —— 带色按钮（「放映」）的颜色浓度 ——
   tint: 0.62,
@@ -156,10 +156,33 @@ function ensureLayer() {
   new ResizeObserver(again).observe(document.documentElement);
   // 字体、图片晚加载时界面会挪一点：每隔一会儿核对一次位置（只量几块玻璃的位置，几乎不费力），
   // 挪了就重画投影，免得投影和玻璃对不齐、露出生硬的边
+  let pointerHeld = false;
+  addEventListener("pointerdown", () => (pointerHeld = true), true);
+  addEventListener("pointerup", () => (pointerHeld = false), true);
+  addEventListener("pointercancel", () => (pointerHeld = false), true);
   setInterval(() => {
-    if (lastScope && !layer.hidden && document.visibilityState === "visible") syncGlass(lastScope);
+    if (pointerHeld || !lastScope || layer.hidden || document.visibilityState !== "visible") return;
+    syncGlass(lastScope);
   }, 400);
   document.fonts?.ready.then(again);
+}
+
+/*
+ * 画一个模糊的形状。Safari 不支持画布的 filter: blur()，
+ * 所以用画布自带的「影子」来做模糊：形状本身画在画布外面，只让它的影子落在要的位置。
+ * 影子的偏移和模糊不受缩放影响，要手动乘上屏幕倍数（dpr）。
+ */
+function blurredShape(ctx, dpr, x, y, w, h, radius, blur, color) {
+  const FAR = 100000;
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = blur * 2 * dpr;
+  ctx.shadowOffsetX = FAR * dpr;
+  ctx.shadowOffsetY = 0;
+  ctx.fillStyle = "#000";
+  shape(ctx, x - FAR, y, w, h, radius);
+  ctx.fill();
+  ctx.restore();
 }
 
 /* 投影：玻璃形状往右下稍微错开，单一颜色；玻璃正下方的大部分挖掉 */
@@ -192,15 +215,29 @@ function paintShadows(canvas, rects, veil = 0) {
     off.height = Math.max(1, Math.round((r.height + pad * 2) * dpr));
     const o = off.getContext("2d");
     o.setTransform(dpr, 0, 0, dpr, 0, 0);
-    o.filter = `blur(${blur}px)`;
-    o.fillStyle = `rgba(${GLASS.shadowColor},${large ? GLASS.shadowOpacityLarge : GLASS.shadowOpacity})`;
-    shape(o, pad + dx, pad + dy, r.width, r.height, radius);
-    o.fill();
+    blurredShape(
+      o,
+      dpr,
+      pad + dx,
+      pad + dy,
+      r.width,
+      r.height,
+      radius,
+      blur,
+      `rgba(${GLASS.shadowColor},${large ? GLASS.shadowOpacityLarge : GLASS.shadowOpacity})`,
+    );
     o.globalCompositeOperation = "destination-out";
-    o.filter = `blur(${Math.max(2, blur * 0.25)}px)`;
-    o.fillStyle = `rgba(0,0,0,${1 - GLASS.shadowUnderGlass})`;
-    shape(o, pad + 1, pad + 1, r.width - 2, r.height - 2, Math.max(0, radius - 1));
-    o.fill();
+    blurredShape(
+      o,
+      dpr,
+      pad + 1,
+      pad + 1,
+      r.width - 2,
+      r.height - 2,
+      Math.max(0, radius - 1),
+      Math.max(2, blur * 0.25),
+      `rgba(0,0,0,${1 - GLASS.shadowUnderGlass})`,
+    );
     ctx.drawImage(off, r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
   }
 }
@@ -218,7 +255,7 @@ function radiusOf(el, r) {
 export function syncGlass(scope = document) {
   ensureLayer();
   lastScope = scope;
-  layer.hidden = false;
+  if (layer.hidden) layer.hidden = false;
   const targets = [...scope.querySelectorAll("[data-glass]")].filter(
     (t) => !t.closest(".modal-backdrop"),
   );
@@ -240,7 +277,8 @@ export function syncGlass(scope = document) {
       layer.append(plate);
       plates.set(key, plate);
     }
-    plate.className = `gl-plate ${isControl ? "gl-plate--control" : "gl-plate--panel"}`;
+    const cls = `gl-plate ${isControl ? "gl-plate--control" : "gl-plate--panel"}`;
+    if (plate.className !== cls) plate.className = cls;
     const radius = radiusOf(t, r);
     const style = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;border-radius:${radius}px`;
     if (plate.getAttribute("style") !== style) plate.setAttribute("style", style);
