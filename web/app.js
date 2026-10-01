@@ -18,7 +18,6 @@ import {
 import { icon } from "./ui/icons.js";
 import { mascot } from "./ui/mascot.js";
 import { liven, hop, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
-import { mountAmbient } from "./ui/ambient.js";
 const $ = (s) => document.querySelector(s),
   app = $("#app"),
   toast = $("#toast");
@@ -81,7 +80,6 @@ function shell(active, body) {
   document.documentElement.classList.toggle("glass-mode", glass);
   stopLoops();
   if (glass) {
-    mountAmbient();
     app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-round g-round--lg" title="视觉工作台">${mascot({ size: 46, badge: true, label: "视觉工作台" })}</div>${round("home", "grid", "项目总览")}${round("library", "library", "公共素材库")}<div class="ed-rail__spacer"></div><div class="ed-avatar g-round g-round--sm">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
     return;
   }
@@ -191,7 +189,7 @@ function layers(items, depth = 0) {
 }
 function property() {
   if (!S.selected.length)
-    return `<div class="ed-empty">${mascot({ size: 104, body: true, badge: true })}<span>未选择元素</span></div>`;
+    return `<div class="ed-empty">${mascot({ size: 56, badge: true })}<span>未选择元素</span></div>`;
   const e = findElement(page(), S.selected[0])?.element;
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
@@ -238,7 +236,7 @@ function renderEditor() {
   bindDrag();
   decorateEditor();
 }
-// 画面上的小反馈：小兔动起来、保存状态的小圆点跟着文字变
+// 画面上的小反馈：小兔眨眼呼吸、保存状态的小圆点跟着文字变
 function decorateEditor() {
   liven(app);
   const status = $("#save-status");
@@ -254,13 +252,13 @@ function onSaveText(status) {
     mark.outerHTML = `<i class="g-dot g-dot--${state}"></i>`;
     return;
   }
-  // 保存成功：小圆点换成开心的小兔，跳一下，再变回小圆点
-  mark.outerHTML = `<span class="ed-save__bunny">${mascot({ pose: "happy", size: 20, badge: true })}</span>`;
-  const bunny = chip.firstElementChild;
-  hop(bunny, 5);
+  // 保存成功：小圆点换成小对勾，轻轻跳一下，再变回小圆点
+  mark.outerHTML = `<span class="ed-save__ok">${icon("check", 11)}</span>`;
+  const ok = chip.firstElementChild;
+  hop(ok, 4);
   clearTimeout(onSaveText.t);
   onSaveText.t = setTimeout(() => {
-    if (bunny.isConnected) bunny.outerHTML = `<i class="g-dot"></i>`;
+    if (ok.isConnected) ok.outerHTML = `<i class="g-dot"></i>`;
   }, 1400);
 }
 function renderBoard() {
@@ -643,7 +641,7 @@ function play() {
 function playLoader(done) {
   const el = document.createElement("div");
   el.className = "g-loader";
-  el.innerHTML = `<div class="g-loader__stage"><span class="g-loader__glow"></span><span class="g-loader__halo"></span><span class="g-loader__shadow"></span><span class="g-loader__bunny">${mascot({ size: 86, body: true })}</span></div><span>准备放映</span>`;
+  el.innerHTML = `<div class="g-loader__stage"><span class="g-loader__halo"></span></div><span>准备放映</span>`;
   $(".player").append(el);
   const loops = loaderLoop(el);
   const finish = () => {

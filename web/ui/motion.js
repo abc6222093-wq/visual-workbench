@@ -62,7 +62,7 @@ export function liven(root = document) {
   });
 }
 
-/* 跳一下（保存成功、agent 刚改完） */
+/* 跳一下（保存成功的小对勾） */
 export function hop(el, height = 7) {
   if (!el || reduced()) return;
   animate(el, {
@@ -97,47 +97,15 @@ export function fadeOut(el, done) {
   animate(el, { opacity: [1, 0], translateY: [0, -6], duration: 260, ease: "inQuad", onComplete: () => done?.() });
 }
 
-/* 放映前的加载画面：小兔一下一下地跳，光环慢慢转 */
+/* 放映前的加载画面：光圈慢慢转 */
 export function loaderLoop(root) {
   if (reduced()) return [];
   return [
-    animate(root.querySelector(".g-loader__bunny"), {
-      translateY: [0, -14, 0],
-      duration: 620,
-      ease: "outQuad",
-      loop: true,
-      loopDelay: 80,
-    }),
     animate(root.querySelector(".g-loader__halo"), {
       rotate: [0, 360],
-      duration: 5200,
+      duration: 2400,
       ease: "linear",
       loop: true,
     }),
-    animate(root.querySelector(".g-loader__shadow"), {
-      scaleX: [1, 0.72, 1],
-      opacity: [0.5, 0.25, 0.5],
-      duration: 620,
-      ease: "outQuad",
-      loop: true,
-      loopDelay: 80,
-    }),
   ];
-}
-
-/* 背景的光和装饰玻璃片，非常慢地漂 */
-export function drift(root) {
-  if (reduced()) return;
-  root.querySelectorAll("[data-drift]").forEach((el, i) => {
-    const [dx, dy, rot] = el.dataset.drift.split(",").map(Number);
-    animate(el, {
-      translateX: [0, dx],
-      translateY: [0, dy],
-      rotate: [0, rot || 0],
-      duration: 16000 + i * 3700,
-      ease: "inOutSine",
-      loop: true,
-      alternate: true,
-    });
-  });
 }
