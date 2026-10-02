@@ -63,8 +63,11 @@ export function createMotionContext(project, page, root, signal, assetBase) {
   return { context, setStep: value => { currentStep = value; }, cleanup: abort };
 }
 export async function loadMotion(project, page, root, signal, assetBase) {
+  if (project.formatVersion !== 2) throw new Error('旧版项目格式，请迁移到格式版本 2 后检查动效');
+  if (Object.hasOwn(page, 'steps')) throw new Error('页面仍使用旧版 steps 动效，请迁移到 motion');
+  if (page.motion !== undefined && (!page.motion || !Number.isInteger(page.motion.steps) || page.motion.steps < 0 || typeof page.motion.source !== 'string' || !page.motion.source.trim())) throw new Error('页面 motion 需要非负整数 steps 和非空 source');
   const { context, setStep, cleanup } = createMotionContext(project, page, root, signal, assetBase);
-  if (!page.motion) return { handlers: {}, context, setStep, cleanup };
+  if (page.motion === undefined) return { handlers: {}, context, setStep, cleanup };
   const source = page.motion.source;
   if (typeof source !== 'string') throw new Error('motion.source 必须是 ES module 字符串');
   const url = `data:text/javascript;charset=utf-8,${encodeURIComponent(source + `\n// instance:${crypto.randomUUID()}`)}`;

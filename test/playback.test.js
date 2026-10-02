@@ -4,7 +4,7 @@ import { createPlayback } from '../web/playback.js';
 
 const element = { id: 'item', type: 'shape', x: 120, y: 50, width: 100, height: 80, fill: '#f00' };
 function fixture(source, steps = 2) {
-  const project = { id: 'test-project', pages: [] };
+  const project = { id: 'test-project', formatVersion: 2, pages: [] };
   const page = { id: 'one', elements: [structuredClone(element)], motion: { steps, source } };
   project.pages = [page];
   const node = { style: {}, animate: () => ({ finished: Promise.resolve(), cancel() {} }) };
@@ -57,4 +57,32 @@ test('destroy aborts active timer and calls dispose', async () => {
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(node.style.disposed, 'yes');
   assert.equal(node.style.done, 'yes');
+});
+
+test('legacy project and old steps fail before playback', async () => {
+  const { project, page, root } = fixture('export default () => ({step(){}})', 1);
+  project.formatVersion = 1;
+  const old = createPlayback(project, page, { root });
+  await assert.rejects(old.ready, /旧版项目格式/);
+  old.destroy();
+  project.formatVersion = 2;
+  page.steps = [];
+  const tracks = createPlayback(project, page, { root });
+  await assert.rejects(tracks.ready, /旧版 steps/);
+  tracks.destroy();
+});
+test('invalid handler is reported', async () => {
+  const { project, page, root } = fixture('export default () => ({step: 42})', 1);
+  const playback = createPlayback(project, page, { root });
+  await assert.rejects(playback.ready, /step 必须是函数/);
+  playback.destroy();
+});
+
+test('static pages without motion are valid and have no click steps', async () => {
+  const { project, page, root } = fixture('export default () => ({})', 0);
+  delete page.motion;
+  const playback = createPlayback(project, page, { root });
+  await playback.ready;
+  assert.equal(playback.next(), false);
+  await playback.destroy();
 });

@@ -249,7 +249,7 @@
 ```json
 "motion": {
   "steps": 2,
-  "source": "export default async function(ctx) { const title = ctx.element('el_title1'); return { async step(index) { if (index === 0) await ctx.animate(title.node, [{ transform: 'translateX(0)' }, { transform: 'translateX(120px)' }], { duration: 500, fill: 'forwards' }); } }; }"
+  "source": "export default async function(ctx) { const {node} = ctx.element('el_title1'); const pose = node.style.transform; return { async step(index) { await ctx.animate(node, [{ transform: pose + ' translateX(' + index * 120 + 'px)' }, { transform: pose + ' translateX(' + (index + 1) * 120 + 'px)' }], { duration: 500, fill: 'forwards' }); } }; }"
 }
 ```
 
@@ -292,11 +292,11 @@ export default async function (ctx) {
 
 ### 9.4 检查
 
-首次运行真实浏览器检查或完整测试，先 `npm ci`、`npx playwright install chromium`（Linux CI 用 `--with-deps`）。每个阶段默认上限 5 秒，CLI 总上限 120 秒。
+首次运行真实浏览器检查或完整测试，先 `npm ci`、`npx playwright install chromium`（Linux CI 用 `--with-deps`）。每个阶段默认上限 5 秒；CLI 每页使用独立浏览器，即使该页同步死循环，也会终止它并继续检查其他页。每页总时限默认按步骤数计算（至少 10 秒）。长动效可用 `npm run check-motion -- <项目> --timeout-ms 15000 --total-timeout-ms 180000` 指定阶段和整页时限。
 
 改完先运行 `npm run validate -- <项目>` 检查项目结构、编号、素材与字体引用，再运行 `npm run check-motion -- <项目>`。后者会实际打开每一页，初始化模块，按顺序执行所有步骤和换页效果，报告语法、导出、运行时及元素查找错误。工作台打开项目时也会提示检查失败的页面。检查通过能发现代码错误；视觉节奏和画面效果仍需在放映中预览。
 
-检查还会在移动、尺寸及样式变体上重跑所有页，覆盖双向换页与清理；不能证明任意代码没有写死坐标。模块是受信任的本地 agent 代码，检查 iframe 只隔离画板，不是恶意代码沙箱；同步无限循环可能卡住工作台，CLI 独立浏览器可由总时限退出。
+检查还会在移动、尺寸及样式变体上重跑所有页，覆盖双向换页与清理；不能证明任意代码没有写死坐标。模块是受信任的本地 agent 代码，检查 iframe 只隔离画板，不是恶意代码沙箱；同步无限循环可能卡住工作台，CLI 独立浏览器可由每页总时限退出。
 
 ## 10. 版本
 

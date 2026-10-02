@@ -48,6 +48,8 @@ test('editor stays static, reports errors, and clicks finish steps before custom
   await page.waitForSelector('#player-stage [data-page-id="page_scene2"][data-arrival="1"]');
   await page.keyboard.press('Escape');
   await page.waitForSelector('#artboard');
+  // Leaving playback keeps the page just reached; return to the cover to inspect its static pose.
+  await page.locator('[data-action="switch"][data-id="page_cover1"]').click();
   assert.equal(await title.evaluate(n => n.style.left), '321px');
   assert.equal(await title.evaluate(n => n.style.opacity), '1');
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), project);

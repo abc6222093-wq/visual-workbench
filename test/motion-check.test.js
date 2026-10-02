@@ -8,7 +8,7 @@ import { createServer } from '../src/server.js';
 
 const source = 'export default () => ({ step() {}, transition() {}, dispose() {} })';
 function project(code = source, steps = 1) {
-  return { id: 'motion-test', artboard: { width: 640, height: 360 }, assets: [], fonts: [], pages: [{ id: 'page_one', elements: [{ id: 'item', type: 'shape', shape: 'rect', x: 30, y: 40, width: 100, height: 50, fill: '#ff0000' }], motion: { steps, source: code } }] };
+  return { id: 'motion-test', formatVersion: 2, artboard: { width: 640, height: 360 }, assets: [], fonts: [], pages: [{ id: 'page_one', elements: [{ id: 'item', type: 'shape', shape: 'rect', x: 30, y: 40, width: 100, height: 50, fill: '#ff0000' }], motion: { steps, source: code } }] };
 }
 test('browser checker exercises module, steps, transitions, cleanup and delayed errors', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'vw-motion-check-'));
@@ -23,6 +23,7 @@ test('browser checker exercises module, steps, transitions, cleanup and delayed 
     ['valid', source, true],
     ['syntax', 'export default () => ({', false],
     ['export', 'export const value = 1', false],
+    ['handler', 'export default () => ({step: 3})', false],
     ['element', "export default ctx => { ctx.element('missing'); return {step(){}} }", false],
     ['step', "export default () => ({step(){throw new Error('step failed')}})", false],
     ['transition', "export default () => ({step(){},transition(){throw new Error('transition failed')}})", false],
@@ -36,6 +37,14 @@ test('browser checker exercises module, steps, transitions, cleanup and delayed 
     assert.equal(result.ok, expected, `${name}: ${JSON.stringify(result.results)}`);
   }
 
+  for (const [name, change] of [
+    ['legacy version', value => { value.formatVersion = 1; }],
+    ['old page steps', value => { value.pages[0].steps = []; }]
+  ]) {
+    const value = project(); change(value);
+    const result = await page.evaluate(async value => { const { checkMotion } = await import('/motion-check.js'); return checkMotion(value, { timeout: 120 }); }, value);
+    assert.equal(result.ok, false, name);
+  }
   const sample = JSON.parse(readFileSync(new URL('../examples/sample-deck/project.json', import.meta.url), 'utf8'));
   const shifted = structuredClone(sample);
   shifted.pages[1].elements.find(item => item.id === 'el_marker2').x += 97;
