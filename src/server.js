@@ -8,6 +8,7 @@ import { loadConfig, stripDataDirArg } from './config.js';
 import { initDataDir, initProjectDir, listProjects, projectDir } from './data-dir.js';
 import { validateProjectData } from './validate.js';
 import { saveVersion, listVersions, restoreVersion } from './version.js';
+import * as versionStore from './version.js'; // 删除版本（deleteVersion）由另一处提供，运行时再取，没有时给中文提示
 import { copyPages } from './copy-pages.js';
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
@@ -24,7 +25,7 @@ function noSymlinks(path) {
   if (lstatSync(path).isDirectory()) for (const entry of readdirSync(path)) noSymlinks(join(path, entry));
 }
 function checkDataRoots(dataDir) {
-  for (const rel of ['projects', 'library', 'library/assets', 'library/fonts']) {
+  for (const rel of ['projects', 'library', 'library/assets', 'library/fonts', 'exports']) {
     const path = join(dataDir, rel);
     if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw fail(403, '数据目录中的文件夹不能是符号链接');
   }
@@ -60,9 +61,49 @@ function libraryRoot(dataDir) { const root=join(dataDir,'library/assets'); noSym
 function serve(res, root, rel, extra={}) { const file=safe(root,rel); if(!existsSync(file)||!statSync(file).isFile()) throw fail(404,'File not found'); const data=readFileSync(file); res.writeHead(200,{'Content-Type':(MIME[extname(file).toLowerCase()]||'application/octet-stream')+'; charset=utf-8','Content-Length':data.length,'X-Content-Type-Options':'nosniff',...extra}); res.end(data); }
 function upload(input) { const name=String(input.name||'image.png'); if(typeof input.data!=='string') throw fail(400,'Missing image data'); const match=/^data:(image\/(?:png|jpeg|webp|gif));base64,(.*)$/s.exec(input.data); const mime=input.mime||match?.[1]||'image/png'; if(!['image/png','image/jpeg','image/webp','image/gif'].includes(mime)) throw fail(400,'Unsupported image type'); const encoded=match?match[2]:input.data; if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)||encoded.length%4===1) throw fail(400,'Invalid base64 image'); const data=Buffer.from(encoded,'base64'); if(!data.length||data.length>15_000_000) throw fail(400,'Invalid image size'); const ext={ 'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp','image/gif':'.gif' }[mime]; const filename=`${randomUUID()}${ext}`; return {name, mime, data, filename}; }
 function dims(o) { for(const key of ['width','height']) if(!Number.isInteger(o[key])||o[key]<1) throw fail(400,`Invalid ${key}`); }
+// ---------- 导出 ----------
+// 导出文件放在 <数据目录>/exports/<项目编号>/<时间>-<类型>/，不在项目文件夹里：
+// 实时连接不会把导出当成 agent 在改，存版本时也不会把导出文件存进去。
+const EXPORT_KINDS = ['html', 'images', 'pdf'];
+const pad = n => String(n).padStart(2, '0');
+const stamp = (d = new Date()) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+const exportName = (project, id) => String(project?.name || id).replace(/[\\/:\0]/g, '-').replace(/^\.+/, '').trim().slice(0, 120) || id;
+function exportDir(dataDir, id, kind) {
+  const parent = join(dataDir, 'exports', id);
+  mkdirSync(parent, { recursive: true });
+  if (lstatSync(join(dataDir, 'exports')).isSymbolicLink() || lstatSync(parent).isSymbolicLink()) throw fail(403, '导出文件夹不能是符号链接');
+  const base = `${stamp()}-${kind}`;
+  for (let n = 1; ; n++) {
+    const dir = join(parent, n === 1 ? base : `${base}-${n}`);
+    if (!existsSync(dir)) { mkdirSync(dir); return dir; }
+  }
+}
+async function defaultExporter(options) {
+  let mod;
+  try { mod = await import('./export/index.js'); } catch (e) { throw fail(500, `导出功能还没准备好：${e.message}`); }
+  if (typeof mod.exportProject !== 'function') throw fail(500, '导出功能还没准备好：缺少 exportProject');
+  return mod.exportProject(options);
+}
+// 在访达中显示：只允许 <数据目录>/exports/ 里面的东西（解析真实路径，挡住 ../ 和符号链接逃逸）
+function revealPath(dataDir, input) {
+  if (typeof input !== 'string' || !input || input.includes('\0')) throw fail(400, '缺少要显示的路径');
+  const root = join(dataDir, 'exports');
+  if (!existsSync(root) || lstatSync(root).isSymbolicLink()) throw fail(403, '只能显示导出文件夹里的文件');
+  const target = resolve(input), realRoot = realpathSync(root);
+  if (!target.startsWith(root + sep) && !target.startsWith(realRoot + sep)) throw fail(403, '只能显示导出文件夹里的文件');
+  if (!existsSync(target)) throw fail(404, '找不到这个文件，可能已经被移走或删除');
+  const real = realpathSync(target);
+  if (!real.startsWith(realRoot + sep)) throw fail(403, '只能显示导出文件夹里的文件');
+  return target;
+}
+const defaultReveal = path => new Promise((done, failed) => {
+  if (process.platform !== 'darwin') return failed(fail(400, '「在访达中显示」只能在 Mac 上使用'));
+  execFile('open', ['-R', path], error => error ? failed(fail(500, `没能打开访达：${error.message}`)) : done());
+});
+
 function originAllowed(req,port) { const host=req.headers.host||''; if(!new RegExp(`^(localhost|127\\.0\\.0\\.1|\\[::1\\])(?::${port})?$`).test(host)) return false; const origin=req.headers.origin; if(!origin) return true; try { const u=new URL(origin); return u.protocol==='http:' && u.host===host; } catch { return false; } }
 
-export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000 } = {}) {
+export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal } = {}) {
   if(!dataDir) throw new Error('dataDir is required');
   dataDir=resolve(dataDir); checkDataRoots(dataDir); initDataDir(dataDir);
   // 实时连接：监听项目文件夹，文件被工作台以外的程序（agent）改动时推送给开着的界面
@@ -102,6 +143,21 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         let out; try { out=restoreVersion({projectDir:dir,versionId:vid,by:'user'}); } catch(e) { throw fail(400,e.message); } finally { watcher.noteSelfSnapshot(id); }
         return json(res,200,{...readProject(dir),restoredFrom:vid,backup:{id:basename(out.backup.versionDir),...out.backup.meta}});
       }
+      if(parts[3]==='versions'&&parts.length===5&&req.method==='DELETE') { // 删除一个版本（不能恢复）
+        const vid=parts[4]; if(!VERSION_ID.test(vid)) throw fail(400,'版本编号不对'); if(!existsSync(join(dir,'versions',vid,'meta.json'))&&!existsSync(join(dir,'versions',vid,'project.json'))) throw fail(404,'找不到这个版本');
+        const deleteVersion=versionStore.deleteVersion; if(typeof deleteVersion!=='function') throw fail(501,'这个版本的工作台还不能删除版本');
+        let out; try { out=await deleteVersion({projectDir:dir,versionId:vid}); } catch(e) { throw fail(e.status||400,e.message); } finally { watcher.noteSelfSnapshot(id); }
+        return json(res,200,{id:vid,...out});
+      }
+      if(parts[3]==='export'&&parts.length===4&&req.method==='POST') { // 导出：放映版 HTML / 每页图片 / PDF
+        const b=await body(req); if(!EXPORT_KINDS.includes(b.kind)) throw fail(400,'导出类型只能是 html（放映版）、images（每页图片）或 pdf');
+        const outDir=exportDir(dataDir,id,b.kind); let out;
+        try { out=await exporter({projectDir:dir,kind:b.kind,outDir,name:exportName(readProject(dir).project,id)}); }
+        catch(e) { rmSync(outDir,{recursive:true,force:true}); throw fail(e.status||500,`导出失败：${e.message}`); }
+        const finalDir=resolve(out?.outDir||outDir);
+        const files=(out?.files||[]).map(f=>{ const path=resolve(finalDir,String(f.path)); return {path,bytes:Number(f.bytes)||0,name:path.startsWith(finalDir+sep)?path.slice(finalDir.length+1):basename(path)}; });
+        return json(res,201,{kind:b.kind,outDir:finalDir,files});
+      }
       if(parts[3]==='versions'&&parts.length===4&&req.method==='GET') return json(res,200,listVersions(dir).map(p=>({id:basename(p),...JSON.parse(readFileSync(join(p,'meta.json'),'utf8'))})).reverse());
       if(parts[3]==='versions'&&parts.length===4&&req.method==='POST') { const b=await body(req); if(b.note!==undefined&&typeof b.note!=='string') throw fail(400,'Invalid note'); const v=saveVersion({projectDir:dir,note:b.note||'',by:'user'}); return json(res,201,{id:basename(v.versionDir),...v.meta}); }
       if(parts[3]==='copy'&&parts.length===4&&req.method==='POST') { const b=await body(req); if(!ID.test(b.id||'')) throw fail(400,'Invalid project id'); const dest=safe(join(dataDir,'projects'),b.id); const out=copyPages({srcProjectDir:dir,pages:b.pages,destProjectDir:dest,newId:b.id,newName:b.name}); return json(res,201,{project:out.project,revision:readProject(dest).revision}); }
@@ -110,6 +166,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         else { const u=upload(b); ({filename,name,data}=u); source={type:'upload'}; }
         if(width!==undefined||height!==undefined) dims({width,height}); const asset={id:`asset_${randomUUID().replaceAll('-','').slice(0,16)}`,kind:'image',file:`assets/${filename}`,name,...(width&&height?{width,height}:{}),pendingLayout:true,addedAt:new Date().toISOString(),source}; const file=safe(join(dir,'assets'),filename); watcher.noteSelfWrite(id,`assets/${filename}`,data); writeFileSync(file,data,{flag:'wx'}); try { const project={...old.project,updatedAt:new Date().toISOString(),assets:[...old.project.assets,asset]}; const revision=saveProject(dir,project,selfWrite(id)); return json(res,201,{asset,project,revision}); } catch(e){rmSync(file,{force:true});throw e;} }
     }
+    if(url.pathname==='/api/reveal'&&req.method==='POST') { const b=await body(req); const target=revealPath(dataDir,b.path); await reveal(target); return json(res,200,{ok:true,path:target}); }
     if(url.pathname==='/api/library'&&req.method==='GET') { const root=libraryRoot(dataDir); return json(res,200,readdirSync(root,{withFileTypes:true}).filter(e=>e.isFile()&&validFile(e.name)&&MIME[extname(e.name).toLowerCase()]?.startsWith('image/')).map(e=>{ const data=readFileSync(safe(root,e.name)); const inferred=imageSize(data,MIME[extname(e.name).toLowerCase()]); const metaFile=safe(root,`${e.name}.json`); const meta=existsSync(metaFile)?JSON.parse(readFileSync(metaFile,'utf8')):{}; return {name:meta.name||e.name,file:e.name,url:`/data/library/assets/${encodeURIComponent(e.name)}`,width:meta.width??inferred.width??null,height:meta.height??inferred.height??null,mime:meta.mime||MIME[extname(e.name).toLowerCase()]}; })); }
     if(url.pathname==='/api/library'&&req.method==='POST') { const b=await body(req); dims(b); const u=upload(b),root=libraryRoot(dataDir); writeFileSync(safe(root,u.filename),u.data,{flag:'wx'}); writeFileSync(safe(root,`${u.filename}.json`),JSON.stringify({name:u.name,width:b.width,height:b.height,mime:u.mime})); return json(res,201,{name:u.name,file:u.filename,url:`/data/library/assets/${u.filename}`,width:b.width,height:b.height,mime:u.mime}); }
     if(req.method==='GET'&&parts[0]==='data'&&parts[1]==='projects'&&parts.length===5&&['assets','fonts'].includes(parts[3]) ) return serve(res,join(projectPath(dataDir,parts[2]),parts[3]),decodeFile(parts[4]),{'Cache-Control':'no-store'});
