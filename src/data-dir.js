@@ -58,3 +58,6 @@ export function listProjects(dataDir) {
     .map((d) => d.name)
     .sort();
 }
+
+/** 工作台自身的状态文件（放在数据目录根下），目前记录哪些项目是系列母版。 */
+export const STATE_FILE = 'workbench-state.json';
