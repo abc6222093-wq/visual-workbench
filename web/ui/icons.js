@@ -32,6 +32,7 @@ const PATHS = {
   chevronDown: "<path d=\"m6 9 6 6 6-6\" />",
   alert: "<circle cx=\"12\" cy=\"12\" r=\"10\" /> <line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\" /> <line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\" />",
   loader: "<path d=\"M21 12a9 9 0 1 1-6.219-8.56\" />",
+  upload: "<path d=\"M12 3v12\" /> <path d=\"m17 8-5-5-5 5\" /> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" />",
 };
 
 export function icon(name, size = 18) {

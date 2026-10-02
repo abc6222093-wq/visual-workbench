@@ -207,7 +207,9 @@ function paintShadows(canvas, rects, veil = 0) {
     const dx = large
         ? GLASS.largeShadowShift * 0.4
         : Math.min(short * GLASS.shadowShiftX, GLASS.shadowShiftMax * 0.45),
-      dy = large ? GLASS.largeShadowShift : Math.min(short * GLASS.shadowShiftY, GLASS.shadowShiftMax);
+      dy = large
+        ? GLASS.largeShadowShift
+        : Math.min(short * GLASS.shadowShiftY, GLASS.shadowShiftMax);
     const blur = large ? GLASS.largeShadowBlur : GLASS.shadowBlur;
     const pad = blur * 4 + Math.max(dx, dy) + 10;
     const off = document.createElement("canvas");
@@ -317,6 +319,8 @@ async function start(keys) {
   if (initKeys !== keys) return;
   instance?.destroy();
   instance = null;
+  // 这一页没有玻璃（比如放映的加载画面）：只留背景图
+  if (!keys) return;
   initializing = (async () => {
     await bgImg.decode().catch(() => {});
     // 玻璃按「先面板、后按钮」排好：按钮折射的是面板
@@ -335,7 +339,12 @@ async function start(keys) {
   }
 }
 
-/* 离开编辑器（总览页、素材库、放映）时藏起来 */
+/* 当前背景图的地址（放映时铺在作品四周用：全屏时玻璃层在全屏画面外面，看不到） */
+export function backgroundURL() {
+  return bgImg?.currentSrc || bgImg?.src || DEFAULT_BACKGROUND;
+}
+
+/* 放映时藏起来（全屏画面里用不到） */
 export function hideGlass() {
   if (layer) layer.hidden = true;
   lastScope = null;
