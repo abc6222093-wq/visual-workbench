@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "start": "node src/server.js",
     "validate": "node src/cli/validate.js",
     "test": "node --test \"test/**/*.test.js\"",
     "init-data": "node src/cli/init-data.js",

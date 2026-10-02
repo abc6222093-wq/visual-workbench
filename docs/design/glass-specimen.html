@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>玻璃样张</title>
+    <script>
+      /* =====================================================================
+       * 玻璃样张 · 关键参数（都在这里调）
+       *
+       * 玻璃效果由开源库 LiquidGlass（ybouane/liquidglass，MIT）用 WebGL 渲染：
+       * 真的把后面的背景折射、弯曲，边缘有白色亮边和轻微的色散。
+       * ===================================================================== */
+      window.GLASS = {
+        // 通透：0 = 完全透明不加白；越大越像一层白色玻璃（叠加在「变亮」上）
+        whiteness: 0.0,
+        // 变亮：-0.5 ~ 0.5。默认背景本来就很亮，超过 0.02 玻璃里就会一片死白、看不见后面
+        brightness: 0.0,
+        // 饱和度：-1 ~ 1，玻璃里的颜色稍微浓一点，看得出在「透」
+        saturation: 0.15,
+        // 磨砂：0 = 完全不糊（要通透就保持 0 或很小）
+        blur: 0.0,
+
+        // 折射强度：边缘处背景被弯曲的程度（0 ~ 1）
+        refraction: 0.7,
+        // 玻璃厚度：越小越薄越平；太大会有凸起的果冻感
+        thickness: 12,
+        // 边缘色散：亮边处轻微的分色（只在最外沿，很细）
+        chromAberration: 0.05,
+
+        // 亮边强度：库自带的边缘提亮（太大整块玻璃会发白）
+        edgeHighlight: 0.12,
+        // 细白亮边：玻璃外沿那一圈 1px 白线的亮度（0 ~ 1，上方最亮、下方渐弱）
+        rimLine: 0.95,
+        // 掠射反光：越靠边越亮的程度
+        fresnel: 0.6,
+        // 表面高光：玻璃表面的反光点（背景很亮，开大了同样会发白）
+        specular: 0.04,
+
+        // 贴边的细投影（库自带，只在玻璃外 20px 内，开大会出现方形切边）
+        contactShadow: 0.18,
+
+        // —— 投影：光从左上方照下来，投影是玻璃形状的「复印件」，往右下方稍微错开，单一颜色 ——
+        // 投影往右、往下错开多少（按玻璃短边的比例）
+        shadowShiftX: 0.06,
+        shadowShiftY: 0.14,
+        // 错开距离的上限（像素），大面板不会错得太远
+        shadowShiftMax: 16,
+        // 投影颜色（单一颜色）
+        shadowColor: "60, 52, 92",
+        // 投影深浅（小控件）
+        shadowOpacity: 0.34,
+        // 大玻璃（面板、大圆）的投影深浅
+        shadowOpacityLarge: 0.26,
+        // 投影边缘的柔和程度（像素）
+        shadowBlur: 8,
+        // 玻璃正下方的投影透出来多少：0 = 透过玻璃完全看不到投影，1 = 全部看到（太大玻璃会发灰）
+        shadowUnderGlass: 0.2,
+
+        // 带色玻璃（「放映」按钮）的颜色浓度
+        tint: 0.62,
+      };
+    </script>
+    <style>
+      :root {
+        --ink: #2a2733;
+        --ink-2: #5a5766;
+        --ink-3: #8d8a99;
+        --pink: 247, 168, 208;
+        --blue: 143, 193, 255;
+        --violet: 183, 162, 255;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #eef0f3;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "SF Pro Text",
+          "PingFang SC",
+          "Hiragino Sans GB",
+          sans-serif;
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* 根容器：玻璃和它要折射的东西都放在这里面（库的要求：玻璃必须是根的直接子元素） */
+      #root {
+        position: fixed;
+        inset: 0;
+      }
+      #root > * {
+        position: absolute;
+      }
+      .bg {
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 0;
+      }
+
+      /* 投影层：铺满整个画面的画布（画布尺寸由脚本按屏幕清晰度设置，显示尺寸固定为画面大小） */
+      .shadow-layer {
+        left: 0;
+        top: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 1;
+        pointer-events: none;
+      }
+      .shadow-layer.on-panel {
+        z-index: 3;
+      }
+
+      /* 所有玻璃：只用圆形和胶囊形 */
+      .glass {
+        z-index: 2;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink-2);
+        user-select: none;
+      }
+      /* 细白亮边：一圈 1px 白线，上方最亮、往下渐弱（不带颜色） */
+      .glass::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, var(--rim, 0.95)),
+          rgba(255, 255, 255, calc(var(--rim, 0.95) * 0.35)) 55%,
+          rgba(255, 255, 255, calc(var(--rim, 0.95) * 0.7))
+        );
+        -webkit-mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+      }
+      .glass.on-panel {
+        z-index: 4;
+      }
+
+      /* ---- 布局：位置和大小由脚本按窗口大小等比缩放（见 LAYOUT），这里只管样式 ---- */
+      #panel {
+        flex-direction: column;
+        justify-content: flex-start;
+        padding-top: calc(110px * var(--s, 1));
+      }
+      #panel svg {
+        width: calc(64px * var(--s, 1));
+        height: calc(64px * var(--s, 1));
+      }
+      #panel .title {
+        margin-top: calc(14px * var(--s, 1));
+        font-size: calc(15px * var(--s, 1));
+        font-weight: 700;
+        color: var(--ink);
+      }
+      #panel .sub {
+        margin-top: calc(6px * var(--s, 1));
+        font-size: calc(12px * var(--s, 1));
+        font-weight: 500;
+        color: var(--ink-3);
+      }
+      .glass {
+        font-size: calc(14px * var(--s, 1));
+      }
+      #btn-tint {
+        color: #fff;
+        text-shadow: 0 1px 2px rgba(90, 60, 170, 0.35);
+      }
+      #btn-tint .tint {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+          110deg,
+          rgba(var(--pink), 1),
+          rgba(var(--violet), 1) 50%,
+          rgba(var(--blue), 1)
+        );
+      }
+      #btn-tint .label {
+        position: relative;
+      }
+      #btn-round {
+        color: var(--ink);
+      }
+      #btn-round svg {
+        width: calc(20px * var(--s, 1));
+        height: calc(20px * var(--s, 1));
+      }
+      #field {
+        justify-content: space-between;
+        padding: 0 calc(22px * var(--s, 1));
+        font-weight: 500;
+        color: var(--ink-3);
+      }
+      #field b {
+        color: var(--ink);
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+      #bar {
+        font-size: calc(13px * var(--s, 1));
+        color: var(--ink-3);
+      }
+
+      .hint {
+        position: fixed;
+        left: 20px;
+        bottom: 16px;
+        z-index: 10;
+        font-size: 12px;
+        color: rgba(42, 39, 51, 0.55);
+      }
+      .hint.err {
+        color: #b4407e;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <img class="bg" id="bg" alt="" />
+
+      <!-- 投影：画在玻璃下方的底面上（用画布画，库可以直接读取） -->
+      <canvas class="shadow-layer" id="shadow-floor"></canvas>
+
+      <!-- 大玻璃面板（代表编辑器侧栏） -->
+      <div class="glass" id="panel">
+        <svg class="g-mascot is-awake has-badge" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="小兔"><defs><linearGradient id="mq-b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3c8e4"/><stop offset="0.5" stop-color="#cdbfff"/><stop offset="1" stop-color="#bcd9ff"/></linearGradient><clipPath id="mq-c"><circle cx="32" cy="32" r="32"/></clipPath></defs><circle cx="32" cy="32" r="32" fill="url(#mq-b)"/><g clip-path="url(#mq-c)"><g transform="translate(6.4 10) scale(0.8)"><g class="m-figure" fill="#ffffff"><rect class="m-ear" x="19.86" y="6.65" width="10" height="27" rx="5" transform="rotate(-6 24.86 29.65)"/><rect class="m-ear" x="34.14" y="9.59" width="10" height="24.06" rx="5" transform="rotate(24 39.14 29.65)"/><circle class="m-head" cx="32" cy="37" r="17"/><g class="m-eyes" fill="#6a55c8"><circle cx="24.52" cy="38.5" r="2.4"/><circle cx="39.48" cy="38.5" r="2.4"/></g></g></g></g></svg>
+        <span class="title">页面</span>
+        <span class="sub">3 页</span>
+      </div>
+
+      <!-- 面板上控件的投影：落在面板上面、控件下面 -->
+      <canvas class="shadow-layer on-panel" id="shadow-panel"></canvas>
+
+      <!-- 面板上的控件（也是玻璃，叠在面板上方，折射的是面板 + 背景） -->
+      <div class="glass on-panel" id="btn-clear">存一版</div>
+      <div class="glass on-panel" id="btn-tint"><span class="tint"></span><span class="label">放映</span></div>
+      <div class="glass on-panel" id="btn-round" aria-label="添加">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14M12 5v14" /></svg>
+      </div>
+      <div class="glass on-panel" id="field"><span>宽度</span><b>1920</b></div>
+
+      <!-- 两块部分重叠的玻璃 -->
+      <div class="glass" id="lens"></div>
+      <div class="glass on-panel" id="bar">胶囊玻璃压在圆形玻璃上</div>
+      <div class="glass" id="dot"></div>
+    </div>
+    <p class="hint" id="hint">正在加载玻璃效果…</p>
+
+    <script src="glass-specimen-bg.js"></script>
+    <script src="vendor/liquidglass.js"></script>
+    <script>
+      (async () => {
+        const G = window.GLASS;
+        const hint = document.getElementById("hint");
+        const root = document.getElementById("root");
+        const bg = document.getElementById("bg");
+
+        // 1. 背景图（内嵌数据，双击打开也能被 WebGL 读取）
+        bg.src = window.GLASS_SPECIMEN_BG || "../../web/assets/backgrounds/default.jpg";
+        await bg.decode().catch(() => {});
+
+        // 2. 每块玻璃的参数
+        const base = {
+          refraction: G.refraction,
+          zRadius: G.thickness,
+          chromAberration: G.chromAberration,
+          edgeHighlight: G.edgeHighlight,
+          fresnel: G.fresnel,
+          specular: G.specular,
+          blurAmount: G.blur,
+          brightness: G.brightness + G.whiteness,
+          saturation: G.saturation,
+          opacity: 1,
+          shadowOpacity: G.contactShadow,
+          shadowSpread: 5,
+          shadowOffsetY: 2,
+          bevelMode: 0,
+        };
+        const glasses = [...document.querySelectorAll(".glass")];
+
+        // 布局：在一块 1280×800 的「画板」上排好，按窗口大小等比缩放并居中
+        const STAGE = { w: 1280, h: 800 };
+        const LAYOUT = {
+          panel: [80, 40, 320, 720],
+          "btn-clear": [130, 310, 220, 50],
+          "btn-tint": [130, 378, 220, 50],
+          "btn-round": [212, 450, 56, 56],
+          field: [115, 530, 250, 50],
+          lens: [600, 100, 320, 320],
+          bar: [780, 360, 420, 140],
+          dot: [680, 570, 150, 150],
+        };
+        function layout() {
+          const sc = Math.min(innerWidth / STAGE.w, innerHeight / STAGE.h);
+          const ox = (innerWidth - STAGE.w * sc) / 2,
+            oy = (innerHeight - STAGE.h * sc) / 2;
+          document.documentElement.style.setProperty("--s", sc);
+          for (const el of glasses) {
+            const [x, y, w, h] = LAYOUT[el.id];
+            Object.assign(el.style, {
+              left: `${ox + x * sc}px`,
+              top: `${oy + y * sc}px`,
+              width: `${w * sc}px`,
+              height: `${h * sc}px`,
+            });
+            el.dataset.config = JSON.stringify({
+              ...base,
+              // 胶囊 / 圆：圆角 = 短边的一半
+              cornerRadius: (Math.min(w, h) * sc) / 2,
+              zRadius: Math.min(G.thickness, (Math.min(w, h) * sc) / 2),
+            });
+          }
+        }
+        layout();
+        document.querySelector("#btn-tint .tint").style.opacity = G.tint;
+        document.documentElement.style.setProperty("--rim", G.rimLine);
+
+        // 3. 投影：每块玻璃在底面上落一片柔和的单色投影；面板上控件的投影落在面板上
+        function pill(ctx, x, y, w, h) {
+          ctx.beginPath();
+          ctx.roundRect(x, y, w, h, Math.min(w, h) / 2);
+        }
+        function paintShadows(canvas, ids) {
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.round(innerWidth * dpr);
+          canvas.height = Math.round(innerHeight * dpr);
+          const ctx = canvas.getContext("2d");
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          for (const id of ids) {
+            const r = document.getElementById(id).getBoundingClientRect();
+            const short = Math.min(r.width, r.height);
+            const large = short > 200;
+            const dx = Math.min(short * G.shadowShiftX, G.shadowShiftMax * 0.45),
+              dy = Math.min(short * G.shadowShiftY, G.shadowShiftMax);
+            const blur = G.shadowBlur * (large ? 1.8 : 1);
+            const pad = blur * 4 + Math.max(dx, dy) + 10;
+            const off = document.createElement("canvas");
+            off.width = Math.round((r.width + pad * 2) * dpr);
+            off.height = Math.round((r.height + pad * 2) * dpr);
+            const o = off.getContext("2d");
+            o.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const x = pad + dx,
+              y = pad + dy,
+              w = r.width,
+              h = r.height;
+            // 1) 投影：玻璃形状往右下错开，单一颜色
+            o.filter = `blur(${blur}px)`;
+            o.fillStyle = `rgba(${G.shadowColor},${large ? G.shadowOpacityLarge : G.shadowOpacity})`;
+            pill(o, x, y, w, h);
+            o.fill();
+            // 2) 玻璃正下方的投影大部分挖掉：投影只从玻璃右下边缘露出来，玻璃里面保持通透
+            o.globalCompositeOperation = "destination-out";
+            o.filter = `blur(${Math.max(2, blur * 0.35)}px)`;
+            o.fillStyle = `rgba(0,0,0,${1 - G.shadowUnderGlass})`;
+            pill(o, pad + 1, pad + 1, w - 2, h - 2);
+            o.fill();
+            ctx.drawImage(off, r.left - pad, r.top - pad, r.width + pad * 2, r.height + pad * 2);
+          }
+        }
+        const paintAll = () => {
+          paintShadows(document.getElementById("shadow-floor"), ["panel", "lens", "dot"]);
+          paintShadows(document.getElementById("shadow-panel"), [
+            "btn-clear",
+            "btn-tint",
+            "btn-round",
+            "field",
+            "bar",
+          ]);
+        };
+        paintAll();
+
+        // 窗口大小变了（包括刚打开时窗口还在变化）：重新排版、重画投影、让玻璃重新取样
+        let t;
+        const relayout = () => {
+          clearTimeout(t);
+          t = setTimeout(() => {
+            layout();
+            paintAll();
+            window.__glass?.markChanged();
+          }, 80);
+        };
+        addEventListener("resize", relayout);
+        new ResizeObserver(relayout).observe(document.documentElement);
+
+        // 4. 启动玻璃
+        try {
+          const instance = await LiquidGlassLib.LiquidGlass.init({ root, glassElements: glasses });
+          window.__glass = instance;
+          relayout();
+          hint.textContent = "玻璃样张 · 参数在文件开头 window.GLASS 里调";
+        } catch (err) {
+          hint.textContent = "玻璃效果没能启动：" + err.message;
+          hint.classList.add("err");
+          console.error(err);
+        }
+      })();
+    </script>
+  </body>
+</html>
