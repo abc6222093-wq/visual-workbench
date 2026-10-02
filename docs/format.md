@@ -1,4 +1,4 @@
-# 视觉工作台 · 项目格式（v1）
+# 视觉工作台 · 项目格式（v2）
 
 机器可读定义：`schema/project.schema.json`（JSON Schema 2020-12）。示例：`examples/sample-deck/`。校验：`npm run validate <项目路径>`。
 
@@ -6,11 +6,12 @@
 
 ## 1. 设计原则
 
-1. **一个项目一个文件**：`project.json` 是唯一的真相来源。エイ 的工作台和 agent 读写同一份。
-2. **每个东西有稳定编号**：页面、元素、素材、字体、步骤都有 `id`，一旦生成就不再改。工具、动效、交接都认编号，不认名字和顺序。
-3. **动效只挂编号、只写相对变化**：动效永远不说"移到 (500, 300)"，只说"向右移 120"、"放大到 0.85 倍"。エイ 把元素拖到哪里，动效都从那里开始。
-4. **能用数据就不用代码**：动效用 JSON 描述，不允许 agent 写脚本。理由见 §9.9。
-5. **素材随项目走**：素材、字体文件都存在项目文件夹里，项目之间不共用引用。
+1. **项目文件是唯一的真相来源**：エイ 和 agent 读写同一份 `project.json`。放映动效不能回写编辑数据。
+2. **编号稳定**：页面、元素、素材、字体的 `id` 一旦生成就不改。动效按元素编号查找，不按数组位置或名字。
+3. **动效由 agent 自由写代码**：每页可内嵌一个 JavaScript ES module。没有固定动效种类；放映器只负责提供最新元素状态与点击步数。
+4. **布局取实时数据**：每次放映从最新项目文件创建只读快照。代码根据元素当前的位置、尺寸、外观计算动效，エイ 挪动、缩放或改字后仍能从新状态出发。
+5. **编辑静止、放映运行**：编辑器只画项目文件里的状态。页面动效及换页代码仅在放映或动效检查时执行。
+6. **素材随项目走**：素材、字体文件都存在项目文件夹里。
 
 ## 2. 文件与目录
 
@@ -40,7 +41,7 @@
 ```json
 {
   "format": "visual-workbench/project",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "sample-deck",
   "name": "示例课件",
   "description": "可选",
@@ -86,13 +87,13 @@
   "notes": "给人看的备注，不渲染",
   "background": "#0f172a",
   "elements": [ … ],
-  "steps": [ … ]
+  "motion": { "steps": 2, "source": "export default async function(ctx) { … }" }
 }
 ```
 
 - `background`：颜色或渐变（§7）。
 - `elements`：元素列表，见 §6。画面上的叠放顺序由每个元素的 `zIndex` 决定，不由数组顺序决定。
-- `steps`：动效步骤，见 §9。没有动效就写 `[]`。
+- `motion`：可选。`steps` 是点击推进的次数，`source` 是本页动效与离页换页代码，见 §9。没有动效可省略 `motion`。
 
 页码 = 在 `pages` 里的位置（从 1 数）。页码会随增删变化，所以工具间传递用 `id`，只有给エイ看的命令行参数用页码。
 
@@ -156,7 +157,7 @@
 
 - 分组自己有位置和大小（它的框）；子元素的 `x`/`y` 相对分组左上角，子元素的 `zIndex` 只在组内比较。
 - 子元素编号也必须全项目唯一。
-- 动效可以挂在分组上（整组一起动），也可以挂在子元素上。
+- 动效代码可通过编号取得分组或子元素的放映节点。
 
 ### 6.6 视觉效果 `effects`（agent 专属）
 
@@ -176,7 +177,7 @@
 | `mask` | 渐变遮罩：stops 里 `opacity` 1 = 显示、0 = 遮住 |
 | `clip` | 多边形裁切：顶点按元素框百分比 |
 
-这些是静态效果（页面一打开就这样）。要在动效里变化它们，见 §9.5。
+这些是静态效果（编辑和放映起点均按项目文件绘制）。放映代码可在放映节点上临时改变外观，见 §9。
 
 ### 6.7 编号规则
 
@@ -186,7 +187,6 @@
 | 元素 | `el_…` | `el_title1` |
 | 素材 | `asset_…` | `asset_city01` |
 | 字体 | `font_…` | `font_inter` |
-| 步骤 | `step_…` | `step_cover_in` |
 
 - agent 新建时可以用易读的后缀，但**不要和已有的重复**（校验会报 `DUPLICATE_ID`）。
 - 编号一旦写进文件就不改。改名字用 `name`。
@@ -236,113 +236,62 @@
 
 ### 8.4 复制页面到新项目
 
-`npm run copy-pages -- <源项目> <页码,如 1,3> --to <新项目编号>`：新建项目，只复制选中的页，以及这些页用到的素材和字体（文件一起复制，`source` 改为 `copied-from-project`）。页面、元素、步骤编号保持不变。源项目不动。
+`npm run copy-pages -- <源项目> <页码,如 1,3> --to <新项目编号>`：新建项目，只复制选中的页，以及这些页用到的素材和字体（文件一起复制，`source` 改为 `copied-from-project`）。页面、元素编号保持不变。源项目不动。
 
-## 9. 动效
+## 9. 动效与换页
 
-### 9.1 两条硬规则
+### 9.1 文件写法
 
-1. **只挂元素编号**：每条轨道的 `target` 是一个本页元素的 `id`。
-2. **只写相对变化**：位置/大小/旋转/透明度只能 `{"by": 数值}`，缩放只能 `{"times": 倍数}`，滤镜只能 `{"by": 数值}`。写 `{"to": …}` 或直接写数字，校验报 `RELATIVE_ONLY`。
+本轮格式版本为 `2`，旧版本 `1` 的固定轨道不能直接打开；迁移时保留静态元素，将旧 `steps` 的表现重写到 `motion.source`，再把 `formatVersion` 改为 `2`。工作台不会自动丢弃旧动效。
 
-"相对当前状态"的意思：轨道开始时元素是什么样（文件里的布局，叠加之前步骤已经做过的变化），就从那里变。エイ 把元素从 (200, 200) 拖到 (500, 500)，"向左移 120" 这条动效完全不用改。
-
-### 9.2 结构：步骤 → 轨道 → 变化
+每页可选 `motion`。`steps` 是非负整数，表示这一页有多少次点击推进；`source` 是**内嵌在项目 JSON 中的 JavaScript ES module 字符串**。代码与页面一起存版、复制。旧版 `page.steps`、轨道、固定变化类型均已取消。
 
 ```json
-"steps": [
-  {
-    "id": "step_cover_bullets",
-    "name": "点击：三条要点依次淡入",
-    "trigger": "click",
-    "delay": 0,
-    "tracks": [
-      { "target": "el_bullet1", "delay": 0,   "duration": 400, "easing": "ease-out", "change": { "appear": true } },
-      { "target": "el_bullet2", "delay": 250, "duration": 400, "change": { "appear": true } },
-      { "target": "el_bullet3", "delay": 500, "duration": 400, "change": { "appear": true } }
-    ]
-  }
-]
+"motion": {
+  "steps": 2,
+  "source": "export default async function(ctx) { const title = ctx.element('el_title1'); return { async step(index) { if (index === 0) await ctx.animate(title.node, [{ transform: 'translateX(0)' }, { transform: 'translateX(120px)' }], { duration: 500, fill: 'forwards' }); } }; }"
+}
 ```
 
-| 层 | 字段 | 说明 |
-|---|---|---|
-| 步骤 `step` | `trigger` | `click`：等エイ/观众点一下才开始；`auto`：上一步结束后自动开始（第一步 `auto` = 页面一打开就播） |
-| | `delay` | 触发后再等多少毫秒 |
-| | `tracks` | 这一步里一起执行的轨道，至少一条 |
-| 轨道 `track` | `target` | 元素编号 |
-| | `delay` | 相对步骤开始的毫秒 |
-| | `duration` | 毫秒，0 = 瞬间 |
-| | `easing` | linear / ease / ease-in / ease-out / ease-in-out |
-| | `change` | 变化内容，至少一项 |
+`source` 必须提供默认导出函数：
 
-一个步骤的时长 = 其中最晚结束的轨道（delay + duration）。
+```js
+export default async function (ctx) {
+  // 初始化本页放映状态；不修改 ctx.project、ctx.page 或 project.json
+  return {
+    async step(index) { /* 点击推进：index 从 0 到 motion.steps - 1 */ },
+    async transition({ from, to, direction }) { /* 离开本页时的换页效果 */ },
+    dispose() { /* 清理本页自建的节点、监听器、第三方库实例 */ },
+  };
+}
+```
 
-### 9.3 变化项一览
+返回对象中的三个函数均可选；但 `steps > 0` 时必须返回 `step` 函数。`steps: 0` 的页面可以只提供 `transition`。每次点击等当前异步步骤完成后才能继续；最后一步完成后的**下一次点击**才翻到下一页。`transition` 接收的 `from` / `to` 是实际放映页 DOM 容器（`to` 为已渲染的下一页），`direction` 为 `1`（前进）或 `-1`（后退）；没有 `transition` 时直接切换。切换或重置时调用 `dispose`。页内自动连续推进可在一次 `step` 内串联多个 `await ctx.animate(...)` 和 `await ctx.timer(...)`，不必增加点击次数。
 
-| 键 | 写法 | 含义 |
-|---|---|---|
-| `appear` | `true` | 从隐藏变为显示（在 duration 内淡入） |
-| `disappear` | `true` | 从显示变为隐藏（淡出） |
-| `x` / `y` | `{"by": 120}` | 平移（画板像素） |
-| `width` / `height` | `{"by": -40}` | 宽高增减 |
-| `rotation` | `{"by": 15}` | 旋转角度增减 |
-| `opacity` | `{"by": -0.5}` | 透明度增减，结果夹在 0–1 |
-| `scale` | `{"times": 0.85}` | 以元素中心缩放的倍数 |
-| `color` | `{"to": "#ef4444"}` | 文字颜色 / 形状填充色变成这个颜色 |
-| `blend` | `{"to": "multiply"}` | 混合模式切换 |
-| `filters` | `{"grayscale": {"by": 1}}` | 滤镜数值增减 |
-| `mask` | `{"to": {…渐变遮罩…}}` 或 `{"to": null}` | 换遮罩 / 去掉遮罩 |
-| `clip` | `{"to": {…多边形…}}` 或 `{"to": null}` | 换裁切形状 / 去掉裁切 |
+### 9.2 工作台提供的 `ctx`
 
-同一条轨道里不能同时 `appear` 和 `disappear`。
+| 成员 | 说明 |
+|---|---|
+| `ctx.project`、`ctx.page` | 放映初始化时，从最新项目文件复制并递归冻结的只读快照；包含エイ 最新的元素数据。 |
+| `ctx.root` | 本页放映 DOM 容器；代码可在其中创建临时粒子等节点。不要修改编辑器 DOM。 |
+| `ctx.element(id)` | 返回 `{ node, base }`；`node` 是本页该编号的放映 DOM 节点，`base` 是含 `x/y/width/height/rotation/opacity/颜色/字体/层级` 等属性的冻结元素快照。找不到编号会抛错，动效检查会报告。分组子元素也可查。 |
+| `ctx.step` | 当前正在执行的从 0 开始的步索引；初始化时为 `-1`。 |
+| `ctx.signal` | `AbortSignal`；翻页、重置时终止，用于清理异步工作。 |
+| `ctx.animate(node, keyframes, options)` | 基于浏览器动画 API 播放并返回 `Animation.finished` 的 Promise；工作台登记动画并在终止时取消。 |
+| `ctx.timer(ms)` | 等待毫秒数，终止时拒绝 Promise。 |
+| `ctx.assetUrl(file)` | 将本项目 `assets/` 或 `fonts/` 中的相对文件路径转为本地 URL。 |
 
-**为什么 color / blend / mask / clip 用 `to`**：这几项不含任何位置、大小信息，エイ 挪动元素不会影响它们；而"颜色相对变化"（色相偏移多少度）agent 几乎无法精确控制，所以用目标值。裁切顶点和遮罩都按元素框百分比/比例表达，本身就是相对元素的。
+动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可 `import` 已存放在本地的现成库，例如绝对 URL `'/vendor/anime.esm.min.js'`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此**相对 import 不支持**。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/` 后通过绝对 URL 导入；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。
 
-### 9.4 初始可见性
+### 9.3 从エイ 修改后的状态出发
 
-页面打开时：某元素在本页步骤里的**第一次**可见性变化若是 `appear`，它初始隐藏；否则初始显示。
-所以"点击才出现"的元素，在工作台编辑时是正常可见的（エイ 要能摆它），播放时才隐藏到出现。
+每次放映，`ctx.element(id).base` 都来自项目文件的最新值；`node` 是按该值渲染的放映节点。相对平移可以用 `transform: translate(...)`，曲线路径可按 `base.width`、`base.height` 算控制点；元素间联动可同时读取两个元素的 `base` 或 DOM 尺寸。不要在代码里固化元素的画板坐标、宽高、文字、颜色、字体、层级，也不要把播放后的样式写回项目文件。若动效跨几个点击持续移动同一元素，应在放映节点上延续前一步状态，或依据 `base` 计算累计位移。
 
-### 9.5 效果变化
+エイ 删除了动效代码引用的元素后，agent 必须修正 `source`；复制元素不会自动复制动效逻辑。编辑器只按文件数据显示静止状态，因此エイ 仍能摆放所有元素，包括放映开头会被隐藏的元素。
 
-静态 `effects`（§6.6）给的是起点；动效里 `filters.*.by` 从起点加减，`blend/mask/clip.to` 直接替换。裁切用相同顶点数时可以做形状渐变（示例第 3 页菱形 → 六边形）。
+### 9.4 检查
 
-### 9.6 要求表达的效果，各怎么写
-
-| 效果 | 写法 | 示例位置 |
-|---|---|---|
-| 依次淡入 | 一个步骤里多条 `appear` 轨道，`delay` 递增 | 第 1 页 `step_cover_bullets` |
-| 点击才出现 | 步骤 `trigger: "click"` + `appear` | 同上 |
-| 点一下画面连续推进一段 | `click` 步骤后面跟一个或多个 `auto` 步骤 | 第 2 页 `step_scene_push1` → `step_scene_push2` |
-| 多个元素联动平移缩放 | 同一步骤里多条轨道，各自 `x/y.by` + `scale.times` | 第 2 页 `step_scene_push1` |
-| 同一元素在不同步骤之间移动并变色 | 多个步骤各有一条指向同一元素的轨道，`x.by` + `color.to` | 第 2 页 `step_scene_marker1` / `marker2` |
-| 渐变遮罩 | 静态 `effects.mask`；动效 `mask.to` | 第 1 页 `el_bgphoto` / `step_cover_mask` |
-| 颜色混合（multiply 等） | 静态 `effects.blend`；动效 `blend.to` | 第 2 页 `el_tint2` |
-| 黑白等滤镜 | 静态 `effects.filters.grayscale`；动效 `filters.grayscale.by` | 第 2 页 `step_scene_gray` |
-| 多边形裁切 | 静态 `effects.clip`；动效 `clip.to` | 第 3 页 `el_clipimg3` / `step_clip_morph` |
-
-### 9.7 做不到 / 不做的
-
-- **沿曲线路径运动**：目前只有直线平移。要拐弯就拆成多个 `auto` 步骤。
-- **逐字出现的文字动效**：没有。要的话把文字拆成多个元素。
-- **循环/往返动效**：没有。写两个步骤。
-- **元素之间的"跟随/吸附"关系**：没有。
-- 这些都是故意不做的，为了格式简单、エイ挪元素不出事。以后真需要再加，并升 `formatVersion`。
-
-### 9.8 agent 写动效的检查单
-
-1. `target` 是本页存在的元素编号。
-2. 几何只写 `by`，缩放只写 `times`，没有 `to`、没有裸数字。
-3. 多步骤连续推进时，心里算一下累计位移，别把元素推出画板。
-4. 写完 `npm run validate <项目>`。
-
-### 9.9 为什么用数据而不是让 agent 写代码
-
-- 校验器能检查数据（编号存在、只用相对变化）；代码检查不了。
-- 工作台渲染数据是安全的，执行 agent 写的代码有风险，也更难做"エイ挪动后动效照跑"。
-- エイ 不看代码；数据至少能在工作台里列成"第几步、哪个元素、做什么"。
-- 代价：表达力有上限（§9.7）。接受。
+改完先运行 `npm run validate -- <项目>` 检查项目结构、编号、素材与字体引用，再运行 `npm run check-motion -- <项目>`。后者会实际打开每一页，初始化模块，按顺序执行所有步骤和换页效果，报告语法、导出、运行时及元素查找错误。工作台打开项目时也会提示检查失败的页面。检查通过能发现代码错误；视觉节奏和画面效果仍需在放映中预览。
 
 ## 10. 版本
 
@@ -359,16 +308,14 @@
 |---|---|
 | `INVALID_JSON` | 文件不存在或不是合法 JSON |
 | `SCHEMA` | 不符合 `schema/project.schema.json`（缺字段、类型不对、多了未知字段、编号格式不对……） |
-| `DUPLICATE_ID` | 页面 / 元素 / 素材 / 字体 / 步骤编号重复（元素、步骤跨全部页面查） |
+| `DUPLICATE_ID` | 页面 / 元素 / 素材 / 字体编号重复（元素跨全部页面查） |
 | `MISSING_ASSET_FILE` | `assets[].file` 在磁盘上不存在 |
 | `MISSING_FONT_FILE` | `fonts[].file` 在磁盘上不存在 |
 | `UNKNOWN_ASSET_REF` | 图片元素引用了不存在的素材编号 |
 | `UNKNOWN_FONT_REF` | 文字元素引用了不存在的字体编号 |
-| `UNKNOWN_ANIMATION_TARGET` | 动效指向的元素不在本页 |
-| `RELATIVE_ONLY` | 动效用了绝对值描述位置、大小、旋转、透明度、缩放或滤镜 |
 
 通过时会额外列出待排版素材。程序内用法：`import { validateProject, validateProjectData } from './src/validate.js'`。
 
 ## 12. 示例
 
-`examples/sample-deck/`：3 页，覆盖 §9.6 全部效果，含一个待排版素材（`asset_newpic1`）、一个随项目存放的字体（Inter，OFL 许可证）、一个分组。
+`examples/sample-deck/`：演示多元素连续联动、同一元素跨步变化、现成库效果与自定义换页，并含待排版素材、随项目存放的字体和分组。
