@@ -70,3 +70,19 @@ export function resizeGroup(target, original, width, height) {
   });
   resize(target.children, original.children);
 }
+// 生成给 agent 看的引用文字：每行「项目 <编号> · 第 N 页（<页面编号>）」，选中元素接在当前页那行后面
+export function referenceText(project, { checkedPageIds = [], currentPageId, selectedIds = [] } = {}) {
+  const pages = project.pages || [];
+  const head = `项目 ${project.id}`;
+  if (!pages.length) return head;
+  const current = pages.find(page => page.id === currentPageId) || pages[0];
+  const checked = new Set(checkedPageIds);
+  const elementIds = [...new Set(selectedIds)].filter(id => findElement(current, id));
+  // 勾选里不存在的页面编号忽略；勾选为空（或全无效）时当前页总要出一行
+  const anyChecked = pages.some(page => checked.has(page.id));
+  const rows = pages.filter(page => checked.has(page.id) || (page === current && (elementIds.length > 0 || !anyChecked)));
+  return rows.map(page => {
+    const line = `${head} · 第 ${pages.indexOf(page) + 1} 页（${page.id}）`;
+    return page === current && elementIds.length ? `${line} · ${elementIds.join('、')}` : line;
+  }).join('\n');
+}
