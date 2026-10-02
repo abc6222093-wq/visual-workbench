@@ -50,12 +50,16 @@ export function createMotionContext(project, page, root, signal, assetBase) {
     },
     async importModule(path) {
       if (typeof path !== 'string' || !path.startsWith('/')) throw new Error('importModule 需要本地绝对路径');
+      // 导出的单文件放映版：库已打包进文件，按路径从文件内的模块表取
+      const exported = globalThis.__VW_EXPORT__;
+      if (typeof exported?.importModule === 'function') return exported.importModule(path);
       const url = new URL(path, location.origin);
       if (url.origin !== location.origin) throw new Error('只能导入同源本地模块');
       return import(url.href);
     },
     assetUrl(file) {
       if (typeof file !== 'string' || ![...(projectSnapshot.assets || []), ...(projectSnapshot.fonts || [])].some(item => item.file === file)) throw new Error(`未登记的项目资源：${file}`);
+      if (typeof globalThis.__VW_EXPORT__?.resolveAsset === 'function') return globalThis.__VW_EXPORT__.resolveAsset(file);
       const base = String(assetBase || `/data/projects/${encodeURIComponent(projectSnapshot.id)}`).replace(/\/$/, '');
       return new URL(`${base}/${file.split('/').map(encodeURIComponent).join('/')}`, location.href).href;
     }

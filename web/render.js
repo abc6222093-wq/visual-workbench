@@ -27,15 +27,22 @@ function assetUrl(base, file) {
   return `${prefix}/${file.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+// 导出的单文件放映版没有服务器：可传 options.resolveAsset(file)，
+// 或由导出页在 globalThis.__VW_EXPORT__.resolveAsset 提供文件内嵌的数据地址；都没有时照旧按 assetBase 拼地址
+function fileUrl(options, file) {
+  const resolve = options?.resolveAsset || globalThis.__VW_EXPORT__?.resolveAsset;
+  return typeof resolve === 'function' ? resolve(file) : assetUrl(options?.assetBase, file);
+}
+
 function fontFaceName(project, font) { return `vw-${project.id}-${font.id}`; }
 
-function ensureFonts(project, base) {
+function ensureFonts(project, options) {
   if (typeof document === 'undefined' || !document.head) return;
   for (const font of project.fonts || []) {
     const key = `vw-font-${project.id}-${font.id}`;
     let style = document.getElementById(key);
     if (!style) { style = document.createElement('style'); style.id = key; document.head.append(style); }
-    style.textContent = `@font-face{font-family:${JSON.stringify(fontFaceName(project, font))};src:url(${JSON.stringify(assetUrl(base, font.file))});font-weight:${font.weight === 'variable' ? '100 900' : font.weight || 400};font-style:${font.style || 'normal'}}`;
+    style.textContent = `@font-face{font-family:${JSON.stringify(fontFaceName(project, font))};src:url(${JSON.stringify(fileUrl(options, font.file))});font-weight:${font.weight === 'variable' ? '100 900' : font.weight || 400};font-style:${font.style || 'normal'}}`;
   }
 }
 
@@ -135,7 +142,7 @@ function renderElement(project, element, options, fontMap, assetMap) {
   } else if (element.type === 'image') {
     const image = document.createElement('img');
     image.decoding = 'sync'; // 拖动时画面每一步都会重画：同步解码，Safari 里图片不会闪一下空白
-    image.src = assetUrl(options.assetBase, assetMap.get(element.asset)?.file || '');
+    image.src = fileUrl(options, assetMap.get(element.asset)?.file || '');
     image.alt = element.name || '';
     image.draggable = false;
     image.style.cssText = `width:100%;height:100%;display:block;object-fit:${element.fit || 'cover'}`;
@@ -158,7 +165,7 @@ function renderElement(project, element, options, fontMap, assetMap) {
 }
 
 export function renderPage(project, page, options = {}) {
-  ensureFonts(project, options.assetBase);
+  ensureFonts(project, options);
   const root = document.createElement('div');
   root.className = 'vw-artboard';
   root.dataset.pageId = page.id;

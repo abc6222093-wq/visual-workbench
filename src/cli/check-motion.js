@@ -24,7 +24,13 @@ function parse(argv) {
 }
 let opts;
 try { opts = parse(process.argv.slice(2)); }
-catch (error) { console.error(error.message); console.error('用法：check-motion <项目目录或 project.json> [--timeout-ms 正整数] [--total-timeout-ms 正整数]'); process.exit(1); }
+catch (error) { console.error(error.message); console.error('用法：check-motion <项目目录、project.json 或导出的放映 .html> [--timeout-ms 正整数] [--total-timeout-ms 正整数]'); process.exit(1); }
+// 导出的放映版单文件：用 file:// 打开，跑文件里内嵌的同一套检查
+if (/\.html?$/i.test(opts.input)) {
+  const { checkExportedHtml } = await import('./check-motion-html.js');
+  await checkExportedHtml(opts);
+  process.exit(process.exitCode ?? 0);
+}
 const projectDir = opts.input.endsWith('.json') ? dirname(opts.input) : opts.input;
 const projectFile = opts.input.endsWith('.json') ? opts.input : join(opts.input, 'project.json');
 let project;
