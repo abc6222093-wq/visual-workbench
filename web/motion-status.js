@@ -12,7 +12,7 @@ export function mountMotionStatus(project, assetBase, toolbar) {
   if (!cache.has(key)) {
     const promise = new Promise(resolve => {
       const frame = document.createElement('iframe');
-      frame.style.cssText = `position:fixed;left:-100000px;top:0;width:${project.artboard.width}px;height:${project.artboard.height}px;border:0;pointer-events:none`;
+      frame.style.cssText = `position:fixed;left:0;top:0;transform:scale(0.001);transform-origin:0 0;opacity:0.01;z-index:-1;width:${project.artboard.width}px;height:${project.artboard.height}px;border:0;pointer-events:none`;
       frame.setAttribute('aria-hidden', 'true');
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
       frame.src = '/motion-check.html';
@@ -24,7 +24,8 @@ export function mountMotionStatus(project, assetBase, toolbar) {
         resolve(result);
       };
       const receive = event => {
-        if (event.source !== frame.contentWindow || event.origin !== location.origin || event.data?.id !== token) return;
+        // Safari 里 event.source 与 frame.contentWindow 不是同一个对象，靠同源 + 一次性 token 识别
+        if (event.origin !== location.origin || event.data?.type !== 'check-motion-result' || event.data?.id !== token) return;
         done(event.data.result || {ok:false,errors:[{message:event.data.error || '检查失败'}]});
       };
       const timer = setTimeout(() => done({ ok: false, errors: [{ message: '动效检查超时，请运行 check-motion 查看详情' }] }), Math.max(30000, project.pages.reduce((n, p) => n + (p.motion?.steps || 0) + 4, 0) * 10000));

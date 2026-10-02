@@ -37,10 +37,18 @@ function conflict(ctx, path, local, remote) {
   return ctx.prefer === 'remote' ? remote : local;
 }
 
+// 页面的 motion（steps + source）整体当成一个值：source 是一段完整的代码，绝不能逐字合并或截断，
+// steps 与 source 也必须配套。动效只归 agent 写，所以双方都改了时整体取磁盘（agent）的那份并记冲突。
+const isMotionPath = path => path.length === 3 && path[0] === 'pages' && path[2] === 'motion';
+
 function mergeValue(base, local, remote, path, ctx) {
   if (deepEqual(local, remote)) return local;
   if (deepEqual(local, base)) return remote;
   if (deepEqual(remote, base)) return local;
+  if (isMotionPath(path)) {
+    ctx.conflicts.push({ path: [...path], local, remote });
+    return remote;
+  }
   // base 不是同类容器（例如双方都新增了这个键）时，按空容器逐项合并，冲突粒度更细
   if (isObj(local) && isObj(remote)) return mergeObject(isObj(base) ? base : {}, local, remote, path, ctx);
   if (isIdArray(local) && isIdArray(remote)) return mergeIdArray(isIdArray(base) ? base : [], local, remote, path, ctx);
@@ -105,7 +113,7 @@ function mergeIdArray(base, local, remote, path, ctx) {
 const PROP_NAMES = {
   x: '位置', y: '位置', width: '大小', height: '大小', rotation: '旋转', opacity: '透明度',
   zIndex: '层级', text: '文字', color: '颜色', fill: '填充', font: '字体', fontSize: '字号',
-  fontWeight: '字重', background: '背景', name: '名称',
+  fontWeight: '字重', background: '背景', name: '名称', motion: '动效代码',
 };
 const COLLECTION_NAMES = { steps: '动效', assets: '素材', fonts: '字体' };
 

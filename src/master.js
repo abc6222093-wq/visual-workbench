@@ -1,6 +1,6 @@
 // 系列母版：把满意的项目标为母版，新建项目时从母版继承画板、背景、字体、配色、动效代码和通用素材，但不带页面内容。
 // 母版和新项目之间全部是复制，不互相引用；母版文件夹里的任何文件都不会被修改。
-// 项目文件格式本轮不变，所以「是不是母版」记在数据目录的 workbench-state.json，配色与来源记在新项目的 series.json。
+// 项目文件格式本轮不变，所以「是不是母版」记在数据目录的 workbench-state.json，配色、来源与母版各页的动效代码记在新项目的 series.json。
 import {
   copyFileSync,
   existsSync,
@@ -214,7 +214,17 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
     pages: [blankPage(firstBg)],
   };
   const palette = extractPalette(master);
-  const series = { master: master.id, masterName: master.name, createdFromAt: iso, palette };
+  // 格式 v2 的动效写在页面里，新项目只有一张空白页，页面动效引用的元素都不存在，不能直接搬进页面；
+  // 原样记进 series.json 的 motions，供 agent 排新页面时复用这套系列动效代码
+  const motions = masterPages
+    .filter((page) => page && typeof page === 'object' && page.motion && typeof page.motion === 'object')
+    .map((page) => ({
+      pageId: page.id,
+      pageName: page.name,
+      steps: page.motion.steps,
+      source: page.motion.source,
+    }));
+  const series = { master: master.id, masterName: master.name, createdFromAt: iso, palette, motions };
 
   mkdirSync(dirname(destProjectDir), { recursive: true });
   mkdirSync(destProjectDir);

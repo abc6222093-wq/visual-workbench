@@ -1,6 +1,8 @@
 import { renderPage } from "./render.js";
 import { showMotionPage } from "./motion-stage.js";
 import { mountMotionStatus } from "./motion-status.js";
+// 编辑器里预览本页动效（第 4 轮）：临时层里播一遍，播完拿掉，不改项目
+import { startMotionPreview } from "./motion-preview.js";
 import {
   clone,
   uid,
@@ -55,6 +57,8 @@ const S = {
   sync: null,
   lastConflict: null,
   stale: new Map(), // 被 agent 换过内容的素材文件 → 时间戳（让图片重新加载）
+  preview: null, // 正在预览动效时：{ stop, done }
+  exportKind: "pdf", // 导出弹窗上次选的类型
 };
 const esc = (s) =>
   String(s ?? "").replace(
@@ -106,6 +110,7 @@ function tbtn(a, label, name, cls = "", extra = "") {
 const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group" };
 function shell(active, body) {
   document.documentElement.classList.add("glass-mode");
+  stopPreview(); // 换画面时，正在播的动效预览一起结束
   stopLoops();
   closeModalGlass();
   // 左侧导航：当前所在的页面那一格浮起来
@@ -276,7 +281,7 @@ function setAgent(state) {
 // エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
 function isBusy() {
   if (S.view !== "editor" || !S.project) return true;
-  if (S.dragging || S.saving || S.assetPromise) return true;
+  if (S.dragging || S.saving || S.assetPromise || S.preview) return true;
   if ($("#modal-root")?.childElementCount) return true;
   const field = document.activeElement;
   if (field?.matches?.("input[data-prop],textarea[data-prop]") && field.value !== field.defaultValue)
@@ -386,11 +391,12 @@ function inspectorBody(p) {
 }
 function renderEditor() {
   if (!S.project) return;
+  stopPreview();
   const p = page();
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
   );
   renderBoard();
   mountMotionStatus(S.project, base(), $(".ed-toolbar"));
@@ -426,6 +432,7 @@ function onSaveText(status) {
   }, 1400);
 }
 function renderBoard() {
+  stopPreview();
   const holder = $("#artboard-holder");
   if (!holder) return;
   holder.replaceChildren();
@@ -767,7 +774,7 @@ async function versions() {
   await flush();
   const list = await api(`${path()}/versions`);
   modal(
-    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "エイ", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
+    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "エイ", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}${ibtn("version-delete", "trash", "删除这个版本", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
   );
 }
 function versionTime(v) {
@@ -779,6 +786,17 @@ function restoreDialog(id, note) {
   modal(
     `<h2>退回到这个版本？</h2><p class="g-sheet__note">「${esc(note)}」· 当前内容会先自动存一版，随时可以再退回来</p><div class="g-sheet__actions">${gbtn("versions", "返回列表")}${gbtn("restore-confirm", "退回", { icon: "history", cls: "g-btn--prism", extra: `data-id="${esc(id)}"` })}</div>`,
   );
+}
+// 删除版本前再问一次（删除后不能恢复）
+function deleteVersionDialog(id, note) {
+  modal(
+    `<h2>删除这个版本？</h2><p class="g-sheet__note">「${esc(note)}」· 删除后不能恢复，其他版本和当前内容不受影响</p><div class="g-sheet__actions">${gbtn("versions", "返回列表")}${gbtn("version-delete-confirm", "删除", { icon: "trash", cls: "g-btn--prism", extra: `data-id="${esc(id)}"` })}</div>`,
+  );
+}
+async function deleteVersion(id) {
+  const out = await api(`${path()}/versions/${encodeURIComponent(id)}`, "DELETE");
+  await versions();
+  notice(out.freedBytes ? `版本已删除，腾出 ${formatBytes(out.freedBytes)}` : "版本已删除");
 }
 async function restore(id) {
   await flush();
@@ -859,6 +877,118 @@ function copyDialog() {
     }
   };
 }
+// ---------- 预览动效 ----------
+// 在画板上面盖一层临时画面，把本页动效从头播到尾（不播换页过渡）；按 Esc 或再点一次按钮提前结束
+function previewButton(on) {
+  const button = $('[data-action="preview-motion"]');
+  if (!button) return;
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+  button.title = on ? "停止预览" : "预览动效";
+  button.querySelector("span").textContent = on ? "停止预览" : "预览动效";
+}
+function stopPreview() {
+  const preview = S.preview;
+  if (!preview) return;
+  S.preview = null;
+  preview.stop();
+  previewButton(false);
+}
+function togglePreview() {
+  if (S.preview) return stopPreview();
+  const p = page();
+  if (!p.motion) {
+    notice("这一页还没有动效");
+    return;
+  }
+  const holder = $("#artboard-holder"),
+    artboard = $("#artboard");
+  if (!holder || !artboard) return;
+  S.selected = [];
+  const preview = startMotionPreview({
+    project: S.project,
+    page: p,
+    holder,
+    artboard,
+    scale: S.scale,
+    assetBase: base(),
+    onError: (error) => notice(`动效错误：${error.message}`),
+  });
+  S.preview = preview;
+  previewButton(true);
+  preview.done.then((result) => {
+    if (S.preview !== preview) return;
+    S.preview = null;
+    previewButton(false);
+    if (result === "finished") notice("动效预览完了");
+  });
+}
+
+// ---------- 导出 ----------
+const EXPORT_KINDS = [
+  ["html", "放映版 HTML", "一个网页文件，双击就能在浏览器里放映（带动效）", "play"],
+  ["images", "每页图片", "每一页存成一张 PNG 图片", "image"],
+  ["pdf", "PDF", "所有页面合成一个 PDF 文件", "copy"],
+];
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n || 0))} B`;
+  const units = ["KB", "MB", "GB"];
+  let v = n / 1024,
+    i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+function exportDialog() {
+  const kind = S.exportKind;
+  modal(
+    `<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`,
+  );
+}
+function chooseExportKind(kind) {
+  if (!EXPORT_KINDS.some(([k]) => k === kind)) return;
+  S.exportKind = kind;
+  document.querySelectorAll('[data-action="export-kind"]').forEach((row) => {
+    const on = row.dataset.kind === kind;
+    row.classList.toggle("selected", on);
+    row.setAttribute("aria-checked", on ? "true" : "false");
+  });
+}
+async function startExport(button) {
+  if (S.exporting) return;
+  const kind = S.exportKind,
+    label = EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind,
+    sheet = button.closest(".g-sheet");
+  S.exporting = true;
+  const controls = [...sheet.querySelectorAll("button")];
+  controls.forEach((c) => (c.disabled = true));
+  button.innerHTML = `${icon("loader", 17)}正在导出…`;
+  sheet.setAttribute("aria-busy", "true");
+  try {
+    await flush();
+    const result = await api(`${path()}/export`, "POST", { kind });
+    if (!sheet.isConnected) notice(`${label}已导出到：${result.outDir}`);
+    else exportResult(result, label);
+  } catch (err) {
+    if (sheet.isConnected) {
+      controls.forEach((c) => (c.disabled = false));
+      button.innerHTML = `${icon("upload", 17)}开始导出`;
+      sheet.removeAttribute("aria-busy");
+    }
+    notice(err.message);
+  } finally {
+    S.exporting = false;
+  }
+}
+function exportResult({ outDir, files }, label) {
+  const target = files.length === 1 ? files[0].path : outDir;
+  const total = files.reduce((n, f) => n + (f.bytes || 0), 0);
+  modal(
+    `<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", "在访达中显示", { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`,
+  );
+}
+
 // 放映：作品画面不透明，四周铺背景图；下面一条磨砂白控制条（加载画面结束后才出现）。
 // 放映会进全屏，全屏画面里看不到玻璃层，所以背景图直接铺在放映画面上，控制条用 CSS 磨砂
 function play() {
@@ -1070,7 +1200,29 @@ app.addEventListener("click", async (e) => {
       case "restore-confirm":
         await restore(id);
         break;
+      case "version-delete":
+        deleteVersionDialog(id, b.dataset.note || "");
+        break;
+      case "version-delete-confirm":
+        await deleteVersion(id);
+        break;
+      case "preview-motion":
+        togglePreview();
+        break;
+      case "export":
+        exportDialog();
+        break;
+      case "export-kind":
+        chooseExportKind(b.dataset.kind);
+        break;
+      case "export-start":
+        await startExport(b);
+        break;
+      case "reveal":
+        await api("/api/reveal", "POST", { path: b.dataset.path });
+        break;
       case "play":
+        stopPreview();
         await flush();
         play();
         document
@@ -1171,7 +1323,19 @@ $("#file-picker").onchange = (e) => {
   upload(e.target.files, e.target.dataset.target === "library");
   e.target.value = "";
 };
+// Safari 全屏时按 Esc 只退出全屏、不把按键交给页面；所以全屏一结束就回到编辑（Chrome 同样适用）
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement || S.view !== "play") return;
+  S.playback?.destroy();
+  S.view = "editor";
+  renderEditor();
+});
 window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.preview) {
+    e.preventDefault();
+    stopPreview();
+    return;
+  }
   if (e.key === "Escape") {
     if (S.view === "play") {
       S.playback?.destroy();
@@ -1191,7 +1355,7 @@ window.addEventListener("keydown", (e) => {
     nextPage(-1);
     return;
   }
-  if (S.view !== "editor" || e.target.matches("input,textarea,select")) return;
+  if (S.view !== "editor" || S.preview || e.target.matches("input,textarea,select")) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
     $(`[data-action="${e.shiftKey ? "redo" : "undo"}"]`)?.click();

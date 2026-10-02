@@ -14,10 +14,13 @@
     "init-data": "node src/cli/init-data.js",
     "save-version": "node src/cli/save-version.js",
     "copy-pages": "node src/cli/copy-pages.js",
-    "check-motion": "node src/cli/check-motion.js"
+    "check-motion": "node src/cli/check-motion.js",
+    "export": "node src/cli/export.js"
   },
   "dependencies": {
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "sharp": "^0.35.5",
+    "subset-font": "^2.9.0"
   },
   "devDependencies": {
     "playwright": "^1.63.0"

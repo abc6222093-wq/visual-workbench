@@ -1,0 +1,130 @@
+// 单文件放映版里的放映器（在浏览器里运行，导出时整段内嵌进 .html）。
+// 页面渲染、点击推进、换页、动效检查都直接用工作台的 render.js / playback.js / motion-check.js，
+// 这里只负责：画板按窗口缩放、点击 / 按键 / 滑动推进、页码显示。
+// 换页流程与工作台 web/motion-stage.js 一致：先渲染下一页（隐藏），由当前页的 transition 负责过渡，再销毁当前页。
+import { renderPage } from './render.js';
+import { createPlayback } from './playback.js';
+import { checkMotion } from './motion-check.js';
+
+const exported = globalThis.__VW_EXPORT__;
+const project = exported.project;
+const W = project.artboard.width;
+const H = project.artboard.height;
+const stage = document.getElementById('vw-stage');
+const counter = document.getElementById('vw-counter');
+const toast = document.getElementById('vw-toast');
+
+const layer = document.createElement('div');
+layer.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;transform-origin:0 0`;
+stage.append(layer);
+
+// 画板等比缩放到窗口内居中，四周留黑
+function fit() {
+  const width = stage.clientWidth || innerWidth;
+  const height = stage.clientHeight || innerHeight;
+  const scale = Math.min(width / W, height / H);
+  layer.style.transform = `translate(${(width - W * scale) / 2}px, ${(height - H * scale) / 2}px) scale(${scale})`;
+}
+fit();
+addEventListener('resize', fit);
+addEventListener('orientationchange', () => setTimeout(fit, 200));
+globalThis.visualViewport?.addEventListener('resize', fit);
+
+let toastTimer;
+function say(text) {
+  toast.textContent = text;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
+}
+function report(error) {
+  console.error(error);
+  say(`动效出错：${error?.message || error}`);
+}
+
+const state = { index: -1, board: null, playback: null, busy: false, broken: false };
+function showCounter() { counter.textContent = `${state.index + 1} / ${project.pages.length}`; }
+
+async function show(index, direction = 1) {
+  state.busy = true;
+  const previous = state.playback;
+  const oldRoot = state.board;
+  const page = project.pages[index];
+  const board = renderPage(project, page, {});
+  board.style.position = 'absolute';
+  board.style.inset = '0';
+  board.style.visibility = oldRoot ? 'hidden' : 'visible';
+  layer.append(board);
+  try {
+    if (previous && oldRoot) {
+      try {
+        await previous.ready;
+        board.style.visibility = 'visible';
+        await previous.transition(board, direction);
+      } catch (error) { report(error); }
+      await previous.destroy();
+      oldRoot.remove();
+    }
+    board.style.visibility = 'visible';
+    state.index = index;
+    state.board = board;
+    state.broken = false;
+    showCounter();
+    // 动效初始化或某一步出错时，不让放映卡住：再点一下直接去下一页
+    state.playback = createPlayback(project, page, { root: board, onError: error => { state.broken = true; report(error); } });
+    await state.playback.ready.catch(() => { state.broken = true; });
+  } finally { state.busy = false; }
+}
+
+function advance() {
+  if (state.busy || !state.playback || state.playback.isPlaying()) return;
+  const steps = project.pages[state.index].motion?.steps || 0;
+  if (!state.broken && state.playback.getState().nextStep < steps) state.playback.next();
+  else if (state.index < project.pages.length - 1) show(state.index + 1, 1);
+  else say('已经是最后一页');
+}
+function back() {
+  if (state.busy || !state.playback || state.playback.isPlaying()) return;
+  if (state.index > 0) show(state.index - 1, -1);
+  else say('已经是第一页');
+}
+
+// 点击 / 轻点推进；手指横向滑动：向左滑前进、向右滑后退
+let down = null;
+stage.addEventListener('pointerdown', event => {
+  if (event.button > 0) return;
+  down = { x: event.clientX, y: event.clientY };
+});
+stage.addEventListener('pointercancel', () => { down = null; });
+stage.addEventListener('pointerup', event => {
+  if (!down) return;
+  const dx = event.clientX - down.x;
+  const dy = event.clientY - down.y;
+  down = null;
+  if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) advance(); else back(); }
+  else if (Math.hypot(dx, dy) < 24) advance();
+});
+addEventListener('keydown', event => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if ([' ', 'Spacebar', 'ArrowRight', 'ArrowDown', 'PageDown', 'Enter'].includes(event.key)) { event.preventDefault(); advance(); }
+  else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(event.key)) { event.preventDefault(); back(); }
+  else if (event.key === 'f' || event.key === 'F') {
+    const root = document.documentElement;
+    if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    else (root.requestFullscreen || root.webkitRequestFullscreen)?.call(root);
+  }
+});
+
+// 自检：与工作台「动效检查」同一套逻辑，逐页跑完所有步骤和换页（原项目 + 移动与尺寸变体）
+globalThis.vwCheckMotion = async (options = {}) => {
+  const mount = document.createElement('div');
+  // 检查用的页面放在看不见但仍在渲染的位置（隐藏元素在 Safari 里动画可能被节流）
+  mount.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;opacity:0;pointer-events:none;z-index:-1;overflow:hidden`;
+  document.body.append(mount);
+  try { return await checkMotion(project, { assetBase: '', timeout: options.timeout ?? 5000, mount, pageId: options.pageId }); }
+  finally { mount.remove(); }
+};
+globalThis.vwPlayer = { advance, back, get page() { return state.index + 1; }, get busy() { return state.busy || !!state.playback?.isPlaying(); } };
+
+// 打开时带 #vw-check 只做检查，不开始放映（命令行检查用，避免放映动效干扰检查结果）
+globalThis.vwReady = location.hash === '#vw-check' ? Promise.resolve() : show(0);

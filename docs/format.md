@@ -27,6 +27,9 @@
       assets/               素材文件（图片）
       fonts/                字体文件
       versions/             版本存档，见 §10
+      series.json           从系列母版新建时才有：母版来源、配色、动效代码
+  exports/<项目编号>/       导出的放映版 HTML、图片、PDF，见 §12
+  workbench-state.json      哪些项目是系列母版（エイ 在界面上标）
   library/                  公共素材库，所有项目都能取用
     assets/
     fonts/
@@ -268,6 +271,10 @@ export default async function (ctx) {
 
 返回对象中的三个函数均可选；但 `steps > 0` 时必须返回 `step` 函数。`steps: 0` 的页面可以只提供 `transition`。每次点击等当前异步步骤完成后才能继续；最后一步完成后的**下一次点击**才翻到下一页。`transition` 接收的 `from` / `to` 是实际放映页 DOM 容器（`to` 为已渲染的下一页），`direction` 为 `1`（前进）或 `-1`（后退）；没有 `transition` 时直接切换。切换或重置时调用 `dispose`。页内自动连续推进可在一次 `step` 内串联多个 `await ctx.animate(...)` 和 `await ctx.timer(...)`，不必增加点击次数。
 
+工作台开着时エイ 和 agent 同时改同一个项目，三方合并把每页 `motion`（`steps` + `source`）当作一个整体：双方都改了时取 agent 的整份并提示エイ，不会把两份代码拼在一起。
+
+从系列母版新建的项目，`series.json` 的 `motions` 里原样记录了母版各页的 `{ pageId, pageName, steps, source }`，供 agent 照着为新页面改写。
+
 ### 9.2 工作台提供的 `ctx`
 
 | 成员 | 说明 |
@@ -282,7 +289,7 @@ export default async function (ctx) {
 | `ctx.importModule(path)` | 导入同源本地绝对路径模块，例如 `/vendor/anime.esm.min.js`，返回模块对象。 |
 | `ctx.assetUrl(file)` | 将本项目 `assets/` 或 `fonts/` 中的相对文件路径转为本地 URL。 |
 
-动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可导入本地现成库，例如 `await ctx.importModule('/vendor/anime.esm.min.js')`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此相对路径及 `/vendor/...` 这样的根路径直接 import 不支持；用 `ctx.importModule` 解析同源本地路径，或 import 完整的本地 HTTP URL。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/`；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。
+动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可导入本地现成库，例如 `await ctx.importModule('/vendor/anime.esm.min.js')`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此相对路径及 `/vendor/...` 这样的根路径直接 import 不支持；用 `ctx.importModule` 解析同源本地路径，或 import 完整的本地 HTTP URL。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/`；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。动效代码以 `motion.source` 为准；项目文件夹里的附属 .js 不能用 `ctx.importModule` 导入，只当参考或存档。导出放映版时如何打包库见 §12。
 
 ### 9.3 从エイ 修改后的状态出发
 
@@ -292,7 +299,7 @@ export default async function (ctx) {
 
 ### 9.4 检查
 
-首次运行真实浏览器检查或完整测试，先 `npm ci`、`npx playwright install chromium`（Linux CI 用 `--with-deps`）。每个阶段默认上限 5 秒；CLI 每页使用独立浏览器，即使该页同步死循环，也会终止它并继续检查其他页。每页总时限默认按步骤数计算（至少 10 秒）。长动效可用 `npm run check-motion -- <项目> --timeout-ms 15000 --total-timeout-ms 180000` 指定阶段和整页时限。
+首次运行真实浏览器检查或完整测试，先 `npm ci`；浏览器的查找顺序见 §13（Linux CI 用 `npx playwright install --with-deps chromium`）。每个阶段默认上限 5 秒；CLI 每页使用独立浏览器，即使该页同步死循环，也会终止它并继续检查其他页。每页总时限默认按步骤数计算（至少 10 秒）。长动效可用 `npm run check-motion -- <项目> --timeout-ms 15000 --total-timeout-ms 180000` 指定阶段和整页时限。
 
 改完先运行 `npm run validate -- <项目>` 检查项目结构、编号、素材与字体引用，再运行 `npm run check-motion -- <项目>`。后者会实际打开每一页，初始化模块，按顺序执行所有步骤和换页效果，报告语法、导出、运行时及元素查找错误。工作台打开项目时也会提示检查失败的页面。检查通过能发现代码错误；视觉节奏和画面效果仍需在放映中预览。
 
@@ -301,8 +308,11 @@ export default async function (ctx) {
 ## 10. 版本
 
 - 工作台自动保存：覆盖同一份 `project.json`，不产生历史。
-- 产生版本只有两种时机：エイ 手动"存一版"；agent 每轮**动手改之前**执行 `npm run save-version -- <项目> -m "备注"`。
-- 一个版本 = `versions/<时间戳>/` 下的 `project.json` + `assets/` + `fonts/` 完整快照 + `meta.json`（时间、备注、谁存的）。
+- 产生版本的时机：エイ 手动"存一版"；agent 每轮**动手改之前**执行 `npm run save-version -- <项目> -m "备注"`；エイ 退回到旧版本前，工作台自动存一份「退回前自动存档」。
+- 一个版本 = `versions/<时间戳>/` 下项目文件夹里除 `versions/` 外的全部文件（`project.json`（含 `motion.source`）、`assets/`、`fonts/`、`series.json`、附属文件）+ `meta.json`（时间、备注、谁存的）。
+- 去重：文件内容按 sha256 存进 `versions/.objects/`，版本目录里是指向它的硬链接，同样的文件只占一份空间。
+- 回收：エイ 可以在版本列表里删除版本；「退回前自动存档」只保留最近 10 条（`AUTO_BACKUP_KEEP`）。删除后，不再被任何版本用到的对象自动清掉。agent 不要手动删 `versions/` 或改 `.objects/`。
+- 版本编号可能在删除后被复用，不要假设编号单调递增；新旧以 `meta.json` 的 `savedAt` 为准。
 - 版本目录不进 git（整个数据目录都不进）。
 
 ## 11. 校验
@@ -321,6 +331,29 @@ export default async function (ctx) {
 
 通过时会额外列出待排版素材。程序内用法：`import { validateProject, validateProjectData } from './src/validate.js'`。
 
-## 12. 示例
+## 12. 导出
+
+命令：`npm run export -- <项目> [--html | --images | --pdf | --all] [--out <目录>]`，默认放在 `<数据目录>/exports/<项目编号>/`。工作台里点顶栏「导出」效果相同，导出完显示文件位置，可一键在访达中显示。导出文件夹在项目文件夹外，不会被当作 agent 的修改，也不进版本。
+
+| 类型 | 内容 |
+|---|---|
+| 放映版 HTML | 一个文件，双击离线放映（不需要工作台、不联网），手机也能开。包含全部页面、`motion.source`、动效用到的库和许可证。点击 / 空格 / → 前进，← 后退，左右滑动翻页，F 全屏 |
+| 图片 | 每页一张 PNG，尺寸 = 画板尺寸，文件名 `NN-页面名.png` |
+| PDF | 每页一张（JPEG 质量 90 嵌入），页面尺寸 = 画板 px × 0.75 pt；文字不可选中 |
+
+- 瘦身（放映版）：字体子集化成 woff2，只留用到该字体的文字、所有 `motion.source` 里的字符和基本 ASCII；图片缩到最大显示尺寸（不放大），透明图保留 PNG，不透明图取 JPEG（质量 85）与 PNG 中更小的；页面没用到、动效代码也没提到的素材不打包。
+- 动效库：只打包 `ctx.importModule('/…')` 里**写成字面量**的路径，文件从 `web/` 取，旁边的 `LICENSE-*` 一起写进注释；拼接出来的路径打包不到（导出时给警告），路径不存在时导出报错。
+- 动效代码在运行时临时写进页面的文字，最好直接出现在 `source` 里，否则字体子集里可能缺字。
+- 图片 / PDF 用的是**每页动效全部播完后的最终画面**：依次执行全部 `step`，等没被 await 的动画也播完，无限循环的动画停在当前帧；`transition` 不执行。所以最后一步应停在想展示的画面上。
+- 动效出错或卡住时导出失败，提示里有页码和页面编号；放映版 HTML 遇到出错的页会提示，再点一下直接去下一页。
+- 放映版 HTML 超过 15 MB 时照样导出，但会给出各部分大小，需停下来报告。
+- 检查导出的放映版：`npm run check-motion -- <文件.html>`。
+
+## 13. 浏览器
+
+动效检查、导出图片 / PDF 要在后台开一个浏览器，按顺序找：Mac 上装的 Google Chrome → Microsoft Edge → Playwright 自带的 Chromium → Playwright 自带的 WebKit（Safari 内核）。都没有时给中文提示：安装 Chrome，或在工作台文件夹运行 `npx playwright install chromium`。环境变量 `VW_BROWSER=chrome|chromium|webkit` 可只用指定的一种。
+
+## 14. 示例
+
 
 `examples/sample-deck/`：演示多元素连续联动、同一元素跨步变化、现成库效果与自定义换页，并含待排版素材、随项目存放的字体和分组。

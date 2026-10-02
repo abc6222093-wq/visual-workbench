@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { chromium } from 'playwright';
+import { launchBrowserServer } from '../browser.js';
 import { validateProjectData } from '../validate.js';
 
 function positive(value, flag) {
@@ -24,7 +24,13 @@ function parse(argv) {
 }
 let opts;
 try { opts = parse(process.argv.slice(2)); }
-catch (error) { console.error(error.message); console.error('用法：check-motion <项目目录或 project.json> [--timeout-ms 正整数] [--total-timeout-ms 正整数]'); process.exit(1); }
+catch (error) { console.error(error.message); console.error('用法：check-motion <项目目录、project.json 或导出的放映 .html> [--timeout-ms 正整数] [--total-timeout-ms 正整数]'); process.exit(1); }
+// 导出的放映版单文件：用 file:// 打开，跑文件里内嵌的同一套检查
+if (/\.html?$/i.test(opts.input)) {
+  const { checkExportedHtml } = await import('./check-motion-html.js');
+  await checkExportedHtml(opts);
+  process.exit(process.exitCode ?? 0);
+}
 const projectDir = opts.input.endsWith('.json') ? dirname(opts.input) : opts.input;
 const projectFile = opts.input.endsWith('.json') ? opts.input : join(opts.input, 'project.json');
 let project;
@@ -46,7 +52,7 @@ const server = http.createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': mime[target.slice(target.lastIndexOf('.'))] || 'application/octet-stream' }); response.end(bytes);
   } catch { response.writeHead(404); response.end('Not found'); }
 });
-let failures = 0, successes = 0;
+let failures = 0, successes = 0, announced = false, noBrowser = null;
 try {
   await new Promise((ok, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', ok); });
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -56,8 +62,8 @@ try {
     let browser, browserServer, timer, timedOut = false;
     const errors = [];
     try {
-      browserServer = await chromium.launchServer({ headless: true });
-      browser = await chromium.connect(browserServer.wsEndpoint());
+      ({ server: browserServer, browser } = await launchBrowserServer());
+      if (!announced) { console.log(`用 ${browser.vwName} 检查`); announced = true; }
       const page = await browser.newPage();
       await page.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort('blockedbyclient'));
       page.on('pageerror', error => errors.push(String(error)));
@@ -74,7 +80,10 @@ try {
       ]).finally(() => clearTimeout(timer));
       for (const row of result.results) { console.log(`${row.ok ? '✓' : '✗'} ${row.page} [${row.variant}]${row.ok ? '' : `: ${row.error}`}`); if (row.ok) successes++; else failures++; }
       for (const error of errors) { console.error(`✗ ${pageId} 浏览器错误: ${error}`); failures++; }
-    } catch (error) { console.error(`✗ ${pageId}: ${error.message}`); failures++; }
+    } catch (error) {
+      if (error.code === 'NO_BROWSER') { noBrowser = error; break; }
+      console.error(`✗ ${pageId}: ${error.message}`); failures++;
+    }
     finally {
       clearTimeout(timer);
       if (browser) {
@@ -86,7 +95,8 @@ try {
       }
     }
   }
-  if (failures) process.exitCode = 1;
+  if (noBrowser) { console.error(noBrowser.message); process.exitCode = 1; }
+  else if (failures) process.exitCode = 1;
   else console.log(`动效检查通过：${successes} 项`);
 } catch (error) { console.error(`动效检查失败：${error.message}`); process.exitCode = 1; }
 finally { await new Promise(resolve => server.close(resolve)); }
