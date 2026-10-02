@@ -13,7 +13,10 @@ import {
   createHistory,
   rootSelection,
   resizeGroup,
+  referenceText,
 } from "./editor.js";
+// 实时连接（第 3 轮）：合并エイ 和 agent 的修改
+import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
 import { icon } from "./ui/icons.js";
 import { mascot } from "./ui/mascot.js";
@@ -45,6 +48,12 @@ const S = {
   tab: "layers",
   playback: null,
   scale: 1,
+  base: null, // 上次和磁盘一致时的项目（合并 agent 修改时当作共同起点）
+  dragging: false,
+  events: null,
+  sync: null,
+  lastConflict: null,
+  stale: new Map(), // 被 agent 换过内容的素材文件 → 时间戳（让图片重新加载）
 };
 const esc = (s) =>
   String(s ?? "").replace(
@@ -142,14 +151,16 @@ async function home() {
   await flush();
   S.view = "home";
   S.project = null;
+  disconnectEvents();
   const list = await api("/api/projects");
+  S.masters = list.filter((x) => x.master).map((x) => ({ id: x.id, name: x.name }));
   // 缩略图框是 16:10，作品按自己的比例居中放进去（竖版海报不会被裁）
   const fit = ({ width, height }) => {
     const r = width / height / 1.6;
     return r >= 1 ? `width:100%;height:${100 / r}%` : `width:${100 * r}%;height:100%`;
   };
   const card = (item, i) =>
-    `<button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${esc(item.project.artboard.preset)}</span></button>`;
+    `<div class="hm-cell"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button></div>`;
   shell(
     "home",
     `${head("项目总览", `${list.length} 个项目`, `<button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
@@ -168,7 +179,7 @@ const presets = [
 ];
 function newDialog() {
   modal(
-    `<h2>新建项目</h2><form id="new-form"><label class="g-field g-field--stack"><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：秋季课程提案" autofocus></label><label class="g-field g-field--stack"><span>画板类型</span><select name="preset">${presets.map((p) => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join("")}</select></label><div class="g-sheet__pair"><label class="g-field g-field--stack"><span>宽度</span><input name="width" type="number" min="1" value="1920" required></label><label class="g-field g-field--stack"><span>高度</span><input name="height" type="number" min="1" value="1080" required></label></div><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("plus", 17)}创建项目</button></div></form>`,
+    `<h2>新建项目</h2><form id="new-form"><label class="g-field g-field--stack"><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：秋季课程提案" autofocus></label>${(S.masters || []).length ? `<label class="g-field g-field--stack"><span>从母版开始</span><select name="master"><option value="">不用母版</option>${S.masters.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>` : ""}<label class="g-field g-field--stack"><span>画板类型</span><select name="preset">${presets.map((p) => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join("")}</select></label><div class="g-sheet__pair"><label class="g-field g-field--stack"><span>宽度</span><input name="width" type="number" min="1" value="1920" required></label><label class="g-field g-field--stack"><span>高度</span><input name="height" type="number" min="1" value="1080" required></label></div><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("plus", 17)}创建项目</button></div></form>`,
   );
   const f = $("#new-form");
   f.preset.onchange = () => {
@@ -176,15 +187,26 @@ function newDialog() {
     f.width.value = p[2];
     f.height.value = p[3];
   };
+  // 选了母版：画板尺寸跟母版走，下面三项不用填
+  if (f.master)
+    f.master.onchange = () => {
+      for (const field of [f.preset, f.width, f.height]) field.disabled = !!f.master.value;
+    };
   f.onsubmit = async (e) => {
     e.preventDefault();
     try {
-      const result = await api("/api/projects", "POST", {
-        name: f.name.value.trim(),
-        preset: f.preset.value,
-        width: +f.width.value,
-        height: +f.height.value,
-      });
+      const result = await api(
+        "/api/projects",
+        "POST",
+        f.master?.value
+          ? { name: f.name.value.trim(), fromMaster: f.master.value }
+          : {
+              name: f.name.value.trim(),
+              preset: f.preset.value,
+              width: +f.width.value,
+              height: +f.height.value,
+            },
+      );
       closeModal();
       open(result.project.id, result);
     } catch (err) {
@@ -203,8 +225,12 @@ async function open(id, data) {
   S.history = createHistory(S.project);
   S.dirty = S.saved = 0;
   S.conflict = false;
+  S.base = clone(S.project);
+  S.lastConflict = null;
+  S.stale.clear();
   S.view = "editor";
   renderEditor();
+  connectEvents(S.project.id);
 }
 function pageItem(p, i) {
   return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
@@ -227,12 +253,11 @@ function property() {
     `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
   return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
 }
-// agent 状态：发现 agent 改过文件后醒来一阵，之后睡着
-const agentUI = { until: 0, timer: null };
-const AGENT_AWAKE_MS = 15000;
+// agent 状态：服务器发现项目文件被工作台以外的程序改动时推送「working」，一段时间没有新改动后推送「idle」
+const agentUI = { state: "idle" };
 function agentChip() {
-  const awake = Date.now() < agentUI.until;
-  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip"><span class="g-disc-badge g-disc-badge--sm">${mascot({ pose: awake ? "awake" : "sleep", size: 17, disc: true })}</span><span>${awake ? "agent 修改中" : "agent 空闲"}</span></span>`;
+  const awake = agentUI.state === "working";
+  return `<span class="g-chip ed-agent ${awake ? "is-awake" : ""}" id="agent-chip"><span class="g-disc-badge g-disc-badge--sm">${mascot({ pose: awake ? "awake" : "sleep", size: 17, disc: true })}</span><span>${awake ? "agent 正在改" : "agent 空闲"}</span></span>`;
 }
 function refreshAgentChip() {
   const chip = $("#agent-chip");
@@ -240,10 +265,114 @@ function refreshAgentChip() {
   chip.outerHTML = agentChip();
   liven($("#agent-chip"));
 }
-function agentWake() {
-  agentUI.until = Date.now() + AGENT_AWAKE_MS;
-  clearTimeout(agentUI.timer);
-  agentUI.timer = setTimeout(refreshAgentChip, AGENT_AWAKE_MS + 50);
+function setAgent(state) {
+  const next = state === "working" ? "working" : "idle";
+  if (agentUI.state === next) return;
+  agentUI.state = next;
+  refreshAgentChip();
+}
+// ---------- 实时连接 ----------
+// エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
+function isBusy() {
+  if (S.view !== "editor" || !S.project) return true;
+  if (S.dragging || S.saving || S.assetPromise) return true;
+  if ($("#modal-root")?.childElementCount) return true;
+  const field = document.activeElement;
+  if (field?.matches?.("input[data-prop],textarea[data-prop]") && field.value !== field.defaultValue)
+    return true;
+  return false;
+}
+function keepSelection() {
+  if (!S.project.pages.some((p) => p.id === S.pageId)) S.pageId = S.project.pages[0].id;
+  S.selected = S.selected.filter((id) => findElement(page(), id));
+  for (const id of [...S.checked]) if (!S.project.pages.some((p) => p.id === id)) S.checked.delete(id);
+}
+// 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留エイ 的并提示
+function applySync({ project, base, revision, remoteChanged, needsSave, conflicts }) {
+  const before = { base: S.base, local: clone(S.project), remote: clone(base) };
+  S.base = clone(base);
+  S.revision = revision;
+  S.conflict = false;
+  if (remoteChanged) {
+    S.project = clone(project);
+    S.history.commit(S.project);
+    keepSelection();
+  }
+  if (needsSave) {
+    S.dirty++;
+    schedule();
+  } else S.saved = S.dirty;
+  if (remoteChanged || conflicts.length) renderEditor();
+  if (conflicts.length) {
+    S.lastConflict = { ...before, labels: summarizeConflicts(conflicts) };
+    conflictDialog();
+  } else if (remoteChanged) notice("已载入 agent 的最新修改（可以撤销）");
+}
+function makeSync() {
+  return createSyncController({
+    isBusy,
+    getLocal: () => ({ project: S.project, base: S.base, revision: S.revision }),
+    fetchRemote: () => api(path()),
+    apply: applySync,
+  });
+}
+// agent 只换了素材 / 动效代码文件内容（项目文件没变）：等エイ 不忙时重画，图片地址带上时间戳重新加载
+function refreshFiles(files) {
+  const stamp = Date.now();
+  for (const file of files) if (file !== "project.json") S.stale.set(file, stamp);
+  clearTimeout(refreshFiles.t);
+  const attempt = () => {
+    if (S.view === "editor" && S.project && !isBusy()) return renderEditor();
+    if (S.project) refreshFiles.t = setTimeout(attempt, 300);
+  };
+  attempt();
+}
+function bustStale(root) {
+  if (!S.stale.size || !S.project) return;
+  root.querySelectorAll("img").forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    for (const [file, stamp] of S.stale)
+      if (src.startsWith(base() + "/") && decodeURIComponent(src.split("?")[0]).endsWith("/" + file))
+        img.src = `${src.split("?")[0]}?v=${stamp}`;
+  });
+}
+function connectEvents(id) {
+  disconnectEvents();
+  S.sync = makeSync();
+  const events = new EventSource(`/api/projects/${encodeURIComponent(id)}/events`);
+  S.events = events;
+  const mine = () => S.events === events && S.project?.id === id;
+  const data = (e) => {
+    try {
+      return JSON.parse(e.data);
+    } catch {
+      return {};
+    }
+  };
+  // hello 在每次连上（包括断线重连）时都会收到：顺便对一下版本，补上断线期间错过的修改
+  events.addEventListener("hello", (e) => {
+    if (!mine()) return;
+    const d = data(e);
+    setAgent(d.agent);
+    if (d.revision && d.revision !== S.revision) S.sync.notify();
+  });
+  events.addEventListener("changed", (e) => {
+    if (!mine()) return;
+    const d = data(e);
+    if (d.revision && d.revision !== S.revision) S.sync.notify();
+    if (d.external && (d.files || []).some((f) => f !== "project.json")) refreshFiles(d.files);
+  });
+  events.addEventListener("agent", (e) => {
+    if (mine()) setAgent(data(e).state);
+  });
+}
+function disconnectEvents() {
+  S.events?.close();
+  S.events = null;
+  S.sync?.dispose();
+  S.sync = null;
+  clearTimeout(refreshFiles.t);
+  agentUI.state = "idle";
 }
 function inspectorBody(p) {
   if (S.tab === "library") {
@@ -260,12 +389,13 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
   );
   renderBoard();
   S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
   bindDrag();
   decorateEditor();
+  bustStale(app);
   syncGlass(app);
 }
 // 画面上的小反馈：小兔眨眼呼吸、保存状态的小圆点跟着文字变
@@ -319,6 +449,7 @@ function renderBoard() {
   holder.style.width = `${S.project.artboard.width * S.scale}px`;
   holder.style.height = `${S.project.artboard.height * S.scale}px`;
   $("#zoom-label").textContent = `${Math.round(S.scale * 100)}%`;
+  bustStale(holder);
   board.onpointerdown = (e) => {
     if (e.target === board) {
       S.selected = [];
@@ -352,6 +483,7 @@ function selectCanvas(id, event) {
     values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element) })),
   };
   event.preventDefault();
+  S.dragging = true;
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
@@ -388,6 +520,7 @@ function selectCanvas(id, event) {
   const up = (e) => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
+    S.dragging = false;
     if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) changed();
     else renderEditor();
   };
@@ -426,12 +559,15 @@ async function flush() {
       const result = await api(path(), "PUT", { project: snapshot, revision });
       S.revision = result.revision;
       S.saved = generation;
+      S.base = clone(result.project);
       if ($("#save-status"))
         $("#save-status").textContent = S.saved < S.dirty ? "正在保存…" : "已保存";
     } catch (e) {
       if (e.status === 409) {
-        S.conflict = true;
-        conflictDialog();
+        // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（エイ 的修改保留，agent 的修改并进来）
+        e.message = "agent 刚改过这个项目，正在合并，请稍后再试";
+        if ($("#save-status")) $("#save-status").textContent = "正在保存…";
+        setTimeout(() => S.sync?.notify(), 0);
       } else {
         notice(e.message);
         if ($("#save-status")) $("#save-status").textContent = "保存失败";
@@ -445,9 +581,11 @@ async function flush() {
   if (S.saved < S.dirty) return flush();
 }
 
+// 两边改了同一处：已经保留エイ 的修改，这里告诉她是哪些地方，并让她可以改用 agent 的
 function conflictDialog() {
+  const labels = S.lastConflict?.labels || [];
   modal(
-    `<h2>项目已在别处更新</h2><p class="g-sheet__note">本地修改和磁盘上的版本不一致</p><div class="g-sheet__actions">${gbtn("export-local", "下载本地副本")}${gbtn("reload", "载入磁盘版本")}${gbtn("keep", "保留本地修改", { cls: "g-btn--prism" })}</div>`,
+    `<h2>你和 agent 改了同一处</h2><p class="g-sheet__note">已保留你的修改。agent 的其他修改已经并进来了。</p><div class="g-sheet__list">${labels.map((label) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon("alert", 15)}</span><span class="g-row__text">${esc(label)}</span></div>`).join("")}</div><div class="g-sheet__actions">${gbtn("export-local", "下载我的副本")}${gbtn("conflict-agent", "这几处改用 agent 的")}${gbtn("close", "保留我的", { cls: "g-btn--prism" })}</div>`,
   );
 }
 function bindDrag() {
@@ -605,6 +743,8 @@ async function upload(files, toLibrary = false, coords) {
 async function library() {
   await flush();
   S.view = "library";
+  S.project = null;
+  disconnectEvents();
   const assets = await api("/api/library");
   const card = (a) =>
     `<div class="hm-card hm-card--asset"><div class="hm-card__thumb hm-card__thumb--asset"><img src="${esc(a.url)}" alt="${esc(a.name)}" loading="lazy"></div><div class="hm-card__info"><strong>${esc(a.name)}</strong><small>${a.width} × ${a.height}</small></div></div>`;
@@ -625,8 +765,33 @@ async function versions() {
   await flush();
   const list = await api(`${path()}/versions`);
   modal(
-    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(v.savedAt || v.createdAt || v.timestamp || "")}</small></span></div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
+    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "エイ", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
   );
+}
+function versionTime(v) {
+  const t = new Date(v.savedAt || v.createdAt || v.timestamp || "");
+  return Number.isNaN(t.getTime()) ? "" : t.toLocaleString("zh-CN", { hour12: false });
+}
+// 退回前再问一次；退回时服务器会先把当前内容自动存一版
+function restoreDialog(id, note) {
+  modal(
+    `<h2>退回到这个版本？</h2><p class="g-sheet__note">「${esc(note)}」· 当前内容会先自动存一版，随时可以再退回来</p><div class="g-sheet__actions">${gbtn("versions", "返回列表")}${gbtn("restore-confirm", "退回", { icon: "history", cls: "g-btn--prism", extra: `data-id="${esc(id)}"` })}</div>`,
+  );
+}
+async function restore(id) {
+  await flush();
+  const d = await api(`${path()}/versions/${encodeURIComponent(id)}/restore`, "POST", {});
+  S.project = d.project;
+  S.revision = d.revision;
+  S.base = clone(d.project);
+  S.history.commit(S.project);
+  S.saved = S.dirty;
+  S.stale.clear();
+  for (const a of S.project.assets) S.stale.set(a.file, Date.now());
+  keepSelection();
+  closeModal();
+  renderEditor();
+  notice("已退回；退回前的内容已自动存了一版");
 }
 function versionDialog() {
   modal(
@@ -634,9 +799,11 @@ function versionDialog() {
   );
   $("#version-form").onsubmit = async (e) => {
     e.preventDefault();
-    await flush();
+    // 备注要在等待之前读出来：等保存完成后 e.currentTarget 已经是空的了
+    const note = e.currentTarget.note.value.trim();
     try {
-      await api(`${path()}/versions`, "POST", { note: e.currentTarget.note.value.trim() });
+      await flush();
+      await api(`${path()}/versions`, "POST", { note });
       closeModal();
       notice("版本已保存");
     } catch (err) {
@@ -678,10 +845,10 @@ function copyDialog() {
   );
   $("#copy-form").onsubmit = async (e) => {
     e.preventDefault();
+    const f = e.currentTarget; // 同上：先取表单，再等待
     try {
       await flush();
-      const f = e.currentTarget,
-        pages = S.project.pages.map((p, i) => (ids.includes(p.id) ? i + 1 : null)).filter(Boolean),
+      const pages = S.project.pages.map((p, i) => (ids.includes(p.id) ? i + 1 : null)).filter(Boolean),
         data = await api(`${path()}/copy`, "POST", { pages, id: f.id.value, name: f.name.value });
       closeModal();
       await open(data.project?.id || f.id.value, data.project ? data : undefined);
@@ -890,18 +1057,37 @@ app.addEventListener("click", async (e) => {
         closeModal();
         notice("已换回默认背景");
         break;
-      case "reference": {
-        const refs = [...S.checked].map((id) => {
-          const i = S.project.pages.findIndex((p) => p.id === id);
-          return `${i + 1}页:${id}`;
-        });
-        if (!refs.length)
-          refs.push(`${S.project.pages.findIndex((p) => p.id === S.pageId) + 1}页:${S.pageId}`);
-        if (S.selected.length) refs.push(...S.selected);
-        await navigator.clipboard.writeText(refs.join(" · "));
+      case "reference":
+        // 带上项目编号和页码，agent 拿到就能找到（例：项目 autumn-deck · 第 3 页（page_intro） · el_title）
+        await navigator.clipboard.writeText(
+          referenceText(S.project, {
+            checkedPageIds: [...S.checked],
+            currentPageId: S.pageId,
+            selectedIds: S.selected,
+          }),
+        );
         notice("引用已复制");
         break;
+      case "brief": {
+        await flush();
+        const { text } = await api(`${path()}/brief`);
+        await navigator.clipboard.writeText(text);
+        notice("已复制，开新的 agent 对话时直接粘贴");
+        break;
       }
+      case "master": {
+        const on = b.dataset.on !== "1";
+        await api(`/api/projects/${encodeURIComponent(id)}/master`, "PUT", { master: on });
+        await home();
+        notice(on ? "已设为系列母版，新建项目时可以选「从母版开始」" : "已取消系列母版");
+        break;
+      }
+      case "restore":
+        restoreDialog(id, b.dataset.note || "");
+        break;
+      case "restore-confirm":
+        await restore(id);
+        break;
       case "play":
         await flush();
         play();
@@ -933,24 +1119,19 @@ app.addEventListener("click", async (e) => {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         break;
       }
-      case "reload": {
-        const d = await api(path());
-        S.project = d.project;
-        S.revision = d.revision;
-        S.history.replace(d.project);
-        S.conflict = false;
-        S.dirty = S.saved = 0;
+      case "conflict-agent": {
+        // 冲突的那几处改用 agent 的版本（同样进撤销记录）
+        const c = S.lastConflict;
+        if (c) {
+          S.project = mergeProjects(c.base, c.local, c.remote, { prefer: "remote" }).merged;
+          S.history.commit(S.project);
+          keepSelection();
+          S.dirty++;
+          schedule();
+          S.lastConflict = null;
+        }
         closeModal();
         renderEditor();
-        break;
-      }
-      case "keep": {
-        const d = await api(path());
-        S.revision = d.revision;
-        S.conflict = false;
-        S.dirty++;
-        closeModal();
-        schedule();
         break;
       }
     }
@@ -1047,21 +1228,6 @@ window.addEventListener("resize", () => {
   if (S.view === "editor") renderBoard();
   else if (S.view === "play") showPage(S.pageId);
 });
-setInterval(async () => {
-  if (S.view !== "editor" || S.dirty !== S.saved || S.saving || S.conflict) return;
-  try {
-    const d = await api(path());
-    if (d.revision !== S.revision) {
-      S.project = d.project;
-      S.revision = d.revision;
-      S.history.replace(d.project);
-      S.selected = [];
-      agentWake();
-      renderEditor();
-      notice("已载入 agent 的最新修改");
-    }
-  } catch {}
-}, 5000);
 home().catch((e) => {
   app.innerHTML = '<div class="startup-error">无法打开工作台，请检查本地服务。</div>';
   notice(e.message);
