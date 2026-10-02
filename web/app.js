@@ -20,9 +20,10 @@ import { mascot } from "./ui/mascot.js";
 import { liven, hop, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
 import {
   syncGlass,
-  hideGlass,
   openModalGlass,
   closeModalGlass,
+  hideGlass,
+  backgroundURL,
   setBackgroundFile,
   resetBackground,
 } from "./ui/glass.js";
@@ -73,9 +74,6 @@ function notice(m) {
   clearTimeout(notice.t);
   notice.t = setTimeout(() => toast.classList.remove("visible"), 3200);
 }
-function btn(a, t, c = "", extra = "") {
-  return `<button class="btn ${c}" data-action="${a}" ${extra}>${t}</button>`;
-}
 // glass：在这个按钮下面垫一块真玻璃（见 ui/glass.js）。"panel" = 直接放在背景上，"control" = 放在别的玻璃上
 function glassAttr(glass) {
   if (!glass) return "";
@@ -97,19 +95,17 @@ function tbtn(a, label, name, cls = "", extra = "") {
 }
 const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group" };
 function shell(active, body) {
-  const glass = active === "editor";
-  document.documentElement.classList.toggle("glass-mode", glass);
+  document.documentElement.classList.add("glass-mode");
   stopLoops();
   closeModalGlass();
-  if (glass) {
-    app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${ibtn("home", "grid", "项目总览")}${ibtn("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
-    return;
-  }
-  hideGlass();
-  app.innerHTML = `<div class="shell"><aside class="rail"><div class="brand-mark">✦</div><button class="rail-btn ${active === "home" ? "active" : ""}" data-action="home" title="项目总览">▦</button><button class="rail-btn ${active === "library" ? "active" : ""}" data-action="library" title="公共素材库">◇</button><div class="rail-spacer"></div><div class="rail-dot">E</div></aside><main class="main">${body}</main></div><div id="modal-root"></div>`;
+  // 左侧导航：当前所在的页面那一格浮起来
+  const nav = (a, name, title) =>
+    `<button class="ed-ibtn ${active === a ? "is-on" : ""}" data-action="${a}" title="${title}" aria-label="${title}" ${active === a ? 'aria-current="page"' : ""}>${icon(name, 18)}</button>`;
+  app.innerHTML = `<div class="ed-shell"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
 }
-function head(name, actions = "") {
-  return `<header class="top"><div><h1>${esc(name)}</h1></div><div class="top-actions">${actions}</div></header>`;
+// 总览页、素材库的顶部：左边页面名直接放在背景上，右边一个白色圆钮
+function head(name, count, action) {
+  return `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(name)}</h1>${count ? `<span class="ed-count ed-count--bg">${count}</span>` : ""}</div><div class="ed-spacer"></div>${action}</header>`;
 }
 function modal(html) {
   $("#modal-root").innerHTML = document.documentElement.classList.contains("glass-mode")
@@ -147,11 +143,20 @@ async function home() {
   S.view = "home";
   S.project = null;
   const list = await api("/api/projects");
+  // 缩略图框是 16:10，作品按自己的比例居中放进去（竖版海报不会被裁）
+  const fit = ({ width, height }) => {
+    const r = width / height / 1.6;
+    return r >= 1 ? `width:100%;height:${100 / r}%` : `width:${100 * r}%;height:100%`;
+  };
+  const card = (item, i) =>
+    `<button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${esc(item.project.artboard.preset)}</span></button>`;
   shell(
     "home",
-    `${head("项目总览页", btn("new", "＋ 新建项目", "primary"))}<div class="overview-head"><div><h2>最近的项目</h2></div><span class="count">${list.length} 个项目</span></div><div class="projects-grid">${list.map((item, i) => `<button class="project-card" data-action="open" data-id="${esc(item.id)}"><div class="project-thumb" data-thumb="${i}"></div><div class="project-info"><span class="project-type">${esc(item.project.artboard.preset)}</span><h3>${esc(item.name)}</h3><p>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</p></div><span class="card-arrow">↗</span></button>`).join("")}<button class="project-card add-card" data-action="new"><span class="add-orb">＋</span><strong>开启新项目</strong></button></div>`,
+    `${head("项目总览", `${list.length} 个项目`, `<button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
+  liven(app);
+  syncGlass(app);
 }
 const presets = [
   ["slide-16x9", "演示文稿", 1920, 1080],
@@ -163,7 +168,7 @@ const presets = [
 ];
 function newDialog() {
   modal(
-    `<p class="eyebrow">NEW PROJECT</p><h2>新建项目</h2><p class="muted">选择画板尺寸，开始一份新的设计。</p><form id="new-form"><label>项目名称<input name="name" required maxlength="200" placeholder="例如：秋季课程提案" autofocus></label><label>画板类型<select name="preset">${presets.map((p) => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join("")}</select></label><div class="field-row"><label>宽度<input name="width" type="number" min="1" value="1920" required></label><label>高度<input name="height" type="number" min="1" value="1080" required></label></div><div class="modal-actions">${btn("close", "取消")}<button class="btn primary" type="submit">创建项目</button></div></form>`,
+    `<h2>新建项目</h2><form id="new-form"><label class="g-field g-field--stack"><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：秋季课程提案" autofocus></label><label class="g-field g-field--stack"><span>画板类型</span><select name="preset">${presets.map((p) => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join("")}</select></label><div class="g-sheet__pair"><label class="g-field g-field--stack"><span>宽度</span><input name="width" type="number" min="1" value="1920" required></label><label class="g-field g-field--stack"><span>高度</span><input name="height" type="number" min="1" value="1080" required></label></div><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("plus", 17)}创建项目</button></div></form>`,
   );
   const f = $("#new-form");
   f.preset.onchange = () => {
@@ -601,10 +606,14 @@ async function library() {
   await flush();
   S.view = "library";
   const assets = await api("/api/library");
+  const card = (a) =>
+    `<div class="hm-card hm-card--asset"><div class="hm-card__thumb hm-card__thumb--asset"><img src="${esc(a.url)}" alt="${esc(a.name)}" loading="lazy"></div><div class="hm-card__info"><strong>${esc(a.name)}</strong><small>${a.width} × ${a.height}</small></div></div>`;
   shell(
     "library",
-    `${head("公共素材库", btn("upload-library", "⇧ 上传素材", "primary"))}<div class="overview-head"><div><h2>随时取用的灵感</h2><p>公共素材会在使用时复制到项目中。</p></div><span class="count">${assets.length} 个素材</span></div><div class="library-grid">${assets.map((a) => `<div class="library-card"><img src="${esc(a.url)}" alt="${esc(a.name)}"><div><strong>${esc(a.name)}</strong><small>${a.width} × ${a.height}</small></div></div>`).join("")}</div>`,
+    `${head("公共素材库", `${assets.length} 个素材`, `<button class="ed-play" data-action="upload-library">${icon("upload", 15)}<span>上传素材</span></button>`)}<section class="hm-panel" ${glassAttr("library:panel")} data-glass-frost><div class="hm-scroll ed-scroll">${assets.length ? `<div class="hm-grid hm-grid--assets">${assets.map(card).join("")}</div>` : `<p class="hm-empty">还没有素材</p>`}</div></section>`,
   );
+  liven(app);
+  syncGlass(app);
 }
 async function browseLibrary() {
   S.libraryChoices = await api("/api/library");
@@ -681,23 +690,29 @@ function copyDialog() {
     }
   };
 }
+// 放映：作品画面不透明，四周铺背景图；下面一条磨砂白控制条（加载画面结束后才出现）。
+// 放映会进全屏，全屏画面里看不到玻璃层，所以背景图直接铺在放映画面上，控制条用 CSS 磨砂
 function play() {
   S.view = "play";
   stopLoops();
+  closeModalGlass();
   hideGlass();
-  app.innerHTML = `<div class="player g-player"><div id="player-stage"></div><div class="g-player-bar"><button data-action="stop">${icon("arrowLeft", 16)}返回编辑</button><span class="g-player-bar__page">${esc(S.project.name)}<b id="player-page"></b></span><button class="is-round" data-action="prev" title="上一页" aria-label="上一页">${icon("chevronLeft", 18)}</button><button class="is-round" data-action="next" title="下一页" aria-label="下一页">${icon("chevronRight", 18)}</button></div></div>`;
+  app.innerHTML = `<div class="player g-player" style="--g-player-bg: url('${backgroundURL()}')"><div id="player-stage"></div><div class="g-player-bar" hidden>${tbtn("stop", "返回编辑", "arrowLeft")}<span class="ed-sep"></span><span class="g-player-bar__page">${esc(S.project.name)}<b id="player-page"></b></span><button class="ed-add" data-action="prev" title="上一页" aria-label="上一页">${icon("chevronLeft", 16)}</button><button class="ed-add" data-action="next" title="下一页" aria-label="下一页">${icon("chevronRight", 16)}</button></div></div>`;
   playLoader(() => showPage(S.pageId));
 }
 // 放映开始前的加载画面（约 1 秒）；期间按键不生效，按 Esc 直接退出
 function playLoader(done) {
   const el = document.createElement("div");
   el.className = "g-loader";
-  el.innerHTML = `<div class="g-loader__stage"><span class="g-loader__halo"></span></div><span>准备放映</span>`;
+  el.innerHTML = `<div class="g-loader__stage"><span class="g-loader__halo"></span><span class="g-disc-badge g-disc-badge--lg">${mascot({ size: 46, disc: true })}</span></div><span>准备放映</span>`;
   $(".player").append(el);
+  liven(el);
   const loops = loaderLoop(el);
   const finish = () => {
     clearTimeout(timer);
     window.removeEventListener("keydown", block, true);
+    const bar = $(".g-player-bar");
+    if (bar) bar.hidden = false;
     fadeOut(el, () => {
       loops.forEach((a) => a.cancel());
       el.remove();

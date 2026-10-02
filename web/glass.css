@@ -693,7 +693,7 @@ html.glass-mode #toast {
   transform-origin: 50% 50%;
 }
 
-/* ---------- 放映前的加载画面 ---------- */
+/* ---------- 放映前的加载画面：背景图上一个小兔白色圆钮，外面一圈淡淡的光转着 ---------- */
 .g-loader {
   position: fixed;
   inset: 0;
@@ -701,16 +701,19 @@ html.glass-mode #toast {
   display: grid;
   place-items: center;
   align-content: center;
-  gap: 20px;
-  background: #121214;
-  color: rgba(255, 255, 255, 0.75);
-  font: 600 13px/1 var(--g-font);
+  gap: 22px;
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--g-ink-3);
+  font: 600 12.5px/1 var(--g-font);
   letter-spacing: 0.04em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 .g-loader__stage {
   position: relative;
-  width: 56px;
-  height: 56px;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
 }
 .g-loader__halo {
   position: absolute;
@@ -718,70 +721,84 @@ html.glass-mode #toast {
   border-radius: 50%;
   background: conic-gradient(
     from 0deg,
-    rgba(var(--g-pink-rgb), 0),
-    rgba(var(--g-pink-rgb), 0.9),
-    rgba(var(--g-violet-rgb), 1),
-    rgba(var(--g-blue-rgb), 1)
+    rgba(213, 238, 250, 0),
+    rgba(213, 238, 250, 0.95),
+    rgba(250, 222, 245, 0.95),
+    rgba(250, 222, 245, 0)
   );
-  -webkit-mask: radial-gradient(circle, transparent 60%, #000 62%);
-  mask: radial-gradient(circle, transparent 60%, #000 62%);
+  -webkit-mask: radial-gradient(circle, transparent 62%, #000 64%, #000 70%, transparent 72%);
+  mask: radial-gradient(circle, transparent 62%, #000 64%, #000 70%, transparent 72%);
+  filter: blur(1.5px);
 }
 
-/* ---------- 放映控制条（深色画面上的玻璃） ---------- */
-.g-player {
-  background: #121214 !important;
+/* ---------- 放映：作品四周铺背景图（和其他页面一样蒙一层白纱），控制条是磨砂白 ---------- */
+/* 放映会进全屏，全屏里看不到玻璃层，所以背景图直接铺在放映画面上 */
+html.glass-mode .g-player {
+  position: relative;
+  z-index: 1;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.22)),
+    var(--g-player-bg, none) center / cover no-repeat,
+    #e9ebef !important;
 }
-.g-player-bar {
+/* 作品画面本身不透明，只给一圈柔和的投影 */
+html.glass-mode .g-player #player-stage {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.5),
+    4px 18px 40px -16px rgba(60, 52, 92, 0.45);
+}
+.g-player-bar,
+html.glass-mode .g-player-bar {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  bottom: 16px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 52px;
-  padding: 0 8px;
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.86);
+  gap: 4px;
+  height: 48px;
+  padding: 0 8px 0 6px;
+  border-radius: 24px;
+  color: var(--g-ink-2);
   font: 600 12.5px/1 var(--g-font);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06));
+  background: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: blur(18px) saturate(0.7);
+  backdrop-filter: blur(18px) saturate(0.7);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 20px 40px -18px rgba(0, 0, 0, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    2px 10px 18px -8px rgba(60, 52, 92, 0.34);
 }
-.g-player-bar button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.9);
-  font: inherit;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-  cursor: pointer;
-  transition: background 0.18s ease;
+.g-player-bar[hidden] {
+  display: none !important;
 }
-.g-player-bar button:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-.g-player-bar .is-round {
-  width: 36px;
-  padding: 0;
-  justify-content: center;
+.g-player-bar .ed-add {
+  margin-left: 4px;
 }
 .g-player-bar__page {
-  padding: 0 10px;
-  color: rgba(255, 255, 255, 0.6);
+  padding: 0 8px 0 4px;
+  color: var(--g-ink-3);
   white-space: nowrap;
 }
 .g-player-bar__page b {
-  color: #fff;
-  font-weight: 650;
-  margin-left: 6px;
+  margin-left: 8px;
+  color: var(--g-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 打开失败时的提示 ---------- */
+html.glass-mode .startup-error {
+  width: fit-content;
+  margin: 30vh auto 0;
+  padding: 16px 22px;
+  border-radius: 16px;
+  color: var(--g-ink-2);
+  font: 600 13px/1.4 var(--g-font);
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    3px 10px 22px -10px rgba(60, 52, 92, 0.4);
 }
 
 /* =====================================================================
@@ -1394,10 +1411,198 @@ html.glass-mode .resize-handle {
   .ed-grid {
     grid-template-columns: 212px minmax(0, 1fr) 264px;
   }
-  .ed-agent > span {
+  .ed-agent > span:not(.g-disc-badge) {
     display: none;
+  }
+  .ed-agent {
+    padding-right: 3px;
   }
   .ed-bar .ed-tbtn span {
     display: none;
   }
+}
+
+/* =====================================================================
+ * 其他页面：项目总览、公共素材库（hm-）—— 和编辑器同一套：
+ * 左侧同一条导航，顶部页面名放在背景上 + 白色圆钮，下面一整块磨砂白玻璃，
+ * 卡片不垫玻璃，缩略图是作品本身（不透明）
+ * ===================================================================== */
+/* 左侧导航：当前所在的页面那一格浮起来 */
+.ed-ibtn.is-on {
+  color: var(--g-ink);
+  background: var(--g-raised);
+  box-shadow: var(--g-raised-edge);
+}
+.ed-count--bg {
+  color: var(--g-ink-3);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.hm-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 26px;
+  overflow: hidden;
+}
+.hm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.hm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 16px;
+}
+.hm-grid--assets {
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+}
+.hm-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 8px 12px;
+  border: 0;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: var(--g-raised-edge);
+  color: var(--g-ink);
+  font: inherit;
+  text-align: left;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+button.hm-card {
+  cursor: pointer;
+}
+button.hm-card:hover {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.85),
+    3px 10px 18px -10px rgba(60, 52, 92, 0.42);
+  transform: translateY(-2px);
+}
+button.hm-card:active {
+  transform: translateY(0) scale(0.99);
+}
+.hm-card:focus-visible {
+  outline: 2px solid var(--g-focus);
+  outline-offset: 2px;
+}
+/* 缩略图框：中性灰底；里面的作品不透明 */
+.hm-card__thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #e3e4e8;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.6),
+    1px 4px 8px -4px rgba(60, 52, 92, 0.35);
+}
+.hm-card__art {
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(60, 52, 92, 0.06);
+}
+.hm-card__art .miniature {
+  width: 100%;
+  height: 100%;
+}
+.hm-card__thumb--asset {
+  position: relative;
+}
+.hm-card__thumb--asset img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.hm-card__info {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 6px;
+}
+.hm-card__info strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.hm-card__info small {
+  color: var(--g-ink-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.hm-card__tag {
+  position: absolute;
+  right: 14px;
+  bottom: 13px;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 3px 7px;
+  border-radius: 6px;
+  color: var(--g-ink-3);
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+/* 新建项目：和卡片一样大，中间一个白色小圆钮 */
+.hm-card--add {
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  min-height: 200px;
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  color: var(--g-ink-3);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.hm-card--add .ed-add {
+  width: 44px;
+  height: 44px;
+  pointer-events: none;
+}
+button.hm-card--add:hover {
+  color: var(--g-ink-2);
+}
+.hm-empty {
+  margin: 40px 0;
+  text-align: center;
+  color: var(--g-ink-3);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* ---------- 弹窗里并排的两个输入框（宽度、高度） ---------- */
+.g-sheet__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.g-sheet__pair .g-field--stack > span {
+  min-width: 0;
+}
+.g-sheet__pair input {
+  width: 100%;
+}
+.g-field input[type="number"] {
+  -moz-appearance: textfield;
 }
