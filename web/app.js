@@ -1,5 +1,6 @@
 import { renderPage } from "./render.js";
-import { createPlayback } from "./playback.js";
+import { showMotionPage } from "./motion-stage.js";
+import { mountMotionStatus } from "./motion-status.js";
 import {
   clone,
   uid,
@@ -263,6 +264,7 @@ function renderEditor() {
     `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span></div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>`,
   );
   renderBoard();
+  mountMotionStatus(S.project, base(), $(".ed-toolbar"));
   S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
   bindDrag();
   decorateEditor();
@@ -730,35 +732,16 @@ function playLoader(done) {
   }, 1100);
 }
 function showPage(id) {
-  S.playback?.destroy();
-  S.pageId = id;
-  const p = page(),
-    stage = $("#player-stage");
-  stage.replaceChildren();
-  const board = renderPage(S.project, p, { assetBase: base() });
-  stage.append(board);
-  const scale = Math.min(
-    innerWidth / S.project.artboard.width,
-    (innerHeight - 90) / S.project.artboard.height,
-  );
-  board.style.transform = `scale(${scale})`;
-  board.style.transformOrigin = "top left";
-  stage.style.width = `${S.project.artboard.width * scale}px`;
-  stage.style.height = `${S.project.artboard.height * scale}px`;
-  $("#player-page").textContent = `${S.project.pages.indexOf(p) + 1} / ${S.project.pages.length}`;
-  S.playback = createPlayback(S.project, p, { root: board });
-  S.playback.start();
-  stage.onclick = () => {
-    if (S.playback.isPlaying()) return;
-    advancePlay();
-  };
+  showMotionPage(S, id, { stage: $("#player-stage"), label: $("#player-page"), assetBase: base(), onError: error => notice(`动效错误：${error.message}`) });
+  $("#player-stage").onclick = advancePlay;
 }
 function advancePlay() {
-  if (S.playback?.isPlaying()) return;
-  if (S.playback?.getState().nextStep < page().steps.length) S.playback.next();
+  if (S.motionChanging || S.playback?.isPlaying()) return;
+  if (S.playback?.getState().nextStep < (page().motion?.steps || 0)) S.playback.next();
   else nextPage();
 }
 function nextPage(delta = 1) {
+  if (S.motionChanging || S.playback?.isPlaying()) return;
   const n = S.project.pages.findIndex((p) => p.id === S.pageId) + delta;
   if (n >= 0 && n < S.project.pages.length) showPage(S.project.pages[n].id);
   else notice("已经是最后一页");
@@ -830,7 +813,6 @@ app.addEventListener("click", async (e) => {
           name: `页面 ${S.project.pages.length + 1}`,
           background: "#ffffff",
           elements: [],
-          steps: [],
         });
         S.pageId = S.project.pages.at(-1).id;
         changed();

@@ -34,7 +34,6 @@ export function deleteElements(page, ids) {
   const removed = new Set();
   const collect = element => { removed.add(element.id); element.children?.forEach(collect); };
   ids.forEach(id => { const found = findElement(page, id); if (!found || !editable(page, id)) return; collect(found.element); found.items.splice(found.index, 1); });
-  page.steps = page.steps.map(step => ({ ...step, tracks: step.tracks.filter(track => !removed.has(track.target)) })).filter(step => step.tracks.length);
   return removed;
 }
 export function reorderPages(project, selectedPageId, from, to) {

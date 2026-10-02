@@ -279,9 +279,10 @@ export default async function (ctx) {
 | `ctx.signal` | `AbortSignal`；翻页、重置时终止，用于清理异步工作。 |
 | `ctx.animate(node, keyframes, options)` | 基于浏览器动画 API 播放并返回 `Animation.finished` 的 Promise；工作台登记动画并在终止时取消。 |
 | `ctx.timer(ms)` | 等待毫秒数，终止时拒绝 Promise。 |
+| `ctx.importModule(path)` | 导入同源本地绝对路径模块，例如 `/vendor/anime.esm.min.js`，返回模块对象。 |
 | `ctx.assetUrl(file)` | 将本项目 `assets/` 或 `fonts/` 中的相对文件路径转为本地 URL。 |
 
-动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可 `import` 已存放在本地的现成库，例如绝对 URL `'/vendor/anime.esm.min.js'`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此**相对 import 不支持**。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/` 后通过绝对 URL 导入；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。
+动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可导入本地现成库，例如 `await ctx.importModule('/vendor/anime.esm.min.js')`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此相对路径及 `/vendor/...` 这样的根路径直接 import 不支持；用 `ctx.importModule` 解析同源本地路径，或 import 完整的本地 HTTP URL。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/`；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。
 
 ### 9.3 从エイ 修改后的状态出发
 
@@ -291,7 +292,11 @@ export default async function (ctx) {
 
 ### 9.4 检查
 
+首次运行真实浏览器检查或完整测试，先 `npm ci`、`npx playwright install chromium`（Linux CI 用 `--with-deps`）。每个阶段默认上限 5 秒，CLI 总上限 120 秒。
+
 改完先运行 `npm run validate -- <项目>` 检查项目结构、编号、素材与字体引用，再运行 `npm run check-motion -- <项目>`。后者会实际打开每一页，初始化模块，按顺序执行所有步骤和换页效果，报告语法、导出、运行时及元素查找错误。工作台打开项目时也会提示检查失败的页面。检查通过能发现代码错误；视觉节奏和画面效果仍需在放映中预览。
+
+检查还会在移动、尺寸及样式变体上重跑所有页，覆盖双向换页与清理；不能证明任意代码没有写死坐标。模块是受信任的本地 agent 代码，检查 iframe 只隔离画板，不是恶意代码沙箱；同步无限循环可能卡住工作台，CLI 独立浏览器可由总时限退出。
 
 ## 10. 版本
 

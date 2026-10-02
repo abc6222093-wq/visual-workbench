@@ -13,9 +13,13 @@
     "test": "node --test \"test/**/*.test.js\"",
     "init-data": "node src/cli/init-data.js",
     "save-version": "node src/cli/save-version.js",
-    "copy-pages": "node src/cli/copy-pages.js"
+    "copy-pages": "node src/cli/copy-pages.js",
+    "check-motion": "node src/cli/check-motion.js"
   },
   "dependencies": {
     "ajv": "^8.17.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
   }
 }
