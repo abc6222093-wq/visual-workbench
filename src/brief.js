@@ -50,6 +50,9 @@ export function agentBrief({ repoDir, dataDir, projectDir, project }) {
     const series = readJson(seriesFile);
     const master = series && typeof series.master === 'string' && series.master ? series.master : '（未知）';
     lines.push(`- 这个项目来自系列母版 ${master}，配色见 ${seriesFile}`);
+    if (series && Array.isArray(series.motions) && series.motions.length) {
+      lines.push(`- 系列的动效代码在 ${seriesFile} 的 motions 里（按母版页面列出），排新页面时照着复用`);
+    }
   }
 
   lines.push(
