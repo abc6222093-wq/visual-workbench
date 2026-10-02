@@ -16,7 +16,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { PROJECT_LAYOUT } from './data-dir.js';
 import { validateProject } from './validate.js';
 
@@ -26,6 +26,12 @@ const pad = (n) => String(n).padStart(2, '0');
 const OBJECTS = '.objects';
 /** 版本目录名格式：YYYYMMDD-HHMMSS，同秒冲突时带 -2、-3…… */
 const VERSION_ID = /^[0-9]{8}-[0-9]{6}(-[0-9]+)?$/;
+/** 退回前自动存档最多保留的个数。 */
+export const AUTO_BACKUP_KEEP = 10;
+const AUTO_KIND = 'before-restore';
+const AUTO_NOTE_PREFIX = '退回前自动存档';
+/** 对象仓库里遗留临时文件的清理年龄（毫秒）。 */
+const STALE_TMP_MS = 60 * 60 * 1000;
 /** 版本说明文件，不属于项目内容。 */
 const META = 'meta.json';
 /** 硬链接失败时退回复制的错误码。 */
@@ -85,7 +91,7 @@ function putObject(objectsDir, hash, data) {
  * 存一个版本。
  * @returns {{versionDir: string, meta: object}}
  */
-export function saveVersion({ projectDir, note = '', by = 'agent' }) {
+export function saveVersion({ projectDir, note = '', by = 'agent', auto }) {
   const projectFile = join(projectDir, PROJECT_LAYOUT.file);
   if (!existsSync(projectFile)) throw new Error(`找不到项目文件：${projectFile}`);
   const project = JSON.parse(readFileSync(projectFile, 'utf8'));
@@ -134,6 +140,7 @@ export function saveVersion({ projectDir, note = '', by = 'agent' }) {
     projectName: project.name,
     files,
     objects,
+    ...(auto ? { auto } : {}),
   };
   writeFileSync(join(versionDir, META), JSON.stringify(meta, null, 2) + '\n');
   return { versionDir, meta };
@@ -222,7 +229,7 @@ export function restoreVersion({ projectDir, versionId, by = 'user' }) {
     throw new Error(`版本 ${versionId} 校验未通过，未做任何改动：${detail}`);
   }
 
-  const backup = saveVersion({ projectDir, note: `退回前自动存档（退回到 ${versionId}）`, by: 'system' });
+  const backup = saveVersion({ projectDir, note: `${AUTO_NOTE_PREFIX}（退回到 ${versionId}）`, by: 'system', auto: AUTO_KIND });
 
   // 版本里的文件：目录里实际存在的普通文件（除 meta.json），旧格式版本也适用
   const files = orderFiles(listFiles(versionDir, versionDir, [META]));
@@ -241,5 +248,123 @@ export function restoreVersion({ projectDir, versionId, by = 'user' }) {
   // 3. 最后原子替换 project.json
   copyInto(join(versionDir, PROJECT_LAYOUT.file), join(projectDir, PROJECT_LAYOUT.file), 'project');
 
+  // 4. 只保留最近 AUTO_BACKUP_KEEP 个自动存档，多出的删掉并回收空间（此时退回已完成，删旧存档是安全的）
+  pruneAutoBackups(projectDir);
+
   return { backup, restoredFrom: versionDir, files };
+}
+
+/** 读版本的 meta.json，缺失或损坏返回 null。 */
+function readMeta(versionDir) {
+  try {
+    return JSON.parse(readFileSync(join(versionDir, META), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** 版本编号排序键：时间戳部分按字符串，同秒序号按数字（避免 -10 排在 -2 前面）。 */
+function versionKey(id) {
+  const m = /^(\d{8}-\d{6})(?:-(\d+))?$/.exec(id);
+  return m ? [m[1], Number(m[2] || 1)] : [id, 0];
+}
+function compareVersionIds(a, b) {
+  const [ta, na] = versionKey(a);
+  const [tb, nb] = versionKey(b);
+  return ta < tb ? -1 : ta > tb ? 1 : na - nb;
+}
+
+/** 是否「退回前自动存档」：新的带 auto 字段；旧的靠 by === 'system' 加说明前缀。 */
+function isAutoBackup(meta) {
+  if (!meta || meta.by !== 'system') return false;
+  return meta.auto === AUTO_KIND || (typeof meta.note === 'string' && meta.note.startsWith(AUTO_NOTE_PREFIX));
+}
+
+/**
+ * 回收对象仓库里没有任何版本引用的对象。
+ * 被引用 = 剩余版本 meta.objects 里出现的哈希；另外硬链接数 > 1 的对象一律不删（兼容旧版本或异常情况）。
+ * 只动 versions/.objects/ 内部。
+ * @returns {{freedBytes: number, removedObjects: string[]}}
+ */
+export function collectGarbage({ projectDir }) {
+  const objectsDir = join(projectDir, PROJECT_LAYOUT.versions, OBJECTS);
+  const result = { freedBytes: 0, removedObjects: [] };
+  if (!existsSync(objectsDir)) return result;
+
+  const referenced = new Set();
+  for (const v of listVersions(projectDir)) {
+    const meta = readMeta(v);
+    if (meta?.objects && typeof meta.objects === 'object') {
+      for (const h of Object.values(meta.objects)) referenced.add(h);
+    }
+  }
+
+  const now = Date.now();
+  for (const ent of readdirSync(objectsDir, { withFileTypes: true })) {
+    if (!ent.isFile()) continue;
+    const abs = join(objectsDir, ent.name);
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      continue;
+    }
+    if (ent.name.endsWith('.tmp') && ent.name.startsWith('.')) {
+      // 写到一半遗留的临时文件：超过一小时才清，避免误删正在写的
+      if (now - st.mtimeMs > STALE_TMP_MS) {
+        rmSync(abs, { force: true });
+        result.freedBytes += st.size;
+      }
+      continue;
+    }
+    if (referenced.has(ent.name) || st.nlink > 1) continue;
+    rmSync(abs, { force: true });
+    result.freedBytes += st.size;
+    result.removedObjects.push(ent.name);
+  }
+  return result;
+}
+
+/** 校验版本编号并返回版本目录；编号不合法时抛中文错误。 */
+function versionDirOf(projectDir, versionId) {
+  if (typeof versionId !== 'string' || !VERSION_ID.test(versionId)) {
+    throw new Error(`版本编号不合法：${versionId}（应为 YYYYMMDD-HHMMSS 或 YYYYMMDD-HHMMSS-N）`);
+  }
+  return join(projectDir, PROJECT_LAYOUT.versions, versionId);
+}
+
+/**
+ * 删除一个版本，并回收不再被引用的对象。
+ * @returns {{removed: string, freedBytes: number, removedObjects: string[]}}
+ */
+export function deleteVersion({ projectDir, versionId }) {
+  const dir = versionDirOf(projectDir, versionId);
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`找不到版本：${versionId}`);
+  // 版本目录里的文件可能是只读对象的硬链接，rm 只删目录项，不影响对象本身
+  let freedBytes = 0;
+  rmSync(dir, { recursive: true, force: true });
+  const gc = collectGarbage({ projectDir });
+  freedBytes += gc.freedBytes;
+  return { removed: versionId, freedBytes, removedObjects: gc.removedObjects };
+}
+
+/** 自动存档只留最近 AUTO_BACKUP_KEEP 个，更早的删掉（用户和 agent 存的版本不动），再回收空间。 */
+function pruneAutoBackups(projectDir) {
+  const autos = listVersions(projectDir)
+    .map((v) => ({ id: basename(v), dir: v, meta: readMeta(v) }))
+    .filter((v) => isAutoBackup(v.meta))
+    // 编号删除后会被复用，不能只按编号判断新旧：先比存档时间（ISO，可直接比字符串），相同再比编号
+    .sort((a, b) => {
+      const ta = String(a.meta.savedAt || '');
+      const tb = String(b.meta.savedAt || '');
+      if (ta !== tb) return ta < tb ? -1 : 1;
+      // 同一毫秒内存的：比 meta.json 的纳秒级修改时间，最后才比编号
+      const na = statSync(join(a.dir, META), { bigint: true }).mtimeNs;
+      const nb = statSync(join(b.dir, META), { bigint: true }).mtimeNs;
+      return na < nb ? -1 : na > nb ? 1 : compareVersionIds(a.id, b.id);
+    });
+  const excess = autos.slice(0, Math.max(0, autos.length - AUTO_BACKUP_KEEP));
+  for (const v of excess) rmSync(v.dir, { recursive: true, force: true });
+  collectGarbage({ projectDir });
+  return excess.map((v) => v.id);
 }
