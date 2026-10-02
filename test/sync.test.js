@@ -149,16 +149,16 @@ test('エイ 拖动页面顺序、agent 改某页内容：顺序按 エイ 的�
   assert.deepEqual(conflicts, []);
 });
 
-test('agent 改动效 steps、エイ 改同页元素位置：都在', () => {
+test('agent 改动效代码、エイ 改同页元素位置：都在', () => {
   const [base, local, remote] = trio();
-  const steps = pageOf(remote, 'page_scene2').steps;
-  steps[0].tracks[0].duration = 1200;
-  steps.push({ id: 'step_agent_new', name: '新动效', trigger: 'click', tracks: [{ target: 'el_caption2', duration: 300, change: { appear: true } }] });
+  const motion = pageOf(remote, 'page_scene2').motion;
+  motion.source = motion.source + '\n// agent 新加的一行';
+  motion.steps += 1;
   Object.assign(el(local, 'page_scene2', 'el_photo2'), { x: 300, y: 260 });
   const { merged, conflicts } = mergeProjects(base, local, remote);
   const page = pageOf(merged, 'page_scene2');
-  assert.equal(page.steps[0].tracks[0].duration, 1200);
-  assert.equal(page.steps.at(-1).id, 'step_agent_new');
+  assert.equal(page.motion.source, motion.source);
+  assert.equal(page.motion.steps, motion.steps);
   assert.equal(el(merged, 'page_scene2', 'el_photo2').x, 300);
   assert.equal(el(merged, 'page_scene2', 'el_photo2').y, 260);
   assert.deepEqual(conflicts, []);

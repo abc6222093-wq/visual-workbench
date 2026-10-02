@@ -27,7 +27,6 @@ function findElement(data, id) {
   assert.ok(found, `示例里应有元素 ${id}`);
   return found;
 }
-const findStep = (data, stepId) => data.pages.flatMap((p) => p.steps).find((s) => s.id === stepId);
 
 /** 断言改坏后的数据校验失败且含指定错误码 */
 function assertFails(bad, code) {
@@ -50,10 +49,10 @@ test('formatResult：通过的结果以 ✓ 开头，未通过的以 ✗ 开头�
   assert.match(text, /\[INVALID_JSON\]/);
 });
 
-test('错误码共 9 种，且每种在下面都有失败样例', () => {
+test('格式校验的错误码', () => {
   assert.deepEqual(Object.keys(ERROR_CODES).sort(), [
-    'DUPLICATE_ID', 'INVALID_JSON', 'MISSING_ASSET_FILE', 'MISSING_FONT_FILE', 'RELATIVE_ONLY',
-    'SCHEMA', 'UNKNOWN_ANIMATION_TARGET', 'UNKNOWN_ASSET_REF', 'UNKNOWN_FONT_REF',
+    'DUPLICATE_ID', 'INVALID_JSON', 'MISSING_ASSET_FILE', 'MISSING_FONT_FILE',
+    'SCHEMA', 'UNKNOWN_ASSET_REF', 'UNKNOWN_FONT_REF',
   ]);
 });
 
@@ -115,56 +114,44 @@ test('UNKNOWN_FONT_REF：文字元素引用了不存在的字体', () => {
   assertFails(bad, ERROR_CODES.UNKNOWN_FONT_REF);
 });
 
-test('UNKNOWN_ANIMATION_TARGET：动效指向不存在的元素', () => {
-  const bad = loadSample();
-  findStep(bad, 'step_cover_in').tracks[0].target = 'el_ghost';
-  assertFails(bad, ERROR_CODES.UNKNOWN_ANIMATION_TARGET);
+test('新动效格式允许每页内嵌任意模块代码，不限制效果种类', () => {
+  const data = loadSample();
+  data.pages[0].motion = {
+    steps: 2,
+    source: 'export default async function(ctx) { return { async step(index) { if (index === 0) await ctx.timer(1); } }; }',
+  };
+  assert.equal(check(data).ok, true, formatResult(check(data)));
 });
 
-test('UNKNOWN_ANIMATION_TARGET：动效指向别的页面的元素也不行', () => {
+test('旧 page.steps 和固定轨道写法不再接受', () => {
   const bad = loadSample();
-  findStep(bad, 'step_cover_in').tracks[0].target = 'el_marker2'; // 在第 2 页
-  assertFails(bad, ERROR_CODES.UNKNOWN_ANIMATION_TARGET);
+  delete bad.pages[0].motion;
+  bad.pages[0].steps = [{ id: 'step_old1', trigger: 'click', tracks: [] }];
+  assertFails(bad, ERROR_CODES.SCHEMA);
 });
 
-test('RELATIVE_ONLY：x 写成 {to: 100}（绝对位置）', () => {
-  const bad = loadSample();
-  findStep(bad, 'step_cover_in').tracks[0].change.x = { to: 100 };
-  assertFails(bad, ERROR_CODES.RELATIVE_ONLY);
+test('动效 steps 必须是非负整数且 source 不能为空', () => {
+  for (const value of [-1, 1.5, '2']) {
+    const bad = loadSample();
+    bad.pages[0].motion = { steps: value, source: 'export default () => ({})' };
+    assertFails(bad, ERROR_CODES.SCHEMA);
+  }
+  const empty = loadSample();
+  empty.pages[0].motion = { steps: 0, source: '' };
+  assertFails(empty, ERROR_CODES.SCHEMA);
 });
 
-test('RELATIVE_ONLY：x 直接写数字也不行', () => {
-  const bad = loadSample();
-  findStep(bad, 'step_cover_in').tracks[0].change.x = 100;
-  assertFails(bad, ERROR_CODES.RELATIVE_ONLY);
-});
-
-test('RELATIVE_ONLY：scale 写成 {by: 1}（应为 times）', () => {
-  const bad = loadSample();
-  findStep(bad, 'step_scene_push1').tracks[0].change.scale = { by: 1 };
-  assertFails(bad, ERROR_CODES.RELATIVE_ONLY);
-});
-
-test('RELATIVE_ONLY：滤镜写成 {to: 1}（应为 by）', () => {
-  const bad = loadSample();
-  findStep(bad, 'step_scene_gray').tracks[0].change.filters = { grayscale: { to: 1 } };
-  assertFails(bad, ERROR_CODES.RELATIVE_ONLY);
-});
-
-test('位置修改不影响动效：改元素 x/y/width 后校验仍通过，pages[].steps 原样不变', () => {
+test('位置和外观修改后，内嵌动效源码保持原样', () => {
   const original = loadSample();
   const edited = structuredClone(original);
-
   const marker = findElement(edited, 'el_marker2');
   marker.x = 300;
   marker.y = 300;
-  findElement(edited, 'el_title1').width = 1200;
-
+  marker.width += 30;
+  findElement(edited, 'el_title1').color = '#ef4444';
   const result = check(edited);
   assert.equal(result.ok, true, formatResult(result));
-  assert.deepEqual(edited.pages.map((p) => p.steps), original.pages.map((p) => p.steps));
-  // 确认真的改过了
-  assert.notDeepEqual(edited.pages, original.pages);
+  assert.deepEqual(edited.pages.map((p) => p.motion), original.pages.map((p) => p.motion));
 });
 
 test('命令行：无参数校验 examples/，退出码 0 且输出含 ✓', () => {

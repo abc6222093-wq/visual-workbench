@@ -99,7 +99,7 @@ test('setMaster：保留状态文件里的未知字段', () => {
 });
 
 test('blankPage：默认白底空白页，可传入背景', () => {
-  assert.deepEqual(blankPage(), { id: 'page_first', name: '第 1 页', background: '#ffffff', elements: [], steps: [] });
+  assert.deepEqual(blankPage(), { id: 'page_first', name: '第 1 页', background: '#ffffff', elements: [] });
   assert.equal(blankPage('#000000').background, '#000000');
 });
 
@@ -124,7 +124,7 @@ test('createFromMaster：新项目校验通过，只有一页空白页，背景�
     assert.deepEqual(p.artboard, master.artboard);
     assert.equal(p.pages.length, 1);
     assert.deepEqual(p.pages[0].elements, []);
-    assert.deepEqual(p.pages[0].steps, []);
+    assert.equal(p.pages[0].motion, undefined); // 格式 v2：空白页没有动效
     assert.deepEqual(p.pages[0].background, master.pages[0].background);
     for (const d of ['assets', 'fonts', 'versions']) assert.ok(existsSync(join(r.destProjectDir, d)), `${d}/ 应存在`);
   });
@@ -162,7 +162,7 @@ test('createFromMaster：复制动效代码等附属文件，不复制 versions/
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
     const r = create(tmp, masterDir);
-    assert.deepEqual(r.copiedExtra, ['code/intro.js', 'motion/a/b.js']);
+    assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); // README.md 来自示例项目，也是附属文件
     for (const rel of r.copiedExtra) {
       assert.deepEqual(readFileSync(join(r.destProjectDir, rel)), readFileSync(join(masterDir, rel)), `${rel} 应一致`);
     }
@@ -177,7 +177,7 @@ test('createFromMaster：附属文件里的符号链接被跳过', () => {
     symlinkSync(join(masterDir, 'code', 'intro.js'), join(masterDir, 'code', 'link.js'));
     symlinkSync(join(masterDir, 'motion'), join(masterDir, 'motion-link'));
     const r = create(tmp, masterDir);
-    assert.deepEqual(r.copiedExtra, ['code/intro.js', 'motion/a/b.js']);
+    assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); // README.md 来自示例项目，也是附属文件
     assert.equal(existsSync(join(r.destProjectDir, 'code', 'link.js')), false);
     assert.equal(existsSync(join(r.destProjectDir, 'motion-link')), false);
   });

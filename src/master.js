@@ -77,7 +77,7 @@ export function setMaster(dataDir, projectId, on) {
 
 /** 新项目的空白第 1 页（服务器新建项目、从母版新建都用它）。 */
 export function blankPage(background = '#ffffff') {
-  return { id: 'page_first', name: '第 1 页', background, elements: [], steps: [] };
+  return { id: 'page_first', name: '第 1 页', background, elements: [] };
 }
 
 /** 把颜色统一成小写 #rrggbb / #rrggbbaa；#rgb / #rgba 展开；不认识的返回 null。 */

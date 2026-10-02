@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://visual-workbench.local/schema/project.schema.json",
-  "title": "视觉工作台 · 项目文件格式 v1",
-  "description": "一个项目 = 一个画板尺寸 + 若干页面；每页由带稳定编号的元素组成；动效挂在元素编号上，只用相对当前状态的变化描述。人类可读说明见 docs/format.md。",
+  "title": "视觉工作台 · 项目文件格式 v2",
+  "description": "一个项目 = 一个画板尺寸 + 若干页面；每页由带稳定编号的元素组成；每页可内嵌自由编写的 JavaScript 动效模块。人类可读说明见 docs/format.md。",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "formatVersion", "id", "name", "createdAt", "updatedAt", "artboard", "assets", "fonts", "pages"],
   "properties": {
     "format": { "const": "visual-workbench/project" },
-    "formatVersion": { "const": 1 },
+    "formatVersion": { "const": 2 },
     "id": { "$ref": "#/$defs/projectId" },
     "name": { "type": "string", "minLength": 1, "maxLength": 200 },
     "description": { "type": "string" },
@@ -35,7 +35,6 @@
     "pageId": { "type": "string", "pattern": "^page_[a-z0-9_]{4,32}$" },
     "assetId": { "type": "string", "pattern": "^asset_[a-z0-9_]{4,32}$" },
     "fontId": { "type": "string", "pattern": "^font_[a-z0-9_]{4,32}$" },
-    "stepId": { "type": "string", "pattern": "^step_[a-z0-9_]{4,32}$" },
 
     "color": {
       "description": "#RRGGBB 或 #RRGGBBAA",
@@ -125,14 +124,14 @@
     "page": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "background", "elements", "steps"],
+      "required": ["id", "name", "background", "elements"],
       "properties": {
         "id": { "$ref": "#/$defs/pageId" },
         "name": { "type": "string" },
         "notes": { "type": "string", "description": "给 agent 或 エイ 的备注，不渲染" },
         "background": { "$ref": "#/$defs/fill" },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
-        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
+        "motion": { "$ref": "#/$defs/motion" }
       }
     },
 
@@ -299,101 +298,14 @@
       }
     },
 
-    "step": {
-      "description": "一个步骤 = 一次触发后一起执行的若干轨道。click：点击才开始；auto：上一步结束后自动开始（连续推进）。",
+    "motion": {
+      "description": "本页放映动效与离页换页效果。source 是内嵌的浏览器 JavaScript ES module；工作台仅在放映或检查时执行。",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "trigger", "tracks"],
+      "required": ["steps", "source"],
       "properties": {
-        "id": { "$ref": "#/$defs/stepId" },
-        "name": { "type": "string" },
-        "trigger": { "enum": ["click", "auto"] },
-        "delay": { "type": "number", "minimum": 0, "default": 0, "description": "毫秒，触发后再等多久" },
-        "tracks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/track" } }
-      }
-    },
-    "track": {
-      "description": "一条轨道 = 对一个元素（按编号）做一组相对当前状态的变化",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["target", "change"],
-      "properties": {
-        "target": { "$ref": "#/$defs/elementId" },
-        "delay": { "type": "number", "minimum": 0, "default": 0, "description": "毫秒，相对步骤开始" },
-        "duration": { "type": "number", "minimum": 0, "default": 400, "description": "毫秒；0 = 瞬间" },
-        "easing": { "enum": ["linear", "ease", "ease-in", "ease-out", "ease-in-out"], "default": "ease-out" },
-        "change": { "$ref": "#/$defs/change" }
-      }
-    },
-    "by": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["by"],
-      "properties": { "by": { "type": "number" } }
-    },
-    "change": {
-      "description": "只允许相对变化：几何用 by（加减），scale 用 times（倍数），滤镜用 by；外观类（颜色、混合、遮罩、裁切）用 to，因为它们不含任何位置/大小信息。",
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "appear": { "const": true, "description": "从隐藏变为显示（淡入）。页面开始时，第一次可见性变化是 appear 的元素默认隐藏。" },
-        "disappear": { "const": true, "description": "从显示变为隐藏（淡出）" },
-        "x": { "$ref": "#/$defs/by" },
-        "y": { "$ref": "#/$defs/by" },
-        "width": { "$ref": "#/$defs/by" },
-        "height": { "$ref": "#/$defs/by" },
-        "rotation": { "$ref": "#/$defs/by" },
-        "opacity": { "$ref": "#/$defs/by" },
-        "scale": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["times"],
-          "properties": { "times": { "type": "number", "exclusiveMinimum": 0 } }
-        },
-        "color": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["to"],
-          "properties": { "to": { "$ref": "#/$defs/color" } },
-          "description": "文字颜色 / 形状填充色变为 to"
-        },
-        "blend": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["to"],
-          "properties": { "to": { "$ref": "#/$defs/blendMode" } }
-        },
-        "filters": {
-          "type": "object",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "properties": {
-            "grayscale": { "$ref": "#/$defs/by" },
-            "sepia": { "$ref": "#/$defs/by" },
-            "blur": { "$ref": "#/$defs/by" },
-            "brightness": { "$ref": "#/$defs/by" },
-            "contrast": { "$ref": "#/$defs/by" },
-            "saturate": { "$ref": "#/$defs/by" }
-          }
-        },
-        "mask": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["to"],
-          "properties": { "to": { "oneOf": [{ "$ref": "#/$defs/gradientMask" }, { "type": "null" }] } }
-        },
-        "clip": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["to"],
-          "properties": { "to": { "oneOf": [{ "$ref": "#/$defs/polygonClip" }, { "type": "null" }] } }
-        }
-      },
-      "not": {
-        "description": "同一条轨道不能同时 appear 和 disappear",
-        "properties": { "appear": { "const": true }, "disappear": { "const": true } },
-        "required": ["appear", "disappear"]
+        "steps": { "type": "integer", "minimum": 0, "description": "点击推进次数。完成最后一步后下一次点击开始换页。" },
+        "source": { "type": "string", "minLength": 1, "description": "export default async function(ctx) 返回 step、transition、dispose 函数。" }
       }
     }
   }
