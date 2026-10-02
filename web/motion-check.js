@@ -64,13 +64,20 @@ async function runPage(project, page, { assetBase, timeout, mount }) {
     if (errors.length) throw errors[0];
   }
 }
+// Safari 的 error.stack 只有调用位置、不含错误信息，所以先写信息再接 stack
+function describe(error) {
+  if (!error || typeof error !== 'object') return String(error);
+  const head = `${error.name || 'Error'}: ${error.message}`;
+  const stack = String(error.stack || '');
+  return stack.includes(error.message) ? stack : stack ? `${head}\n${stack}` : head;
+}
 export async function checkMotion(project, { assetBase = `/data/projects/${encodeURIComponent(project.id)}`, timeout = 5000, mount = document.body, pageId } = {}) {
   const results = [];
   for (const [label, candidate] of [['原项目', project], ['移动与尺寸变体', variant(project)]]) {
     for (const page of candidate.pages) {
       if (pageId && page.id !== pageId) continue;
       try { await runPage(candidate, page, { assetBase, timeout, mount }); results.push({ page: page.id, variant: label, ok: true }); }
-      catch (error) { results.push({ page: page.id, variant: label, ok: false, error: String(error?.stack || error) }); }
+      catch (error) { results.push({ page: page.id, variant: label, ok: false, error: describe(error) }); }
     }
   }
   return { ok: results.every(result => result.ok), results };

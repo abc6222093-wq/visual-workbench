@@ -1,9 +1,10 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>动效检查</title><body><script type="module">
 import { checkMotion } from './motion-check.js';
 addEventListener('message', async event => {
-  if (event.source !== parent || !event.data || event.data.type !== 'check-motion') return;
+  // Safari 里沙箱 iframe 收到的 event.source 不等于 parent，所以按同源 + 消息类型判断
+  if (event.origin !== location.origin || !event.data || event.data.type !== 'check-motion') return;
   const id = event.data.id;
-  try { parent.postMessage({ type: 'check-motion-result', id, result: await checkMotion(event.data.project, event.data.options || {}) }, event.origin); }
-  catch (error) { parent.postMessage({ type: 'check-motion-result', id, error: String(error?.stack || error) }, event.origin); }
+  try { parent.postMessage({ type: 'check-motion-result', id, result: await checkMotion(event.data.project, event.data.options || {}) }, location.origin); }
+  catch (error) { parent.postMessage({ type: 'check-motion-result', id, error: String(error?.stack || error) }, location.origin); }
 });
 </script></body></html>

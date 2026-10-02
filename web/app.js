@@ -1171,6 +1171,13 @@ $("#file-picker").onchange = (e) => {
   upload(e.target.files, e.target.dataset.target === "library");
   e.target.value = "";
 };
+// Safari 全屏时按 Esc 只退出全屏、不把按键交给页面；所以全屏一结束就回到编辑（Chrome 同样适用）
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement || S.view !== "play") return;
+  S.playback?.destroy();
+  S.view = "editor";
+  renderEditor();
+});
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (S.view === "play") {

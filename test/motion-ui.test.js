@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchBrowser } from '../src/browser.js';
 import { createServer } from '../src/server.js';
 
 test('editor stays static, reports errors, and clicks finish steps before custom page transition', async t => {
@@ -24,7 +24,7 @@ test('editor stays static, reports errors, and clicks finish steps before custom
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   t.after(async () => { await browser?.close(); await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }); });
-  browser = await chromium.launch({ headless: true });
+  browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));

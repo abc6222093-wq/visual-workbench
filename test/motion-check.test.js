@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { launchBrowser } from '../src/browser.js';
 import { createServer } from '../src/server.js';
 
 const source = 'export default () => ({ step() {}, transition() {}, dispose() {} })';
@@ -16,7 +16,7 @@ test('browser checker exercises module, steps, transitions, cleanup and delayed 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
   t.after(async () => { await browser?.close(); await new Promise(resolve => server.close(resolve)); rmSync(dir, { recursive: true, force: true }); });
-  browser = await chromium.launch({ headless: true });
+  browser = await launchBrowser();
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${server.address().port}/motion-check.html`);
   const cases = [
