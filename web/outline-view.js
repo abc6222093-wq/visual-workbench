@@ -124,7 +124,7 @@ export function mountOutlineView(options) {
       else if(action==='disappear') edit(page.id,o=>{const row=o.rows.find(r=>r.id===rowId); if(row.until===current(page)){row.until=null;delete row.visibleOn;return;}if(current(page)<=row.from){notice('文字须先在前一屏出现');return;}row.until=current(page);delete row.visibleOn;});
       else if(action==='image-disappear') edit(page.id,o=>{const image=o.images.find(r=>r.id===imageId);if(image.until===current(page)){image.until=null;delete image.visibleOn;}else if(current(page)>image.from){image.until=current(page);delete image.visibleOn;}else notice('图片须先在前一屏出现');});
       else if(action==='delete-image') edit(page.id,o=>o.images=o.images.filter(r=>r.id!==imageId));
-      else if(action==='add-image') { const asset=await options.openLibrary?.(); if(asset)edit(page.id,o=>o.images.push({id:id('image'),asset:asset.id,caption:asset.name||'',from:current(page),until:null})); }
+      else if(action==='add-image') { const asset=await options.openLibrary?.(); if(asset&&!disposed)edit(page.id,o=>o.images.push({id:id('image'),asset:asset.id,caption:asset.name||'',from:current(page),until:null})); }
       else if(action.startsWith('copy-')) {
         const ids=action==='copy-all'?getProject().pages.map(p=>p.id):getProject().pages.filter(p=>checked.has(p.id)).map(p=>p.id);
         if(!ids.length){notice('请先选择页面');return;}await options.flush();

@@ -1674,14 +1674,18 @@ async function outlineLibrary() {
   return new Promise(resolve => {
     modal(`<h2>选择大纲图片</h2><div class="g-sheet__list">${choices.map((a,i) => `<button class="g-row" data-outline-library="${i}"><img class="g-row__thumb" src="${esc(a.url)}" alt=""><span>${esc(a.name || a.file)}</span></button>`).join("")}</div><div class="g-sheet__actions"><button class="g-btn" data-outline-library-cancel>取消</button></div>`);
     const root = $("#modal-root");
-    root.querySelector('[data-outline-library-cancel]').onclick = () => { closeModal(); resolve(null); };
+    let settled = false;
+    const finish = asset => { if (settled) return; settled = true; observer.disconnect(); resolve(asset); };
+    const observer = new MutationObserver(() => { if (!root.querySelector('[data-outline-library-cancel]')) finish(null); });
+    observer.observe(root, {childList:true});
+    root.querySelector('[data-outline-library-cancel]').onclick = () => { closeModal(); finish(null); };
     root.querySelectorAll('[data-outline-library]').forEach(button => button.onclick = async () => {
       try {
         await flush();
         const asset = choices[Number(button.dataset.outlineLibrary)];
         const result = await api(`${path()}/assets`, "POST", {libraryFile:asset.file,width:asset.width,height:asset.height,revision:S.revision});
         S.project = result.project; S.revision = result.revision; S.base = clone(S.project); S.history.commit(S.project);
-        closeModal(); resolve(result.asset);
+        closeModal(); finish(result.asset);
       } catch(error) { notice(error.message); }
     });
   });
