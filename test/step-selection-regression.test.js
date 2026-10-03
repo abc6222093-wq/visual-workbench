@@ -24,6 +24,10 @@ async function open(t, mode) {
   p.elements = [title];
   p.motion = { steps: 1, source: `export default ctx => {
     window.__selectionMotionInits = (window.__selectionMotionInits || 0) + 1;
+    if (${JSON.stringify(mode)} === 'pending' && window.__selectionMotionInits > 1) {
+      window.__pendingSnapshotStarted = true;
+      return new Promise(resolve=>ctx.signal.addEventListener('abort',()=>{window.__pendingSnapshotAborted=true;resolve({step(){}});},{once:true}));
+    }
     const title = ctx.element('el_title1').node;
     if (${JSON.stringify(mode)} === 'pointer-none') {
       ctx.root.style.pointerEvents = 'none';
@@ -115,4 +119,20 @@ test('screen hit testing ignores elements hidden by ancestor opacity', async t =
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 0, 'transparent ancestors make their children invisible');
   assert.deepEqual(errors, []);
+});
+
+
+test('leaving a page immediately aborts a pending post-drag motion snapshot',async t=>{
+  const {page,errors}=await open(t,'pending');
+  await page.locator('[data-step-view]').selectOption('1');
+  await page.waitForSelector('#artboard[data-step-shown="1"]');
+  const box=await page.locator('#artboard [data-element-id="el_title1"]').boundingBox();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2+20,box.y+box.height/2+20);await page.mouse.up();
+  await page.waitForFunction(()=>window.__pendingSnapshotStarted);
+  await page.locator('[data-action="switch"][data-id="page_scene2"]').click();
+  await page.waitForFunction(()=>window.__pendingSnapshotAborted);
+  assert.equal(await page.locator('#artboard').getAttribute('data-page-id'),'page_scene2');
+  assert.equal(await page.locator('#artboard-holder > div').count(),1);
+  assert.deepEqual(errors,[]);
 });

@@ -68,6 +68,7 @@ const S = {
   exportKind: "pdf", // 导出弹窗上次选的类型
   stepView: 0, // 0 = 全部显示；-1 = 初始化；k >= 1 = 第 k 步之后
   stepPage: null, // 步骤视图对应的页面（换页就回到静止）
+  pendingSnapshot: null,
   stepRun: null, // 正在画板上生效的步骤视图 { ready, dispose }
   inspectorCollapsed: localStorage.getItem("vw-inspector-collapsed") === "true",
   pagesCollapsed: localStorage.getItem("vw-pages-collapsed") === "true",
@@ -525,6 +526,7 @@ function bindBoardPointer(holder, board) {
   holder._pickController?.abort();
   const controller = new AbortController(); holder._pickController = controller;
   holder.addEventListener('pointerdown', e => {
+    if (S.preview) { e.preventDefault();e.stopPropagation();return; }
     const {id,resize}=pickElement(board,e);e.stopPropagation();
     if(id)selectCanvas(id,e,resize);else if(S.selected.length){S.selected=[];refreshSelection();}
   }, {capture:true,signal:controller.signal});
@@ -533,7 +535,7 @@ function bindBoardPointer(holder, board) {
 // 下拉选「第 k 步后」：画板按本页动效快进到第 k 步之后的样子（还没出现的元素藏着、移动过的在移动后的位置）。
 // 拖动、缩放照样改元素自己的 x / y / 宽 / 高；松手后在隐藏容器准备新快照，完成后一次替换。
 function stepSwitcher(p) {
-  const steps = Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
+  const steps = p.outline?.mode === "document" ? p.outline.screens - 1 : Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
   if (!p.motion && !p.outline) return "";
   const options = [`<option value="0" ${S.stepView ? "" : "selected"}>全部显示</option>`, `<option value="-1" ${S.stepView === -1 ? "selected" : ""}>第 1 屏</option>`];
   for (let k = 1; k <= steps; k++)
@@ -542,7 +544,8 @@ function stepSwitcher(p) {
 }
 function clampStepView() {
   if (!S.project) return;
-  const steps = Math.max(page().motion?.steps || 0, (page().outline?.screens || 1) - 1);
+  const p = page();
+  const steps = p.outline?.mode === "document" ? p.outline.screens - 1 : Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
   if (S.stepPage !== S.pageId || !Number.isInteger(S.stepView) || S.stepView < -1 || S.stepView > steps || (!page().motion && !page().outline))
     S.stepView = 0;
   S.stepPage = S.pageId;
@@ -552,6 +555,7 @@ function syncStepSelect() {
   if (select) select.value = String(S.stepView);
 }
 function disposeStepView() {
+  cancelSnapshot();
   const run = S.stepRun;
   S.stepRun = null;
   run?.dispose();
@@ -638,7 +642,7 @@ function selectCanvas(id, event, resize) {
     values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element), translate: getComputedStyle($(`#artboard [data-element-id="${CSS.escape(id)}"]`)).translate })),
   };
   event.preventDefault();
-  snapshotGeneration++;
+  cancelSnapshot();
   S.dragging = true;
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
@@ -1681,7 +1685,13 @@ function refreshHistoryButtons() {
 // After geometry edits, prepare a new motion snapshot beside the still-visible old
 // board, then swap only when ready. Async initializers never expose a blank frame.
 let snapshotGeneration = 0;
+function cancelSnapshot() {
+  snapshotGeneration++;
+  const pending=S.pendingSnapshot; S.pendingSnapshot=null;
+  pending?.run.dispose(); pending?.staging.remove();
+}
 async function refreshBoardSnapshot() {
+  cancelSnapshot();
   if (!S.stepView) { renderBoard(); return; }
   const holder = $('#artboard-holder'), old = $('#artboard'), oldRun = S.stepRun;
   if (!holder || !old) return;
@@ -1693,6 +1703,7 @@ async function refreshBoardSnapshot() {
   staging.style.cssText = 'position:absolute;inset:0;opacity:0;pointer-events:none';
   staging.append(board); holder.append(staging);
   const run = applyStepView({project:S.project,page:page(),root:board,assetBase:base(),count:Math.max(0,view)});
+  const pending={run,staging}; S.pendingSnapshot=pending;
   try {
     await run.ready;
     if (generation !== snapshotGeneration || !old.isConnected || S.pageId !== pageId || S.stepView !== view || S.dragging) {run.dispose();staging.remove();return;}
@@ -1704,10 +1715,11 @@ async function refreshBoardSnapshot() {
   } catch(error) {
     run.dispose(); staging.remove();
     if (generation === snapshotGeneration && old.isConnected && S.stepView === view) { notice(`动效错误：${error.message}`); S.stepView=0;syncStepSelect();renderBoard(); }
-  }
+  } finally { if(S.pendingSnapshot===pending)S.pendingSnapshot=null; }
 }
 // Live document mutations retain the textarea/caret and existing animated DOM.
 function patchDocumentCanvas(before) {
+  cancelSnapshot();
   const board = $('#artboard'); if (!board) return;
   const current = allElements(page()), prior = new Map(allElements(before).map(e=>[e.id,e]));
   const ids = new Set(current.map(e=>e.id));
@@ -1757,6 +1769,7 @@ async function mountEditorOutline() {
       }
       reconcileDocument(S.project,page()); S.history.commit(S.project); S.dirty++;schedule();
       patchDocumentCanvas(before);
+      const priorView=S.stepView;clampStepView();if(priorView!==S.stepView)renderBoard();
       const switcher = $('.ed-stepview');
       if (switcher) switcher.outerHTML=stepSwitcher(page());
       else $('.ed-tools')?.insertAdjacentHTML('afterbegin',stepSwitcher(page()));

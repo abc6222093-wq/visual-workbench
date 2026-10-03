@@ -113,3 +113,17 @@ test('旧大纲提取仍支持祖先可见性和清理离屏节点',async t=>{
     return {visible:frames.map(f=>f[0].visible),holders:[...document.body.children].filter(n=>n.style.left==='-100000px').length};
   });assert.deepEqual(result.visible,[false,true,false]);assert.equal(result.holders,0);
 });
+
+
+test('新段空行和选区在点下方角色框后保留，屏按钮不会在失焦时丢失点击',async t=>{
+  const page=await open(t),editor=page.locator('[data-outline-document]');
+  await editor.fill('');await page.locator('[data-outline-role]').selectOption('title');
+  await editor.fill('标题');await editor.press('End');await editor.press('Enter');
+  assert.equal(await editor.inputValue(),'标题\n\n');
+  await page.locator('[data-outline-role]').selectOption('note');
+  assert.equal(await editor.inputValue(),'标题\n\n');
+  await editor.focus();await page.keyboard.insertText('注释');
+  assert.deepEqual(await page.evaluate(()=>window.outlineTest.project.pages[0].outline.rows.map(r=>r.role)),['title','note']);
+  await page.locator('[data-outline-action="screen-add"]').click();
+  assert.equal(await page.evaluate(()=>window.outlineTest.screen),3);
+});
