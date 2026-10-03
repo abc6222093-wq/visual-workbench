@@ -1662,7 +1662,7 @@ window.addEventListener("resize", () => {
   if (S.view === "editor") renderBoard();
   else if (S.view === "play") showPage(S.pageId);
 });
-const runtimeSettings = mountRuntimeSettings({api,app,modal,closeModal,notice,glass:openModalGlass});
+const runtimeSettings = mountRuntimeSettings({api,app,modal,closeModal,notice,glass:openModalGlass,closeGlass:closeModalGlass});
 runtimeSettings.ready().then(home).catch((e) => {
   app.innerHTML = '<div class="startup-error">无法打开工作台，请检查本地服务。</div>';
   notice(e.message);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { browserCandidates, launchBrowser, NO_BROWSER_MESSAGE } from '../src/browser.js';
+import { browserCandidates, launchBrowser, NO_BROWSER_MESSAGE, noBrowserMessage } from '../src/browser.js';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 
@@ -35,4 +35,13 @@ test('Windows 系统和用户 Chrome、Edge 按顺序查找，路径环境可注
   const candidates = browserCandidates({ platform: 'win32', env, exists: (p) => paths.has(p), only: '' });
   assert.deepEqual(candidates.map((c) => c.name), ['Google Chrome', 'Microsoft Edge']);
   assert.equal(candidates[0].executablePath, [...paths][0]);
+});
+
+test('找不到浏览器时按平台给对应安装说明',()=>{assert.match(noBrowserMessage('win32'),/Windows.*PowerShell/);assert.match(noBrowserMessage('darwin'),/Mac.*应用程序/);assert.match(noBrowserMessage('linux'),/Linux/);});
+
+test('Windows Chrome 和 Edge 各自支持两个系统目录与用户目录',()=>{
+ const env={ProgramFiles:'D:\\程序', 'ProgramFiles(x86)':'D:\\程序32',LOCALAPPDATA:'D:\\用户\\本地'};
+ for(const root of Object.values(env))for(const [name,rel] of [['Google Chrome','Google\\Chrome\\Application\\chrome.exe'],['Microsoft Edge','Microsoft\\Edge\\Application\\msedge.exe']]){
+  const path=`${root}\\${rel}`;const found=browserCandidates({platform:'win32',env,only:'',exists:p=>p===path});assert.equal(found.length,1);assert.equal(found[0].name,name);assert.equal(found[0].executablePath,path);
+ }
 });

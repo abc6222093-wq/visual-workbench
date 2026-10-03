@@ -12,7 +12,7 @@ export function createUsageSession({ dataDir, hostname = systemHostname(), now =
   const ownPath = join(dir, `${sessionId}.json`);
   const startedAt = new Date(now()).toISOString();
   const acknowledged = new Set();
-  let started = false, closed = false, timer;
+  let started = false, closed = false, timer, heartbeatError;
   function scan() {
     const fresh = [], stale = [];
     for (const name of readdirSync(dir).sort()) {
@@ -34,17 +34,22 @@ export function createUsageSession({ dataDir, hostname = systemHostname(), now =
     const temporary = ownPath + '.tmp';
     writeFileSync(temporary, JSON.stringify({ sessionId, computer: hostname, startedAt, updatedAt: new Date(now()).toISOString() }) + '\n');
     renameSync(temporary, ownPath);
+    heartbeatError = null;
   }
   function start() {
     if (started || closed) return;
     started = true;
     heartbeat();
     timer = setInterval(() => {
-      try { heartbeat(); } catch { /* status() reports filesystem errors on the next request. */ }
+      try { heartbeat(); } catch (error) { heartbeatError = error; }
     }, heartbeatMs);
     timer.unref();
   }
+  function ownMarkerValid() {try{return JSON.parse(readFileSync(ownPath,'utf8')).sessionId===sessionId;}catch{return false;}}
   function status() {
+    if(started && !closed && (heartbeatError || !ownMarkerValid())) {
+      try { heartbeat(); } catch(error) {heartbeatError=error;throw new Error(`无法更新数据文件夹的使用标记，已暂停访问：${error.message}`);}
+    }
     const { fresh, stale } = scan();
     const blocked = !closed && fresh.some((entry) => !acknowledged.has(entry.token));
     if (!blocked && !closed) start();

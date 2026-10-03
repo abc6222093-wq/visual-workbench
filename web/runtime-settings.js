@@ -1,11 +1,11 @@
 // Runtime settings and cross-device gate use the existing glass dialog components.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const SOURCE_LABELS = {cli:'命令行 --data-dir',env:'环境变量 VW_DATA_DIR',local:'本机设置',config:'仓库 workbench.config.json',explicit:'启动时指定'};
-export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass}) {
+export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass, closeGlass}) {
   let settings, gate, pending, timer;
   async function check() {
     const state = await api('/api/session');
-    if (!state.blocked) { if(gate){gate.remove();gate=null;app.inert=false;} return state; }
+    if (!state.blocked) { if(gate){closeGlass?.();gate.remove();gate=null;app.inert=false;} return state; }
     if(!gate){gate=document.createElement('div');gate.className='modal-backdrop g-backdrop';gate.style.zIndex='10000';document.body.append(gate);app.inert=true;}
     gate.innerHTML=`<div class="g-sheet" role="alertdialog" aria-modal="true" aria-label="另一台电脑正在使用"><h2>另一台电脑正在使用</h2><p class="g-sheet__note">${state.fresh.map(s=>`${esc(s.computer)} 上的工作台还开着`).join('<br>')}。请先在那台电脑关闭工作台，并等 Google Drive 同步完成。</p><p class="g-sheet__note">如果已经确认那边停止使用，可以继续。不要在两台电脑上同时修改项目。</p><div class="g-sheet__actions"><button class="g-btn" data-recheck>重新检查</button><button class="g-btn g-btn--prism" data-confirm>我已确认，继续使用</button></div><p data-error role="status"></p></div>`;
     glass?.(gate.querySelector('.g-sheet'));
@@ -18,8 +18,8 @@ export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass
     settings=await api('/api/settings');
     const state=await check();
     if(state.warning)notice(state.warning);
-    if(state.blocked) await new Promise(resolve=>{pending=setInterval(()=>{if(!gate){clearInterval(pending);resolve();}},200);});
     timer=setInterval(()=>check().catch(()=>{}),5000);
+    if(state.blocked) await new Promise(resolve=>{pending=setInterval(()=>{if(!gate){clearInterval(pending);resolve();}},200);});
     return settings;
   }
   async function showSettings() {

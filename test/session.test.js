@@ -64,3 +64,8 @@ test('blocked close never deletes another session', (t) => {
   assert.equal(b.status().closed, true);
   assert.throws(() => b.confirm('bad'), /array/);
 });
+
+test('own marker removed by sync is recreated before access; unwritable marker blocks access',t=>{
+ const f=fixture(t),session=f.create('A'),file=join(f.dataDir,'.workbench-sessions',f.files()[0]);rmSync(file);assert.equal(session.status().blocked,false);assert.equal(f.files().length,1);
+ rmSync(file);mkdirSync(file);assert.throws(()=>session.status(),/无法更新.*使用标记/);rmSync(file,{recursive:true});assert.equal(session.status().blocked,false);
+});

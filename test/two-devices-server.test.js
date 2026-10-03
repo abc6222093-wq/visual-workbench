@@ -31,3 +31,13 @@ test('打开项目列出冲突副本；两种大纲说明均带当前数据目�
  for(const mode of ['fill','layout']){const response=await request(`/api/projects/example/outline/brief?mode=${mode}`);assert.equal(response.status,200);assert.ok(response.data.text.includes(dataDir));assert.match(response.data.text,mode==='fill'?/只填不排/:/请按大纲排版/);}
  assert.equal((await request('/api/projects/example/outline/brief?mode=bad')).status,400);
 });
+
+test('上传正文期间同步到新会话，写入前再次检查并拒绝修改',async t=>{
+ const {request:httpRequest}=await import('node:http');const {createUsageSession}=await import('../src/session.js');
+ const root=temp(t),server=createServer({dataDir:root});t.after(()=>new Promise(r=>server.close(r)));await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const accepted=new Promise(r=>server.once('request',r));let request;
+ const response=new Promise((resolve,reject)=>{request=httpRequest({hostname:'127.0.0.1',port:server.address().port,path:'/api/projects',method:'POST',headers:{'Content-Type':'application/json'}},res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});request.on('error',reject);request.write('{"name":');});
+ await accepted;const other=createUsageSession({dataDir:root,hostname:'later'});t.after(()=>other.close());other.confirm(other.status().fresh.map(s=>s.token));request.end('"不得写入"}');
+ assert.equal(await response,423);assert.equal(existsSync(join(root,'projects/不得写入')),false);
+ const {readdirSync}=await import('node:fs');assert.deepEqual(readdirSync(join(root,'projects')),[]);
+});

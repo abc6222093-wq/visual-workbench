@@ -3,7 +3,7 @@
 // 都没有时抛出一句中文说明和解决办法，不让エイ看到英文报错。
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { join, win32, posix } from 'node:path';
 import { chromium, webkit } from 'playwright';
 
 const MAC_APPS = [
@@ -17,6 +17,7 @@ const LINUX_BINS = [
 
 export function noBrowserMessage(platform = process.platform) { return [
   '找不到可用的浏览器，动效检查和导出图片 / PDF 需要一个浏览器在后台打开页面。',
+  platform === 'win32' ? 'Windows：安装 Chrome 或 Microsoft Edge，或在 PowerShell 执行下面的安装命令。' : platform === 'darwin' ? 'Mac：把 Chrome 或 Edge 放入应用程序文件夹，或在终端执行下面的安装命令。' : 'Linux：安装 Chrome，或在终端执行下面的安装命令。',
   '解决办法（任选一个）：',
   '  1. 安装 Google Chrome：https://www.google.com/chrome/ ，装好后重新运行；',
   '  2. 或在终端里进入工作台文件夹运行：npx playwright install chromium',
@@ -27,10 +28,10 @@ export const NO_BROWSER_MESSAGE = noBrowserMessage();
 export function browserCandidates({ platform = process.platform, home = homedir(), exists = existsSync, env = process.env, only = env.VW_BROWSER } = {}) {
   const list = [];
   const system = platform === 'darwin'
-    ? MAC_APPS.flatMap(([name, rel]) => ['/Applications', join(home, 'Applications')].map((dir) => [name, join(dir, rel)]))
+    ? MAC_APPS.flatMap(([name, rel]) => ['/Applications', posix.join(home, 'Applications')].map((dir) => [name, posix.join(dir, rel)]))
     : platform === 'win32' ? ['Google Chrome', 'Microsoft Edge'].flatMap((name) => {
       const rel = name === 'Google Chrome' ? 'Google/Chrome/Application/chrome.exe' : 'Microsoft/Edge/Application/msedge.exe';
-      return [env.PROGRAMFILES || env.ProgramFiles, env['PROGRAMFILES(X86)'] || env['ProgramFiles(x86)'], env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')]
+      return [env.PROGRAMFILES || env.ProgramFiles || 'C:\\Program Files', env['PROGRAMFILES(X86)'] || env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')]
         .filter(Boolean).map((dir) => [name, win32.join(dir, rel)]);
     }) : platform === 'linux' ? LINUX_BINS : [];
   for (const [name, path] of system) if (exists(path) && !list.some((c) => c.name === name)) list.push({ id: 'chrome', name, type: chromium, executablePath: path });
