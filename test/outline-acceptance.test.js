@@ -6,91 +6,94 @@ import { join } from 'node:path';
 import { createServer } from '../src/server.js';
 import { launchBrowser } from '../src/browser.js';
 
-// Use a disposable copy: the checked-in sample and real user projects stay untouched.
-test('sample-deck: actual outline extraction, edit two texts, apply without changing any other element data', async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'vw-outline-acceptance-'));
-  const projectDir = join(dir, 'projects/sample-deck');
-  cpSync(new URL('../examples/sample-deck/', import.meta.url), projectDir, { recursive: true, filter: path => !String(path).includes('/versions') });
-  const file = join(projectDir, 'project.json');
-  const original = JSON.parse(readFileSync(file, 'utf8'));
-  const server = createServer({ dataDir: dir });
-  let browser;
-  t.after(async () => {
-    await browser?.close();
-    if (server.listening) await new Promise(resolve => server.close(resolve));
-    rmSync(dir, { recursive: true, force: true });
-  });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await launchBrowser();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.goto(origin);
-  await page.locator('[data-action="open"][data-id="sample-deck"]').click();
-  await page.waitForSelector('#artboard');
-  await page.locator('[data-action="toggle-outline"]').click();
-  assert.equal(await page.locator('[data-outline-page]').count(), original.pages.length, 'old project opens with one starter card per page');
-  const extracted = page.waitForResponse(r => r.url().endsWith('/outline/extract') && r.ok());
-  await page.locator('[data-outline-action="extract"]').click();
-  await extracted;
-  await page.waitForFunction(() => !document.querySelector('#outline-host').inert);
-  const afterExtract = JSON.parse(readFileSync(file, 'utf8'));
-  const cover = afterExtract.pages[0];
-  assert.equal(cover.outline.screens, cover.motion.steps + 1);
-  assert.equal(cover.outline.rows.find(r => r.elementId === 'el_bullet1').from, 2, 'capture sees initial hidden bullet and its appearance after first click');
-  assert.deepEqual(afterExtract.pages.map(p => p.elements), original.pages.map(p => p.elements));
-  const pairs = [];
-  for (const [elementId, text] of [['el_title1', '先理解，再行动'], ['el_subtitle1', '写大纲 · agent 排版 · エイ 微调']]) {
-    const row = cover.outline.rows.find(r => r.elementId === elementId);
-    await page.locator(`[data-outline-row="${row.id}"] textarea`).fill(text);
-    pairs.push({ elementId, before: structuredClone(cover.elements.find(e => e.id === elementId)), text });
-  }
-  const applied = page.waitForResponse(r => r.url().endsWith('/outline/apply') && r.ok());
-  await page.locator('[data-outline-action="apply"]').click();
-  const result = await (await applied).json();
-  assert.equal(result.applied.length, 2);
-  assert.deepEqual(result.unapplied, []);
-  await page.waitForFunction(() => !document.querySelector('#outline-host').inert);
-  const afterApply = JSON.parse(readFileSync(file, 'utf8'));
-  for (const pair of pairs) {
-    pair.after = afterApply.pages[0].elements.find(e => e.id === pair.elementId);
-    assert.deepEqual(pair.after, { ...pair.before, text: pair.text });
-    delete pair.text;
-  }
-  const expectedPages = structuredClone(original.pages);
-  for (const pair of pairs) expectedPages[0].elements.find(e => e.id === pair.elementId).text = pair.after.text;
-  assert.deepEqual(afterApply.pages.map(p => p.elements), expectedPages.map(p => p.elements));
-  const versions = await (await fetch(`${origin}/api/projects/sample-deck/versions`)).json();
-  assert.equal(versions.length, 2, 'extract and apply each save a version first');
-  const briefs = [];
-  for (const ids of [afterApply.pages.map(p => p.id), ['page_cover1']]) {
-    const brief = await (await fetch(`${origin}/api/projects/sample-deck/outline/brief?pageIds=${ids.join(',')}`)).json();
-    briefs.push(brief.text);
-    assert.ok(brief.text.includes(file));
-    for (const id of ids) assert.ok(brief.text.includes(id));
-    if (ids.length === 1) assert.ok(!brief.text.includes('page_scene2'));
-  }
-  const external = structuredClone(afterApply);
-  external.pages[1].outline.notes = 'agent 从文件写入的新备注';
-  writeFileSync(file, JSON.stringify(external));
-  await page.waitForFunction(() => [...document.querySelectorAll('[data-outline-field=notes]')].some(n => n.value === 'agent 从文件写入的新备注'));
-  const card = page.locator('[data-outline-page="page_cover1"]');
-  const sketch = await card.locator('[data-outline-composition]').boundingBox();
-  assert.ok(Math.abs(sketch.width / sketch.height - original.artboard.width / original.artboard.height) < .02, 'outline sketch preserves artboard proportions');
-  const upload = await fetch(`${origin}/api/library`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({name:'大纲主图',mime:'image/svg+xml',width:64,height:64,data:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="24" fill="#445566"/></svg>').toString('base64')}) });
-  assert.equal(upload.status,201);
-  await card.locator('[data-outline-action="add-image"]').click();
-  await page.locator('[data-outline-library="0"]').click();
-  const image = card.locator('[data-outline-image]').last();
-  await image.waitFor();
-  const imageSaved = page.waitForResponse(r=>r.request().method()==='PUT'&&r.ok());
-  await image.locator('input').fill('这张做主图');
-  await imageSaved;
-  const withImage = JSON.parse(readFileSync(file,'utf8'));
-  assert.equal(withImage.pages[0].outline.images.at(-1).caption,'这张做主图');
-  assert.deepEqual(withImage.pages.map(p=>p.elements),expectedPages.map(p=>p.elements), 'library outline image never places or changes canvas elements');
-  assert.deepEqual(errors, []);
-  console.log('ROUND6_COPY_BRIEFS=' + JSON.stringify(briefs));
-  console.log('ROUND6_SAMPLE_ELEMENT_COMPARISON=' + JSON.stringify(pairs));
+async function open(t, legacy=false) {
+  const dir=mkdtempSync(join(tmpdir(),'vw-document-acceptance-')), file=join(dir,'projects/sample-deck/project.json');
+  cpSync(new URL('../examples/sample-deck/',import.meta.url),join(dir,'projects/sample-deck'),{recursive:true,filter:p=>!String(p).includes('/versions')});
+  const original=JSON.parse(readFileSync(file,'utf8'));
+  original.pages[0].elements=original.pages[0].elements.filter(e=>e.type==='text').slice(0,2);
+  original.pages[0].elements.push({...structuredClone(original.pages[0].elements[0]),id:'el_decoration',text:'DECORATIVE',decorative:true});
+  delete original.pages[0].motion;
+  if(legacy) original.pages[0].outline={screens:2,notes:'旧备注',images:[],rows:[{id:'row_legacy',role:'title',text:'旧大纲保留文案',emphasis:[],from:1,until:null}]};
+  writeFileSync(file,JSON.stringify(original));
+  const server=createServer({dataDir:dir});let browser;
+  t.after(async()=>{await browser?.close();if(server.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  browser=await launchBrowser();const p=await browser.newPage({viewport:{width:1440,height:1000}});
+  const errors=[];p.on('pageerror',e=>errors.push(e.message));
+  await p.goto(origin);await p.locator('[data-action="open"][data-id="sample-deck"]').click();
+  await p.locator('[data-action="tab-outline"]').click();await p.waitForSelector('[data-outline-document]');
+  return {p,file,original,origin,errors};
+}
+const waitSaved=async p=>{await p.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='已保存');};
+const disk=file=>JSON.parse(readFileSync(file,'utf8'));
+
+test('document panel: live bidirectional text, independent paragraphs, deletion, history, metadata and current page',async t=>{
+  const {p,file,original,errors}=await open(t);
+  const doc=p.locator('[data-outline-document]');
+  assert.equal(await p.locator('[data-action="toggle-outline"]').count(),0);
+  assert.equal(await p.locator('.ed-inspector [data-action="versions"]').count(),0);
+  assert.ok(!(await doc.inputValue()).includes('DECORATIVE'));
+  const old=original.pages[0].elements[0],second=original.pages[0].elements[1];
+  await doc.fill(`改好的标题\n\n${second.text}`);
+  await p.waitForFunction(()=>document.querySelector('#artboard [data-element-id="el_title1"]').textContent==='改好的标题');
+  await waitSaved(p);assert.deepEqual(disk(file).pages[0].elements[0],{...old,text:'改好的标题'});
+  // Highlight does not change any canvas data.
+  const beforeEmphasis=disk(file).pages[0].elements;
+  await doc.evaluate(e=>{e.focus();e.setSelectionRange(0,2);e.dispatchEvent(new Event('select'));});
+  await p.locator('[data-outline-action="emphasis"]').click();await waitSaved(p);
+  assert.deepEqual(disk(file).pages[0].elements,beforeEmphasis);
+  assert.equal(await p.locator('.outline-document-overlay mark').textContent(),'改好');
+  await p.locator('[data-outline-action="emphasis"]').click();await waitSaved(p);
+  assert.equal(await p.locator('.outline-document-overlay mark').count(),0);
+  // Body newlines retain one element; blank line adds another independent element.
+  await doc.fill(`改好的标题\n\n${second.text}\n\n新正文第一行\n第二行\n\n独立注释`);await waitSaved(p);
+  let project=disk(file),paragraph=project.pages[0].elements.find(e=>e.text==='新正文第一行\n第二行');
+  assert.ok(paragraph);assert.ok(project.pages[0].elements.some(e=>e.text==='独立注释'));
+  assert.equal(project.pages[0].outline.rows.length,4);
+  await p.locator('[data-action="undo"]').click();await p.waitForSelector('[data-outline-document]');
+  assert.ok(!(await doc.inputValue()).includes('新正文'));
+  await p.locator('[data-action="redo"]').click();await p.waitForSelector('[data-outline-document]');
+  assert.ok((await doc.inputValue()).includes('新正文'));
+  // Canvas property editing updates its mapped document, with no extraction step.
+  await p.locator('[data-action="tab-layers"]').click();
+  await p.locator(`[data-action="select"][data-id="${old.id}"]`).click();
+  await p.locator('[data-prop="text"]').fill('画布改字');await p.locator('[data-prop="text"]').press('Tab');
+  await p.locator('[data-action="tab-outline"]').click();assert.ok((await doc.inputValue()).startsWith('画布改字'));
+  // Delete a document paragraph, then a canvas element.
+  await doc.fill(`画布改字\n\n${second.text}\n\n独立注释`);await waitSaved(p);
+  assert.ok(!disk(file).pages[0].elements.some(e=>e.id===paragraph.id));
+  await p.locator('[data-action="tab-layers"]').click();await p.locator(`[data-action="select"][data-id="${old.id}"]`).click();await p.locator('[data-action="delete"]').click();
+  await p.locator('[data-action="tab-outline"]').click();assert.ok(!(await doc.inputValue()).includes('画布改字'));
+  await waitSaved(p);
+  await p.locator('[data-action="switch"][data-id="page_scene2"]').click();await p.waitForSelector('[data-outline-document]');
+  assert.ok(!(await doc.inputValue()).includes('独立注释'));
+  await p.locator('[data-action="switch"][data-id="page_cover1"]').click();await p.waitForSelector('[data-outline-document]');
+  assert.ok((await doc.inputValue()).includes('独立注释'));
+  // Screen controls share the toolbar; only-one-screen deletion preserves content.
+  await p.locator('[data-outline-action="screen-add"]').click();
+  assert.equal(await p.locator('[data-step-view]').inputValue(),'1');
+  assert.ok((await p.locator('.outline-motion-warning').textContent()).includes('agent'));
+  await p.locator('[data-outline-action="screen-delete"][data-screen="2"]').click();
+  assert.equal(await p.locator('[data-step-view]').inputValue(),'-1');
+  await p.locator('[data-outline-action="screen-delete"][data-screen="1"]').click();
+  assert.ok((await doc.inputValue()).includes('独立注释'));
+  assert.equal(await p.locator('[data-outline-action="screen-delete"]').count(),1);
+  assert.deepEqual(errors,[]);
+});
+
+test('legacy outline conversion automatically versions first and keeps unmapped pending text',async t=>{
+  const {p,file,origin,errors}=await open(t,true);await waitSaved(p);
+  assert.ok((await p.locator('[data-outline-document]').inputValue()).includes('旧大纲保留文案'));
+  const project=disk(file);assert.equal(project.pages[0].outline.mode,'document');
+  assert.equal(project.pages[0].outline.notes,'旧备注');
+  assert.ok(project.pages[0].elements.some(e=>e.text==='旧大纲保留文案'));
+  const versions=await(await fetch(`${origin}/api/projects/sample-deck/versions`)).json();assert.equal(versions.length,1);
+  // Agent writes to the same project file; a non-focused panel receives the update.
+  await p.locator('[data-outline-notes]').focus();await p.locator('[data-outline-notes]').press('Tab');
+  project.pages[0].elements.find(e=>e.id==='el_title1').text='agent 新文案';
+  project.pages[0].outline.rows.find(r=>r.elementId==='el_title1').text='agent 新文案';
+  writeFileSync(file,JSON.stringify(project));
+  await p.waitForFunction(()=>document.querySelector('[data-outline-document]')?.value.includes('agent 新文案'));
+  assert.deepEqual(errors,[]);
 });

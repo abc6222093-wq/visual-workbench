@@ -175,6 +175,8 @@
       "properties": {
         "type": { "const": "text" },
         "text": { "type": "string" },
+        "documentDraft": { "type": "boolean", "description": "Default document draft; clear after manual styling or agent layout" },
+        "decorative": { "type": "boolean", "default": false, "description": "Exclude decorative text from the page document" },
         "font": { "oneOf": [{ "$ref": "#/$defs/fontId" }, { "type": "null" }], "description": "引用 fonts[].id；null = 系统默认字体" },
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "fontWeight": { "type": "integer", "minimum": 100, "maximum": 900, "default": 400 },
@@ -575,6 +577,7 @@
           "images"
         ],
         "properties": {
+          "mode": { "const": "document", "description": "Live bidirectional current-page document" },
           "screens": {
             "type": "integer",
             "minimum": 1
