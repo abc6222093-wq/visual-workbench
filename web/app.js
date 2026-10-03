@@ -1,4 +1,5 @@
 import { mountOutlinePanel } from "./outline-panel.js";
+import { captureOutlinePage } from "./outline-capture.js";
 import { reconcileDocument } from "./outline-document.js";
 import { pickCanvasElement } from "./editor-hit-test.js";
 import { renderPage, updateElementNode } from "./render.js";
@@ -251,6 +252,8 @@ async function open(id, data) {
   S.dirty = S.saved = 0;
   S.conflict = false;
   S.base = clone(S.project);
+  const reconciled = reconcileLinkedPages();
+  if (reconciled) { S.history.commit(S.project); S.dirty++; schedule(); }
   S.lastConflict = null;
   S.stale.clear();
   S.stepView = 0;
@@ -323,17 +326,24 @@ function keepSelection() {
   for (const id of [...S.checked]) if (!S.project.pages.some((p) => p.id === id)) S.checked.delete(id);
 }
 // 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留エイ 的并提示
+function reconcileLinkedPages() {
+  let changed = false;
+  for (const p of S.project.pages) if (p.outline?.mode === 'document') changed = reconcileDocument(S.project,p).changed || changed;
+  return changed;
+}
 function applySync({ project, base, revision, remoteChanged, needsSave, conflicts }) {
   const before = { base: S.base, local: clone(S.project), remote: clone(base) };
   S.base = clone(base);
   S.revision = revision;
   S.conflict = false;
+  let reconciled = false;
   if (remoteChanged) {
     S.project = clone(project);
+    reconciled = reconcileLinkedPages();
     S.history.commit(S.project);
     keepSelection();
   }
-  if (needsSave) {
+  if (needsSave || reconciled) {
     S.dirty++;
     schedule();
   } else S.saved = S.dirty;
@@ -521,7 +531,7 @@ function bindBoardPointer(holder, board) {
 }
 // ---------- 步骤视图 ----------
 // 下拉选「第 k 步后」：画板按本页动效快进到第 k 步之后的样子（还没出现的元素藏着、移动过的在移动后的位置）。
-// 拖动、缩放照样改元素自己的 x / y / 宽 / 高；松手保存后重画画板，动效从新的位置重新快进。
+// 拖动、缩放照样改元素自己的 x / y / 宽 / 高；松手后在隐藏容器准备新快照，完成后一次替换。
 function stepSwitcher(p) {
   const steps = Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
   if (!p.motion && !p.outline) return "";
@@ -628,6 +638,7 @@ function selectCanvas(id, event, resize) {
     values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element), translate: getComputedStyle($(`#artboard [data-element-id="${CSS.escape(id)}"]`)).translate })),
   };
   event.preventDefault();
+  snapshotGeneration++;
   S.dragging = true;
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
@@ -777,7 +788,6 @@ function bindDrag() {
   $("#canvas-well").ondragover = (e) => e.preventDefault();
   $("#canvas-well").ondrop = (e) => {
     e.preventDefault();
-    if (S.outlineMode) return;
     const id = e.dataTransfer.getData("application/x-vw-asset");
     if (id) placeAsset(id, e.clientX, e.clientY);
     else if (e.dataTransfer.getData("application/x-vw-library")) {
@@ -1541,6 +1551,17 @@ function updateProp(input) {
   });
   if (different) changed();
 }
+app.addEventListener("input", (event) => {
+  const input = event.target;
+  if (!input.matches('textarea[data-prop="text"]') || event.isComposing) return;
+  const before=clone(page()); let different=false;
+  mutateElements(page(),rootSelection(page(),S.selected),element=>{
+    if(element.type==='text' && element.text!==input.value){element.text=input.value;different=true;}
+  });
+  if(!different)return;
+  reconcileLinkedPages();S.history.commit(S.project);S.dirty++;schedule();
+  patchDocumentCanvas(before);refreshHistoryButtons();S.outlineView?.refresh();
+});
 app.addEventListener("change", (e) => {
   if (e.target.matches("[data-step-view]")) {
     S.stepView = Number(e.target.value) || 0;
@@ -1602,6 +1623,11 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     nextPage(-1);
     return;
+  }
+  if (S.view === 'editor' && e.target.matches('[data-outline-document]') && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); const start=e.target.selectionStart;
+    $(`[data-action="${e.shiftKey ? 'redo' : 'undo'}"]`)?.click();
+    const input=$('[data-outline-document]');input?.focus();input?.setSelectionRange(start,start);return;
   }
   if (S.view !== "editor" || S.preview || S.outlineBusy || e.target.matches("input,textarea,select")) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
@@ -1673,7 +1699,7 @@ async function refreshBoardSnapshot() {
     markSelection();
   } catch(error) {
     run.dispose(); staging.remove();
-    if (old.isConnected && S.stepView === view) { notice(`动效错误：${error.message}`); S.stepView=0;syncStepSelect();renderBoard(); }
+    if (generation === snapshotGeneration && old.isConnected && S.stepView === view) { notice(`动效错误：${error.message}`); S.stepView=0;syncStepSelect();renderBoard(); }
   }
 }
 // Live document mutations retain the textarea/caret and existing animated DOM.
@@ -1713,6 +1739,18 @@ async function mountEditorOutline() {
       if (currentPage.outline) await api(`${path()}/versions`, 'POST', {note:'大纲文档联动前自动存版'});
       if (S.project.id !== projectId || page().id !== currentPage.id || !host.isConnected) return;
       const before = clone(page());
+      let frames;
+      if (!before.outline && before.motion) {
+        try { frames = await captureOutlinePage(S.project,before,base()); }
+        catch(error) { notice(`文稿已显示全部文字；屏幕可见性待 agent 校对：${error.message}`); }
+        if (!host.isConnected || page().id !== before.id) return;
+        if (JSON.stringify(page()) !== JSON.stringify(before)) { queueMicrotask(mountEditorOutline); return; }
+      }
+      reconcileDocument(S.project,page());
+      if (frames) for (const row of page().outline.rows) {
+        row.visibleOn=frames.flatMap((items,index)=>items.some(e=>e.id===row.elementId && e.visible)?[index+1]:[]);
+        row.from=row.visibleOn[0]||1;row.until=null;
+      }
       reconcileDocument(S.project,page()); S.history.commit(S.project); S.dirty++;schedule();
       patchDocumentCanvas(before);
       const switcher = $('.ed-stepview');

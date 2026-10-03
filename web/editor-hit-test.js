@@ -2,13 +2,15 @@ import { editable, findElement } from './editor.js';
 
 // Motion may disable native pointer events. Keep editing hit tests independent of
 // that setting, while respecting the actual painted visibility of each ancestor.
-function visible(node, board, page) {
+function visible(node, board, page, screen) {
   const id = node.closest('[data-element-id]')?.dataset.elementId;
   const found = id && findElement(page, id);
   if (found && [found.element, ...found.ancestors].some(e => e.visible === false)) return false;
+  const ownVisibility = getComputedStyle(node).visibility;
+  if (ownVisibility === 'hidden' || ownVisibility === 'collapse') return false;
   for (let parent = node; parent; parent = parent.parentElement) {
     const style = getComputedStyle(parent);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
+    if (style.display === 'none' || (screen && Number(style.opacity) === 0)) return false;
     if (parent === board) return true;
   }
   return false;
@@ -82,17 +84,17 @@ export function pickCanvasElement({ board, page, selected = [], screen, event })
   const native = document.elementsFromPoint(x, y).filter(node => board.contains(node));
   const handles = [...board.querySelectorAll('[data-resize]')];
   if (!event.shiftKey) {
-    const handle = handles.filter(node => selected.includes(node.dataset.resize) && editable(page, node.dataset.resize) && visible(node, board, page) && containsPoint(node, x, y)).sort((a, b) => frontFirst(a, b, board))[0];
+    const handle = handles.filter(node => selected.includes(node.dataset.resize) && editable(page, node.dataset.resize) && visible(node, board, page, screen) && containsPoint(node, x, y)).sort((a, b) => frontFirst(a, b, board))[0];
     if (handle) return { id: handle.dataset.resize, resize: handle.dataset.handle };
   }
   const hits = [];
   const add = node => {
     const owner = node.closest('[data-element-id]'), id = owner?.dataset.elementId;
-    if (!id || hits.includes(id) || !editable(page, id) || !visible(owner, board, page)) return;
+    if (!id || hits.includes(id) || !editable(page, id) || !visible(owner, board, page, screen)) return;
     hits.push(id);
   };
   native.forEach(add);
-  const fallback = [...board.querySelectorAll('[data-element-id]')].filter(node => visible(node, board, page) && containsPoint(node, x, y)).sort((a, b) => frontFirst(a, b, board));
+  const fallback = (screen ? [...board.querySelectorAll('[data-element-id]')] : []).filter(node => visible(node, board, page, screen) && containsPoint(node, x, y)).sort((a, b) => frontFirst(a, b, board));
   fallback.forEach(add);
   if (!event.shiftKey) {
     const chosen = hits.find(id => selected.includes(id));

@@ -266,8 +266,9 @@ export function copyBrief(
     "大纲在 project.json 的 pages[].outline；先读最新文件、CLAUDE.md、docs/format.md 与 schema/project.schema.json，改前运行 npm run save-version -- <项目路径> -m <说明>。",
     ...project.pages.filter(p => pageIds.includes(p.id)).map(p =>
       `第 ${project.pages.indexOf(p) + 1} 页（${p.id}） · ${p.name} · ${p.outline ? `${p.outline.screens} 屏` : '尚无大纲，请保留此页并说明'}`),
+    "大纲是右侧实时联动文稿：每段对应独立文字元素。保留 elementId；联动页修改文字时同时更新元素 text 和行 text，排版完成清除 documentDraft。纯装饰文字标 decorative:true。",
     "按大纲里的层级、强调、图片说明和备注排版；保留エイ 调整的位置、大小、颜色、字体、层级和其他页面。N 屏写 motion.steps = N−1，第 1 屏是初始化后、step(0) 前。",
-    "排好后为每条文字和图片写 elementId；更新条目 baseline 及 outline.baseline（screens、rows、images）的已落实快照，供以后只应用文字和识别删除条目。",
+    "排好后为每条文字和图片写 elementId；更新条目 baseline 及 outline.baseline（screens、rows、images）的已落实快照，供后续联动与识别尚未落实的排版要求。",
     "完成后运行 npm run validate -- <项目路径> 与 npm run check-motion -- <项目路径>，两者通过再交付。",
   ];
   return lines.join("\n");
