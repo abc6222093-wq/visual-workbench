@@ -47,7 +47,11 @@ function neededScale(element, width, height) {
   return element.fit === 'contain' ? Math.min(sx, sy) : Math.max(sx, sy);
 }
 
-async function slimImage(buffer, elements) {
+const isSvg = buffer => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^>]*>\s*)?<svg[\s>]/i.test(buffer.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, ''));
+
+async function slimImage(buffer, elements, { keepAlpha = false } = {}) {
+  // SVG 原样放进去（data:image/svg+xml），重新着色（tint）用它当遮罩，矢量边缘保持清晰
+  if (isSvg(buffer)) return { mime: 'image/svg+xml', data: buffer, note: '原样 svg' };
   const meta = await sharp(buffer, { animated: true }).metadata();
   const format = meta.format;
   const original = { mime: IMAGE_MIME[format] || 'application/octet-stream', data: buffer };
@@ -61,7 +65,8 @@ async function slimImage(buffer, elements) {
   const base = () => { const image = sharp(buffer).rotate(); return resize ? image.resize(resize.width, resize.height, { fit: 'fill' }) : image; };
   const transparent = meta.hasAlpha && !(await sharp(buffer).stats()).isOpaque;
   const candidates = [{ mime: 'image/png', data: await base().png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer() }];
-  if (!transparent) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality: 85, mozjpeg: true }).toBuffer() });
+  // 重新着色的图片靠透明度取形状，不能变成 JPEG
+  if (!transparent && !keepAlpha) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality: 85, mozjpeg: true }).toBuffer() });
   // 没有方向问题时，原文件反而更小（比如小图标缩小后边缘更复杂）就用原文件
   if (!rotated && (format === 'png' || format === 'jpeg' || format === 'webp')) candidates.push(original);
   const best = candidates.reduce((a, b) => (b.data.length < a.data.length ? b : a));
@@ -230,7 +235,7 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
     if (!users.length && !mentioned) { skipped.push(asset.file); continue; }
     const buffer = readFileSync(join(projectDir, asset.file));
     // 代码里提到的素材可能被放大使用，保持原尺寸
-    const slim = await slimImage(buffer, mentioned ? [] : users);
+    const slim = await slimImage(buffer, mentioned ? [] : users, { keepAlpha: users.some(element => typeof element.tint === 'string') });
     files[asset.file] = dataUrl(slim.mime, slim.data);
     imageBytes += files[asset.file].length;
     items.push({ kind: 'image', name: asset.file, original: buffer.length, bytes: slim.data.length, note: slim.note });

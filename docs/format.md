@@ -129,6 +129,16 @@
 
 - `font`：引用 `fonts[].id`；`null` 表示系统默认字体。
 - `fontWeight` 100–900；`lineHeight` 是倍数；`align` 为 left / center / right。
+- `stroke`（可选）：文字描边，`{ "color": "#RRGGBB[AA]", "width": 数字 ≥ 0 }` 或 `null`（没有描边）。`width` 是线宽（画板像素），线沿字形边缘居中画，字的填充色盖在描边上面，所以描边不会吃掉字形，露在字外的约为线宽的一半。
+- `shadow`（可选）：文字阴影，`{ "color": "#RRGGBB[AA]", "x": 数字, "y": 数字, "blur": 数字 ≥ 0 }` 或 `null`（没有阴影）。`x` 向右、`y` 向下偏移，`blur` 模糊半径，单位都是画板像素。
+- 描边和阴影是**元素属性**：编辑、放映、动效检查、导出（放映版 HTML、图片、PDF）都按同一份画法显示。不要再在动效代码里临时加描边 / 阴影（那样只在放映时出现）。エイ 可以在工作台里改它们，改过的值 agent 不动。
+
+```json
+{ "id": "el_title2", "type": "text", "x": 160, "y": 300, "width": 1600, "height": 160, "zIndex": 10,
+  "text": "描边标题", "fontSize": 120, "color": "#ffffff",
+  "stroke": { "color": "#e11d48", "width": 6 },
+  "shadow": { "color": "#00000080", "x": 0, "y": 8, "blur": 16 } }
+```
 
 ### 6.3 图片 `image`
 
@@ -139,6 +149,14 @@
 
 - `asset`：引用 `assets[].id`，校验会检查它存在。
 - `fit`：cover（裁满）/ contain（完整放进去）/ fill（拉伸）。
+- `tint`（可选）：重新着色，`"#RRGGBB[AA]"` 或 `null`（原色）。设了以后，图片按自己的透明度当形状，整体画成这一种颜色——用来给**单色矢量标志（SVG）**换颜色，透明底的单色 PNG / WebP 也可以。多色图片会变成一块单色剪影；JPEG 没有透明部分，会整块变成纯色，所以校验会报 `TINT_NEEDS_ALPHA`。エイ 可以在工作台里改颜色。
+
+```json
+{ "id": "el_logo1", "type": "image", "x": 80, "y": 60, "width": 240, "height": 80, "zIndex": 20,
+  "asset": "asset_logo01", "fit": "contain", "tint": "#ffffff" }
+```
+
+- 素材可以是 SVG（`assets/xxx.svg`）。工作台只收纯图形的 SVG：含脚本、`on…` 事件属性、`javascript:`、`<foreignObject>` 或引用网络地址的会被拒绝。
 
 ### 6.4 形状 `shape`
 
@@ -328,6 +346,7 @@ export default async function (ctx) {
 | `MISSING_FONT_FILE` | `fonts[].file` 在磁盘上不存在 |
 | `UNKNOWN_ASSET_REF` | 图片元素引用了不存在的素材编号 |
 | `UNKNOWN_FONT_REF` | 文字元素引用了不存在的字体编号 |
+| `TINT_NEEDS_ALPHA` | 图片设了 `tint`，但素材是没有透明部分的 JPEG |
 
 通过时会额外列出待排版素材。程序内用法：`import { validateProject, validateProjectData } from './src/validate.js'`。
 

@@ -52,7 +52,7 @@ test('formatResult：通过的结果以 ✓ 开头，未通过的以 ✗ 开头�
 test('格式校验的错误码', () => {
   assert.deepEqual(Object.keys(ERROR_CODES).sort(), [
     'DUPLICATE_ID', 'INVALID_JSON', 'MISSING_ASSET_FILE', 'MISSING_FONT_FILE',
-    'SCHEMA', 'UNKNOWN_ASSET_REF', 'UNKNOWN_FONT_REF',
+    'SCHEMA', 'TINT_NEEDS_ALPHA', 'UNKNOWN_ASSET_REF', 'UNKNOWN_FONT_REF',
   ]);
 });
 
