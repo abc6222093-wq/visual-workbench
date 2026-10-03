@@ -139,6 +139,28 @@ export function validateProjectData(data, opts = {}) {
     }
   }
 
+  pages.forEach((page, pi) => {
+    const outline = page?.outline;
+    if (!outline) return;
+    const checkItems = (items, screens, base) => {
+      if (!Array.isArray(items)) return;
+      checkDuplicates(items.map((r,i)=>({id:r?.id,path:`${base}/${i}`})), '大纲', base, errors);
+      items.forEach((r,i)=>{
+        if (!r) return;
+        const path=`${base}/${i}`;
+        const range = value => { if (value && (value.from > screens || (value.until != null && (value.until <= value.from || value.until > screens + 1)) || value.visibleOn?.some(n=>n>screens) || (value.visibleOn && new Set(value.visibleOn).size!==value.visibleOn.length))) errors.push({code:'OUTLINE_RANGE',path,message:'大纲画面范围无效'}); };
+        range(r); range(r.baseline);
+        for(const value of [r,r.baseline]) if(value?.emphasis?.some(e=>e.start>=e.end||e.end>value.text.length)) errors.push({code:'OUTLINE_EMPHASIS',path,message:'强调范围超出文字'});
+        for(const value of [r,r.baseline]) if(value?.asset && !assetIds.has(value.asset)) errors.push({code:ERROR_CODES.UNKNOWN_ASSET_REF,path,message:`大纲素材不存在：${value.asset}`});
+      });
+    };
+    const mapped=[...(outline.rows||[]),...(outline.images||[])].filter(r=>r?.elementId);
+    checkDuplicates(mapped.map(r=>({id:r.elementId,path:`/pages/${pi}/outline`})), '大纲映射', '', errors);
+    checkItems(outline.rows,outline.screens,`/pages/${pi}/outline/rows`);
+    checkItems(outline.images,outline.screens,`/pages/${pi}/outline/images`);
+    if(outline.baseline){checkItems(outline.baseline.rows,outline.baseline.screens,`/pages/${pi}/outline/baseline/rows`);checkItems(outline.baseline.images,outline.baseline.screens,`/pages/${pi}/outline/baseline/images`);}
+  });
+
   return { ok: errors.length === 0, errors, info };
 }
 

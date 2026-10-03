@@ -1,3 +1,4 @@
+import { copyBrief, planApplyText } from '../web/outline-model.js';
 import http from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, readdirSync, existsSync, statSync, lstatSync, realpathSync } from 'node:fs';
@@ -162,6 +163,18 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         const ping=setInterval(()=>{ if(!res.writableEnded) res.write(': ping\n\n'); },25000); ping.unref();
         streams.add(res); req.on('close',()=>{ off(); clearInterval(ping); streams.delete(res); });
         return;
+      }
+      if(parts[3]==='outline'&&parts.length===5) {
+        const action=parts[4];
+        if(action==='brief'&&req.method==='GET') {const {project}=readProject(dir); const ids=url.searchParams.get('pageIds')?.split(',').filter(Boolean)||project.pages.map(p=>p.id); if(ids.some(id=>!project.pages.some(p=>p.id===id)))throw fail(400,'Invalid pageIds'); const filePath=join(dir,'project.json');return json(res,200,{text:copyBrief(project,ids,filePath),filePath});}
+        if(['extract','apply'].includes(action)&&req.method==='POST') {
+          const b=await body(req),old=readProject(dir);checkRevision(b.revision,old.revision);let project=structuredClone(old.project),result={};
+          if(action==='extract') {if(!b.outlines||typeof b.outlines!=='object'||Array.isArray(b.outlines)||!Object.keys(b.outlines).length)throw fail(400,'Outlines required');for(const [pageId,outline] of Object.entries(b.outlines)){const page=project.pages.find(p=>p.id===pageId);if(!page||!outline)throw fail(400,'Invalid outline page');page.outline=outline;}}
+          else {const ids=b.pageIds??project.pages.map(p=>p.id);if(!Array.isArray(ids)||!ids.length||new Set(ids).size!==ids.length||ids.some(id=>!project.pages.some(p=>p.id===id)))throw fail(400,'Invalid pageIds');result=planApplyText(project,ids);project=result.project;}
+          const check=validateProjectData(project,{projectDir:dir});if(!check.ok)throw fail(400,'Invalid outline',check.errors);
+          const backup=saveVersion({projectDir:dir,note:action==='extract'?'提取大纲前自动存版':'应用大纲文字前自动存版',by:'user'});
+          checkRevision(old.revision,readProject(dir).revision);project.updatedAt=new Date().toISOString();const revision=saveProject(dir,project,selfWrite(id));return json(res,200,{project,revision,backup:basename(backup.versionDir),applied:result.applied||[],unapplied:result.changes||[]});
+        }
       }
       if(parts[3]==='brief'&&parts.length===4&&req.method==='GET') return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project:readProject(dir).project})});
       if(parts[3]==='master'&&parts.length===4&&req.method==='PUT') { const b=await body(req); if(typeof b.master!=='boolean') throw fail(400,'Invalid master flag'); setMaster(dataDir,id,b.master); return json(res,200,{id,master:b.master}); }

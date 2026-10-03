@@ -61,6 +61,7 @@ export function copyPages({ srcProjectDir, pages, destProjectDir, newId, newName
   const usedAssets = new Set();
   const usedFonts = new Set();
   for (const page of selectedPages) {
+    for (const image of [...(page.outline?.images || []), ...(page.outline?.baseline?.images || [])]) usedAssets.add(image.asset);
     walkElements(page.elements, (el) => {
       if (el.type === 'image' && el.asset != null) usedAssets.add(el.asset);
       if (el.type === 'text' && el.font != null) usedFonts.add(el.font);
