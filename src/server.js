@@ -248,7 +248,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       server.close();
       process.exitCode = 1;
     });
-    for(const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),3000).unref();});
+    for(const signal of ['SIGINT','SIGTERM','SIGHUP']) process.once(signal,()=>{server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),3000).unref();});
     server.listen(port, '127.0.0.1', () => {
       const url = `http://localhost:${port}/`;
       console.log(`视觉工作台：${url}`);
