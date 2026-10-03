@@ -1,4 +1,4 @@
-.outline-panel { padding: 14px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.outline-panel { box-sizing: border-box; width: 100%; padding: 14px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .outline-document-box { position: relative; border: 1px solid var(--g-border, #d8d9de); border-radius: 8px; background: rgba(255,255,255,.62); overflow: hidden; }
 .outline-document-box textarea, .outline-document-overlay { box-sizing: border-box; margin: 0; padding: 16px 14px; width: 100%; min-height: 164px; font: 15px/1.75 system-ui, sans-serif; letter-spacing: normal; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 4; }
 .outline-document-box textarea { position: relative; display: block; resize: none; border: 0; outline: none; background: transparent; color: transparent; caret-color: #292b32; overflow: hidden; }

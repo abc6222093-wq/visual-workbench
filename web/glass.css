@@ -1658,6 +1658,3 @@ html.glass-mode .resize-handle { right: auto; bottom: auto; transform: translate
 .resize-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .resize-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 .ed-shell.is-focus .ed-grid.is-inspector-collapsed { grid-template-columns: minmax(0, 1fr); }
-.ed-work.is-outline .ed-tools > :not([data-action="toggle-outline"]):not([data-action="focus"]) { display: none; }
-.ed-work.is-outline .ed-well { display: block; padding: 12px; }
-#outline-host { width: 100%; min-height: 100%; }

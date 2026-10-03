@@ -670,7 +670,7 @@ function selectCanvas(id, event, resize) {
     window.removeEventListener("pointerup", up);
     S.dragging = false;
     if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) {
-      for (const { id } of start.values) delete findElement(page(), id).element.documentDraft;
+      for (const { id } of start.values) clearDocumentDraft(findElement(page(), id).element);
       changed({ boardOnly: true });
     } else refreshSelection();
   };
@@ -1509,6 +1509,10 @@ function clearStyle(root) {
   });
   if (different) changed();
 }
+function clearDocumentDraft(element) {
+  delete element.documentDraft;
+  for (const child of element.children || []) clearDocumentDraft(child);
+}
 function updateProp(input) {
   const key = input.dataset.prop;
   if (!S.selected.length) return;
@@ -1545,7 +1549,7 @@ function updateProp(input) {
           key === "height" ? value : e.height,
         );
       else e[key] = value;
-      if (key !== "text") delete e.documentDraft;
+      if (key !== "text") clearDocumentDraft(e);
       different = true;
     }
   });

@@ -6,13 +6,14 @@ import { join } from 'node:path';
 import { createServer } from '../src/server.js';
 import { launchBrowser } from '../src/browser.js';
 
-async function open(t, legacy=false) {
+async function open(t, legacy=false, motion=false) {
   const dir=mkdtempSync(join(tmpdir(),'vw-document-acceptance-')), file=join(dir,'projects/sample-deck/project.json');
   cpSync(new URL('../examples/sample-deck/',import.meta.url),join(dir,'projects/sample-deck'),{recursive:true,filter:p=>!String(p).includes('/versions')});
   const original=JSON.parse(readFileSync(file,'utf8'));
   original.pages[0].elements=original.pages[0].elements.filter(e=>e.type==='text').slice(0,2);
   original.pages[0].elements.push({...structuredClone(original.pages[0].elements[0]),id:'el_decoration',text:'DECORATIVE',decorative:true});
   delete original.pages[0].motion;
+  if(motion) original.pages[0].motion={steps:1,source:"export default ctx=>{const n=ctx.element('el_subtitle1').node;n.style.opacity='0';return {step(){n.style.opacity='1';}}}"};
   if(legacy) original.pages[0].outline={screens:2,notes:'旧备注',images:[],rows:[{id:'row_legacy',role:'title',text:'旧大纲保留文案',emphasis:[],from:1,until:null}]};
   writeFileSync(file,JSON.stringify(original));
   const server=createServer({dataDir:dir});let browser;
@@ -95,5 +96,23 @@ test('legacy outline conversion automatically versions first and keeps unmapped 
   project.pages[0].outline.rows.find(r=>r.elementId==='el_title1').text='agent 新文案';
   writeFileSync(file,JSON.stringify(project));
   await p.waitForFunction(()=>document.querySelector('[data-outline-document]')?.value.includes('agent 新文案'));
+  assert.deepEqual(errors,[]);
+});
+
+
+test('existing motion seeds document visibility and toolbar changes the displayed paragraphs',async t=>{
+  const {p,file,errors}=await open(t,false,true);
+  await waitSaved(p);
+  const cover=disk(file).pages[0];
+  assert.deepEqual(cover.outline.rows.find(r=>r.elementId==='el_subtitle1').visibleOn,[2]);
+  await p.locator('[data-step-view]').selectOption('-1');
+  await p.waitForSelector('#artboard[data-step-shown="-1"]');
+  assert.ok(!(await p.locator('[data-outline-document]').inputValue()).includes(cover.elements[1].text));
+  await p.locator('[data-outline-action="screen"][data-screen="2"]').click();
+  assert.equal(await p.locator('[data-step-view]').inputValue(),'1');
+  assert.ok((await p.locator('[data-outline-document]').inputValue()).includes(cover.elements[1].text));
+  const before=readFileSync(file,'utf8');
+  await p.locator('[data-step-view]').selectOption('0');
+  assert.equal(readFileSync(file,'utf8'),before,'screen selection alone never changes the project');
   assert.deepEqual(errors,[]);
 });

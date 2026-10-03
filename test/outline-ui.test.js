@@ -14,6 +14,7 @@ async function open(t) {
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1440,height:1000}});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('[data-action="open"][data-id="sample-deck"]').waitFor();
   await page.evaluate(async()=>{
     const {mountOutlinePanel}=await import('/outline-panel.js');
     const project=(await (await fetch('/api/projects/sample-deck')).json()).project;
