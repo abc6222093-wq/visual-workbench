@@ -29,6 +29,23 @@ async function open(t, mode) {
       return new Promise(resolve=>ctx.signal.addEventListener('abort',()=>{window.__pendingSnapshotAborted=true;resolve({step(){}});},{once:true}));
     }
     const title = ctx.element('el_title1').node;
+    if (${JSON.stringify(mode)} === 'controlled' && window.__selectionMotionInits > 1) {
+      const index = window.__selectionMotionInits;
+      window.__snapshotGates ||= {};
+      return new Promise(resolve => {
+        const gate = window.__snapshotGates[index] = {
+          aborted: false,
+          release() { resolve({ step() {
+            title.style.transform = 'translate(100px, 0px)';
+            window.__snapshotPrepared = index;
+          } }); },
+        };
+        ctx.signal.addEventListener('abort', () => {
+          gate.aborted = true;
+          resolve({ step() {} });
+        }, { once: true });
+      });
+    }
     if (${JSON.stringify(mode)} === 'pointer-none') {
       ctx.root.style.pointerEvents = 'none';
       title.style.pointerEvents = 'none';
@@ -94,6 +111,8 @@ test('screen drag and resize preserve motion DOM during the gesture', async t =>
   assert.equal(await page.evaluate(() => window.__selectionMotionInits), initCount);
   assert.notEqual(await title.evaluate(n => n.style.translate), '');
   await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector('#artboard') !== window.__selectionBoard
+    && document.querySelector('#artboard')?.dataset.stepShown === '1');
   await page.waitForSelector('#artboard[data-step-shown="1"]');
   const handle = await page.locator('[data-resize="el_title1"][data-handle="se"]').boundingBox();
   await page.evaluate(() => { window.__selectionBoard = document.querySelector('#artboard'); });
@@ -104,6 +123,8 @@ test('screen drag and resize preserve motion DOM during the gesture', async t =>
   assert.equal(await page.evaluate(() => document.querySelector('#artboard') === window.__selectionBoard), true);
   assert.equal(await page.evaluate(() => window.__selectionMotionInits), resizedInitCount);
   await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector('#artboard') !== window.__selectionBoard
+    && document.querySelector('#artboard')?.dataset.stepShown === '1');
   await page.waitForSelector('#artboard[data-step-shown="1"]');
   assert.equal(await page.locator('[data-resize="el_title1"]').count(), 8);
   assert.deepEqual(errors, []);
@@ -136,3 +157,51 @@ test('leaving a page immediately aborts a pending post-drag motion snapshot',asy
   assert.equal(await page.locator('#artboard-holder > div').count(),1);
   assert.deepEqual(errors,[]);
 });
+
+// Resolve the previous gesture's initializer while the next pointer is held.
+// No sleeps: gates prove the delayed frame is ready at the collision point.
+for (const kind of ['drag', 'resize', 'hold']) {
+  test(`ready snapshot waits for ${kind} to end and keeps only the latest geometry`, async t => {
+    const { page, errors } = await open(t, 'controlled');
+    await page.locator('[data-step-view]').selectOption('1');
+    await page.waitForSelector('#artboard[data-step-shown="1"]');
+    const title = page.locator('#artboard [data-element-id="el_title1"]');
+    const box = await title.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20);
+    await page.mouse.up();
+    await page.waitForFunction(() => !!window.__snapshotGates?.[2]);
+    await page.evaluate(() => { window.__selectionBoard = document.querySelector('#artboard'); });
+    const next = kind === 'resize'
+      ? await page.locator('[data-resize="el_title1"][data-handle="se"]').boundingBox()
+      : await title.boundingBox();
+    const x = next.x + next.width / 2, y = next.y + next.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.evaluate(() => window.__snapshotGates[2].release());
+    assert.equal(await page.evaluate(() => window.__snapshotGates[2].aborted), false,
+      'starting another gesture retains the pending frame');
+    await page.waitForFunction(() => window.__snapshotPrepared === 2);
+    assert.equal(await page.evaluate(() => document.querySelector('#artboard') === window.__selectionBoard), true,
+      'a ready frame must not replace a board under an active pointer');
+    if (kind !== 'hold') await page.mouse.move(x + 30, y + 20);
+    const latest = await title.evaluate(n => ({ width: n.style.width, translate: n.style.translate }));
+    assert.equal(await page.evaluate(() => document.querySelector('#artboard') === window.__selectionBoard), true);
+    await page.mouse.up();
+    if (kind !== 'hold') {
+      await page.waitForFunction(() => !!window.__snapshotGates?.[3]);
+      assert.equal(await page.evaluate(() => window.__snapshotGates[2].aborted), true,
+        'new geometry supersedes the previous ready frame');
+      assert.equal(await page.evaluate(() => document.querySelector('#artboard') === window.__selectionBoard), true,
+        'do not briefly display the obsolete frame while the latest one is preparing');
+      await page.evaluate(() => window.__snapshotGates[3].release());
+    }
+    await page.waitForFunction(() => document.querySelector('#artboard') !== window.__selectionBoard
+      && document.querySelector('#artboard')?.dataset.stepShown === '1');
+    assert.equal(await page.evaluate(() => window.__snapshotPrepared), kind === 'hold' ? 2 : 3);
+    if (kind === 'resize') assert.equal(await title.evaluate(n => n.style.width), latest.width);
+    assert.equal(await page.locator('[data-resize="el_title1"]').count(), 8);
+    assert.deepEqual(errors, []);
+  });
+}
