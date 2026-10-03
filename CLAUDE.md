@@ -1,6 +1,6 @@
 # 视觉工作台 · agent 规则
 
-「视觉工作台」只在本地（macOS）运行：agent 按固定格式生成设计（课件、海报、网页等）并写动效，エイ（使用者，没有代码背景）在工作台里微调、放映、导出，agent 再在她改过的基础上继续做。双方读写同一份 `project.json`。产品基准见 `PLAN.md`，当前状态见 `HANDOFF.md`。
+「视觉工作台」只在本地（macOS、Windows）运行：agent 按固定格式生成设计（课件、海报、网页等）并写动效，エイ（使用者，没有代码背景）在工作台里微调、放映、导出，agent 再在她改过的基础上继续做。双方读写同一份 `project.json`。产品基准见 `PLAN.md`，当前状态见 `HANDOFF.md`。
 
 ## 目录结构
 - `src/`：本地服务（`server.js`）、校验、存版与回收（`version.js`）、实时监听（`watch.js`）、系列母版（`master.js`）、导出（`export/`）、找浏览器（`browser.js`）、命令行脚本（`cli/`）
@@ -9,7 +9,7 @@
 - `docs/format.md`：项目格式的文字说明（以最新版为准）
 - `examples/sample-deck/`：示例项目，照着写
 - `test/`：测试（`npm test`）
-- 数据目录（默认 `~/Projects/visual-workbench-data`，可在 `workbench.config.json` 改）：
+- 数据目录（以工作台的设置为准，复制给 agent 的文字里会写明，不要假设固定路径）：
   - `projects/<项目编号>/`：`project.json`、`assets/`、`fonts/`、`versions/`，从母版新建的还有 `series.json`，agent 也可以放动效用的附属文件
   - `library/assets/`、`library/fonts/`：公共素材库
   - `exports/<项目编号>/`：导出的放映版 HTML、图片、PDF
@@ -25,7 +25,7 @@
 | 复制页面到新项目 | `npm run copy-pages -- <源项目> <页码> --to <新编号>` |
 | 导出 | `npm run export -- <项目> [--html \| --images \| --pdf \| --all]` |
 
-动效检查和导出图片 / PDF 要用浏览器：自动按 Mac 上的 Chrome → Edge → Playwright 自带 Chromium → WebKit（Safari 内核）顺序找；都没有时会给中文提示，照提示装 Chrome 或运行 `npx playwright install chromium`。
+动效检查和导出图片 / PDF 要用浏览器：自动找当前系统安装的 Chrome、Edge，再找 Playwright 自带 Chromium / WebKit；都没有时会给中文提示，照提示装 Chrome 或运行 `npx playwright install chromium`。
 
 ## 改项目文件前，必须依次做
 1. 读最新的 `docs/format.md` 和 `schema/project.schema.json`，不要凭记忆。
@@ -53,6 +53,18 @@
 - エイ 删除了动效引用的元素后，要修正源码；复制元素不会自动复制动效。
 - 第三方库的计时器、动画在 `dispose` 或 `ctx.signal` 里清理。
 - 等待和动画优先用 `ctx.timer`、`ctx.animate`（或浏览器动画接口）：往回翻页、步骤视图会把它们瞬间快进到结尾；用第三方库自带计时并在步骤里等它播完的，快进时只能按真实时长等。
+
+## 按文档填大纲
+- 「请填大纲」是独立于「请排版」的工作：先按复制说明读取文档或路径，只处理点名的页。先读最新项目并存版。按原文明确的页界分页；没有页界时按主题分组，页数不够就在最后一个指定页后新建，不擅自改其他页。
+- 每段独立一条 `rows`：大标题 title、小标题 subtitle、英文副标题 english、正文 body、注释 note；正文空行分段。依据原文标记和语义记录强调（UTF-16 左闭右开范围），不擅自缩写原文。图片登记已有素材编号与 `images[].caption`；未提供图片则把待补要求写进 notes，不造不存在的素材引用。这页的气氛和要求放 notes。
+- 联动文稿 `mode: "document"`：每行生成一个独立文字元素，稳定的 `elementId` 对应起来，文字与行 text 一致。新元素仅用工作台 `web/outline-document.js` 的默认草稿样式与安全位置，标 `documentDraft:true`；可用 `reconcileDocument` 落实未映射行。保留已有元素位置、尺寸、样式，只同步被要求改的文案；不写、不修改动效，不做设计排版。
+- 原文有点击/多屏要求才登记 screens 和行的 from/until；此阶段不补动效。保留条目同步 baseline，不把填完的草稿覆盖为已排版的 outline.baseline。完成校验和动效检查，再交给エイ 在大纲中修改；她选择「请排版」后才设计布局与动效。
+
+## 两台电脑与数据目录
+- 配置优先级：`--data-dir` > `VW_DATA_DIR` > 用户主目录 `.visual-workbench/config.json` > 仓库 `workbench.config.json`。同机所有克隆共用本机配置。总览「数据文件夹」显示实际路径和来源；保存新路径后重启生效，环境变量/命令行覆盖仍然优先。
+- Google Drive 仅作普通本地同步文件夹，不调用云端接口。切换电脑前关闭工作台并等同步完成；另一台启动前也等同步完成。不要自动移动用户数据或改现有设置。
+- `.workbench-sessions/` 是工作台自己的使用标记，不属于项目。每 15 秒更新，90 秒未更新算过期；看到新鲜标记先要求确认，过期提醒后可用。网盘延迟和离线意味着它不是跨机器强锁；不能保证两台同时离线开机时立即互相发现。agent 也应尊重提示，不能自行删标记绕过。
+- 打开项目会列出疑似同步冲突副本。先核对双方，不自动删除或合并。
 
 ## 按大纲排版
 - 右侧「大纲」是当前页的联动文稿，不再有整页卡片、提取或应用按钮。数据仍在 `project.json` 的 `pages[].outline`；`mode: "document"` 表示实时联动。旧项目没有大纲也能打开；第 6 轮旧大纲首次转为文稿前工作台自动存版，保留未落实文案和冲突双方。

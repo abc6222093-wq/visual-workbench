@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { browserCandidates, launchBrowser, NO_BROWSER_MESSAGE } from '../src/browser.js';
+import { browserCandidates, launchBrowser, NO_BROWSER_MESSAGE, noBrowserMessage } from '../src/browser.js';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 
@@ -27,4 +27,21 @@ test('check-motion 找不到浏览器时只输出中文提示，不出现英文�
   assert.equal(r.status, 1);
   assert.equal(r.stderr.trim(), NO_BROWSER_MESSAGE);
   assert.doesNotMatch(r.stdout + r.stderr, /Executable|playwright install\b(?! chromium)|Error/);
+});
+
+test('Windows 系统和用户 Chrome、Edge 按顺序查找，路径环境可注入', () => {
+  const env = { PROGRAMFILES: 'C:\\Program Files', 'PROGRAMFILES(X86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\日本 用户\\AppData\\Local' };
+  const paths = new Set(['C:\\Users\\日本 用户\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe']);
+  const candidates = browserCandidates({ platform: 'win32', env, exists: (p) => paths.has(p), only: '' });
+  assert.deepEqual(candidates.map((c) => c.name), ['Google Chrome', 'Microsoft Edge']);
+  assert.equal(candidates[0].executablePath, [...paths][0]);
+});
+
+test('找不到浏览器时按平台给对应安装说明',()=>{assert.match(noBrowserMessage('win32'),/Windows.*PowerShell/);assert.match(noBrowserMessage('darwin'),/Mac.*应用程序/);assert.match(noBrowserMessage('linux'),/Linux/);});
+
+test('Windows Chrome 和 Edge 各自支持两个系统目录与用户目录',()=>{
+ const env={ProgramFiles:'D:\\程序', 'ProgramFiles(x86)':'D:\\程序32',LOCALAPPDATA:'D:\\用户\\本地'};
+ for(const root of Object.values(env))for(const [name,rel] of [['Google Chrome','Google\\Chrome\\Application\\chrome.exe'],['Microsoft Edge','Microsoft\\Edge\\Application\\msedge.exe']]){
+  const path=`${root}\\${rel}`;const found=browserCandidates({platform:'win32',env,only:'',exists:p=>p===path});assert.equal(found.length,1);assert.equal(found[0].name,name);assert.equal(found[0].executablePath,path);
+ }
 });

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listVersions, saveVersion } from '../src/version.js';
 
@@ -25,7 +25,7 @@ test('saveVersion 后 versions/ 多出一份，且含 meta.json', () => {
     const { versionDir } = saveVersion({ projectDir: dir, note: '第一版' });
     assert.equal(listVersions(dir).length, 1);
     assert.ok(existsSync(join(versionDir, 'meta.json')));
-    assert.match(versionDir.split('/').pop(), /^\d{8}-\d{6}(-\d+)?$/);
+    assert.match(basename(versionDir), /^\d{8}-\d{6}(-\d+)?$/);
   });
 });
 

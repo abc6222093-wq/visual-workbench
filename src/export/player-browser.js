@@ -139,4 +139,4 @@ globalThis.vwCheckMotion = async (options = {}) => {
 globalThis.vwPlayer = { advance, back, get page() { return state.index + 1; }, get busy() { return state.busy || !!state.playback?.isPlaying(); } };
 
 // 打开时带 #vw-check 只做检查，不开始放映（命令行检查用，避免放映动效干扰检查结果）
-globalThis.vwReady = location.hash === '#vw-check' ? Promise.resolve() : show(0);
+export const ready = location.hash === '#vw-check' ? Promise.resolve() : show(0);

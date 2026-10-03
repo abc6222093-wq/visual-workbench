@@ -3,12 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, cpSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { join, basename } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { exportImages, exportPdf, safeFileName } from '../src/export/images.js';
 import { buildPdf, jpegInfo } from '../src/export/pdf.js';
 
-const SAMPLE = new URL('../examples/sample-deck/', import.meta.url).pathname;
+const SAMPLE = fileURLToPath(new URL('../examples/sample-deck/', import.meta.url));
 
 function tempDir(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -111,8 +112,8 @@ test('示例项目：每页一张 1920×1080 PNG，再导出一份 3 页 PDF', {
   const out = tempDir(t, 'vw-export-out-');
   const { files } = await exportImages({ projectDir: SAMPLE, outDir: out });
   assert.equal(files.length, 3);
-  assert.match(files[0].path, /\/01-1 封面：逐项出现与擦拭换页\.png$/);
-  assert.match(files[2].path, /\/03-/);
+  assert.match(basename(files[0].path), /^01-1 封面：逐项出现与擦拭换页\.png$/);
+  assert.match(basename(files[2].path), /^03-/);
   for (const file of files) {
     assert.ok(existsSync(file.path));
     assert.equal(statSync(file.path).size, file.bytes);
