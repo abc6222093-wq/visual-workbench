@@ -31,6 +31,7 @@ function checkDataRoots(dataDir) {
   }
 }
 function imageSize(data, mime) {
+  if (mime === 'image/svg+xml') return svgSize(data);
   if (mime === 'image/png' && data.length >= 24 && data.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a','hex'))) return { width:data.readUInt32BE(16), height:data.readUInt32BE(20) };
   if (mime === 'image/gif' && data.length >= 10 && data.subarray(0, 3).toString() === 'GIF') return { width:data.readUInt16LE(6), height:data.readUInt16LE(8) };
   if (mime === 'image/webp' && data.length >= 30 && data.subarray(12, 16).toString() === 'VP8X') return { width:1+data.readUIntLE(24,3), height:1+data.readUIntLE(27,3) };
@@ -58,8 +59,34 @@ function projectPath(dataDir,id) {
   return dir;
 }
 function libraryRoot(dataDir) { const root=join(dataDir,'library/assets'); noSymlinks(root); return root; }
-function serve(res, root, rel, extra={}) { const file=safe(root,rel); if(!existsSync(file)||!statSync(file).isFile()) throw fail(404,'File not found'); const data=readFileSync(file); res.writeHead(200,{'Content-Type':(MIME[extname(file).toLowerCase()]||'application/octet-stream')+'; charset=utf-8','Content-Length':data.length,'X-Content-Type-Options':'nosniff',...extra}); res.end(data); }
-function upload(input) { const name=String(input.name||'image.png'); if(typeof input.data!=='string') throw fail(400,'Missing image data'); const match=/^data:(image\/(?:png|jpeg|webp|gif));base64,(.*)$/s.exec(input.data); const mime=input.mime||match?.[1]||'image/png'; if(!['image/png','image/jpeg','image/webp','image/gif'].includes(mime)) throw fail(400,'Unsupported image type'); const encoded=match?match[2]:input.data; if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)||encoded.length%4===1) throw fail(400,'Invalid base64 image'); const data=Buffer.from(encoded,'base64'); if(!data.length||data.length>15_000_000) throw fail(400,'Invalid image size'); const ext={ 'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp','image/gif':'.gif' }[mime]; const filename=`${randomUUID()}${ext}`; return {name, mime, data, filename}; }
+function serve(res, root, rel, extra={}) { const file=safe(root,rel); if(!existsSync(file)||!statSync(file).isFile()) throw fail(404,'File not found'); const data=readFileSync(file); const svg=extname(file).toLowerCase()==='.svg'; res.writeHead(200,{'Content-Type':(MIME[extname(file).toLowerCase()]||'application/octet-stream')+'; charset=utf-8','Content-Length':data.length,'X-Content-Type-Options':'nosniff',...(svg?{'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'"}:{}),...extra}); res.end(data); }
+// SVG 安全检查：只收纯图形。带脚本、事件属性、javascript: 链接、foreignObject、外部链接的一律拒绝
+function checkSvg(data) {
+  const text=data.toString('utf8');
+  if(!/<svg[\s>]/i.test(text)) throw fail(400,'这个文件不是有效的 SVG 图片');
+  if(/<script/i.test(text)) throw fail(400,'SVG 里含有脚本（<script>），为了安全不能使用');
+  if(/<foreignObject/i.test(text)) throw fail(400,'SVG 里嵌了网页内容（foreignObject），为了安全不能使用');
+  if(/[\s"'\/]on[a-z]+\s*=/i.test(text)) throw fail(400,'SVG 里含有事件代码（on… 属性），为了安全不能使用');
+  if(/javascript\s*:/i.test(text)) throw fail(400,'SVG 里含有 javascript: 链接，为了安全不能使用');
+  if(/href\s*=\s*["']?\s*(?:https?:)?\/\//i.test(text)) throw fail(400,'SVG 引用了网络上的外部文件，为了安全不能使用；请把图形直接画在 SVG 里');
+  if(/<!ENTITY/i.test(text)) throw fail(400,'SVG 里含有实体声明（<!ENTITY>），为了安全不能使用');
+}
+// SVG 尺寸：根 <svg> 的 width / height（像素或无单位），没有就用 viewBox 的宽高
+function svgSize(data) {
+  const root=/<svg\b[^>]*>/i.exec(data.toString('utf8'))?.[0]; if(!root) return {};
+  const attr=name=>new RegExp(`\\s${name}\\s*=\\s*["']([^"']*)["']`,'i').exec(root)?.[1];
+  const length=v=>{ const m=/^\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$/i.exec(v||''); return m?Math.round(Number(m[1])):undefined; };
+  let width=length(attr('width')), height=length(attr('height'));
+  const box=(attr('viewBox')||'').trim().split(/[\s,]+/).map(Number);
+  if(box.length===4&&box.every(Number.isFinite)&&box[2]>0&&box[3]>0) {
+    if(!width&&!height) { width=Math.round(box[2]); height=Math.round(box[3]); }
+    else if(!width) width=Math.round(height*box[2]/box[3]);
+    else if(!height) height=Math.round(width*box[3]/box[2]);
+  }
+  return width>=1&&height>=1?{width,height}:{};
+}
+const UPLOAD_EXT={ 'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp','image/gif':'.gif','image/svg+xml':'.svg' };
+function upload(input) { const name=String(input.name||'image.png'); if(typeof input.data!=='string') throw fail(400,'Missing image data'); const match=/^data:(image\/(?:png|jpeg|webp|gif|svg\+xml));base64,(.*)$/s.exec(input.data); const mime=input.mime||match?.[1]||'image/png'; if(!UPLOAD_EXT[mime]) throw fail(400,'Unsupported image type'); const encoded=match?match[2]:input.data; if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)||encoded.length%4===1) throw fail(400,'Invalid base64 image'); const data=Buffer.from(encoded,'base64'); if(!data.length||data.length>15_000_000) throw fail(400,'Invalid image size'); if(mime==='image/svg+xml') checkSvg(data); const ext=UPLOAD_EXT[mime]; const filename=`${randomUUID()}${ext}`; return {name, mime, data, filename, ...imageSize(data,mime)}; }
 function dims(o) { for(const key of ['width','height']) if(!Number.isInteger(o[key])||o[key]<1) throw fail(400,`Invalid ${key}`); }
 // ---------- 导出 ----------
 // 导出文件放在 <数据目录>/exports/<项目编号>/<时间>-<类型>/，不在项目文件夹里：
@@ -163,12 +190,12 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       if(parts[3]==='copy'&&parts.length===4&&req.method==='POST') { const b=await body(req); if(!ID.test(b.id||'')) throw fail(400,'Invalid project id'); const dest=safe(join(dataDir,'projects'),b.id); const out=copyPages({srcProjectDir:dir,pages:b.pages,destProjectDir:dest,newId:b.id,newName:b.name}); return json(res,201,{project:out.project,revision:readProject(dest).revision}); }
       if(parts[3]==='assets'&&parts.length===4&&req.method==='POST') { const b=await body(req),old=readProject(dir); if(b.revision!==undefined) checkRevision(b.revision,old.revision); let filename,name,data,source,width=b.width,height=b.height;
         if(b.libraryFile!==undefined) { if(!validFile(b.libraryFile)) throw fail(400,'Invalid library file'); const library=libraryRoot(dataDir); const from=safe(library,b.libraryFile); if(!existsSync(from)) throw fail(404,'Library file not found'); data=readFileSync(from); const metaPath=safe(library,`${b.libraryFile}.json`); const meta=existsSync(metaPath)?JSON.parse(readFileSync(metaPath,'utf8')):{}; const inferred=imageSize(data,MIME[extname(from).toLowerCase()]); width=width??meta.width??inferred.width; height=height??meta.height??inferred.height; filename=`${randomUUID()}${extname(from)}`; name=b.name||meta.name||b.libraryFile; source={type:'library',from:b.libraryFile}; }
-        else { const u=upload(b); ({filename,name,data}=u); source={type:'upload'}; }
+        else { const u=upload(b); ({filename,name,data}=u); source={type:'upload'}; if(width===undefined&&height===undefined&&u.width&&u.height) ({width,height}=u); }
         if(width!==undefined||height!==undefined) dims({width,height}); const asset={id:`asset_${randomUUID().replaceAll('-','').slice(0,16)}`,kind:'image',file:`assets/${filename}`,name,...(width&&height?{width,height}:{}),pendingLayout:true,addedAt:new Date().toISOString(),source}; const file=safe(join(dir,'assets'),filename); watcher.noteSelfWrite(id,`assets/${filename}`,data); writeFileSync(file,data,{flag:'wx'}); try { const project={...old.project,updatedAt:new Date().toISOString(),assets:[...old.project.assets,asset]}; const revision=saveProject(dir,project,selfWrite(id)); return json(res,201,{asset,project,revision}); } catch(e){rmSync(file,{force:true});throw e;} }
     }
     if(url.pathname==='/api/reveal'&&req.method==='POST') { const b=await body(req); const target=revealPath(dataDir,b.path); await reveal(target); return json(res,200,{ok:true,path:target}); }
     if(url.pathname==='/api/library'&&req.method==='GET') { const root=libraryRoot(dataDir); return json(res,200,readdirSync(root,{withFileTypes:true}).filter(e=>e.isFile()&&validFile(e.name)&&MIME[extname(e.name).toLowerCase()]?.startsWith('image/')).map(e=>{ const data=readFileSync(safe(root,e.name)); const inferred=imageSize(data,MIME[extname(e.name).toLowerCase()]); const metaFile=safe(root,`${e.name}.json`); const meta=existsSync(metaFile)?JSON.parse(readFileSync(metaFile,'utf8')):{}; return {name:meta.name||e.name,file:e.name,url:`/data/library/assets/${encodeURIComponent(e.name)}`,width:meta.width??inferred.width??null,height:meta.height??inferred.height??null,mime:meta.mime||MIME[extname(e.name).toLowerCase()]}; })); }
-    if(url.pathname==='/api/library'&&req.method==='POST') { const b=await body(req); dims(b); const u=upload(b),root=libraryRoot(dataDir); writeFileSync(safe(root,u.filename),u.data,{flag:'wx'}); writeFileSync(safe(root,`${u.filename}.json`),JSON.stringify({name:u.name,width:b.width,height:b.height,mime:u.mime})); return json(res,201,{name:u.name,file:u.filename,url:`/data/library/assets/${u.filename}`,width:b.width,height:b.height,mime:u.mime}); }
+    if(url.pathname==='/api/library'&&req.method==='POST') { const b=await body(req); const u=upload(b),root=libraryRoot(dataDir); const width=b.width??u.width,height=b.height??u.height; dims({width,height}); writeFileSync(safe(root,u.filename),u.data,{flag:'wx'}); writeFileSync(safe(root,`${u.filename}.json`),JSON.stringify({name:u.name,width,height,mime:u.mime})); return json(res,201,{name:u.name,file:u.filename,url:`/data/library/assets/${u.filename}`,width,height,mime:u.mime}); }
     if(req.method==='GET'&&parts[0]==='data'&&parts[1]==='projects'&&parts.length===5&&['assets','fonts'].includes(parts[3]) ) return serve(res,join(projectPath(dataDir,parts[2]),parts[3]),decodeFile(parts[4]),{'Cache-Control':'no-store'});
     if(req.method==='GET'&&parts[0]==='data'&&parts[1]==='library'&&parts[2]==='assets'&&parts.length===4 ) return serve(res,libraryRoot(dataDir),decodeFile(parts[3]));
     if(req.method==='GET'&&!url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/data/')) return serve(res,WEB,url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1)),{'Cache-Control':'no-cache'}); // 界面代码更新后，浏览器不能继续用旧的

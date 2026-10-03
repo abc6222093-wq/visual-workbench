@@ -1,6 +1,8 @@
-import { loadMotion } from './motion-runtime.js';
+import { loadMotion, finishAnimations } from './motion-runtime.js';
 
-export function createPlayback(project, page, { root, onRender, onComplete, onError, assetBase } = {}) {
+// startAtEnd：初始化后立刻无动画地跑完全部步骤，直接停在本页最后一步的画面（后退到上一页时用，像 PowerPoint）。
+// 快进期间页面保持 visibility:hidden，避免闪一下初始画面；之后的下一次点击直接去下一页。
+export function createPlayback(project, page, { root, onRender, onComplete, onError, assetBase, startAtEnd = false } = {}) {
   let controller = new AbortController();
   let runtime;
   const staticRoot = root?.cloneNode?.(true);
@@ -9,16 +11,42 @@ export function createPlayback(project, page, { root, onRender, onComplete, onEr
   let destroyed = false;
   const steps = page.motion?.steps || 0;
   const report = error => { if (!controller.signal.aborted) onError?.(error); };
-  const init = async () => {
+  const init = async (toEnd = false) => {
     const activeController = controller;
+    const hide = toEnd && root?.style;
+    const visibility = hide ? root.style.visibility : '';
+    if (hide) root.style.visibility = 'hidden';
     try {
-      const loaded = await loadMotion(project, page, root, activeController.signal, assetBase);
+      const loaded = await loadMotion(project, page, root, activeController.signal, assetBase, { fast: toEnd });
       if (activeController.signal.aborted) { loaded.cleanup(); await loaded.handlers.dispose?.(); return; }
       runtime = loaded;
+      if (toEnd) await fastForward(activeController.signal);
+      if (activeController.signal.aborted) return;
       onRender?.(getState());
     } catch (error) { if (!activeController.signal.aborted) onError?.(error); throw error; }
+    finally { if (hide) root.style.visibility = visibility; }
   };
-  let ready = init();
+  // 快进：按顺序跑完 step(0..steps-1)，每步后把 root 里的有限动画直接跳到结尾。
+  // 某一步出错只报告，不让 ready 失败：页面照常显示，下一次点击去下一页。
+  async function fastForward(signal) {
+    finishAnimations(root);
+    try {
+      for (let index = 0; index < steps; index++) {
+        if (signal.aborted) return;
+        runtime.setStep(index);
+        await runtime.handlers.step(index);
+        finishAnimations(root);
+      }
+    } catch (error) {
+      if (!signal.aborted) onError?.(error);
+    } finally {
+      runtime.setFast(false);
+    }
+    if (signal.aborted) return;
+    nextStep = steps;
+    if (steps > 0) onComplete?.();
+  }
+  let ready = init(startAtEnd);
   ready.catch(() => {});
   function getState() { return { nextStep, totalSteps: steps }; }
   function next() {

@@ -97,6 +97,61 @@ function shapeContent(node, element) {
   }
 }
 
+// 文字描边：-webkit-text-stroke 画在字形边缘（宽度为线宽，画板像素）；paint-order 让填充盖在描边上，描边不吃掉字形。
+// 文字阴影：text-shadow x y blur color。没有这两个属性的旧项目不写任何样式，画面与以前一致。
+function applyTextStyle(node, element) {
+  const stroke = element.stroke;
+  const value = stroke && Number(stroke.width) > 0 ? `${px(stroke.width)} ${stroke.color}` : '';
+  if (value || node.style.webkitTextStroke || node.style.getPropertyValue('-webkit-text-stroke')) {
+    node.style.webkitTextStroke = value;
+    node.style.setProperty('-webkit-text-stroke', value);
+    node.style.paintOrder = value ? 'stroke fill' : '';
+  }
+  const shadow = element.shadow;
+  const textShadow = shadow ? `${px(shadow.x)} ${px(shadow.y)} ${px(Math.max(0, Number(shadow.blur) || 0))} ${shadow.color}` : '';
+  if (textShadow || node.style.textShadow) node.style.textShadow = textShadow;
+}
+
+// 图片元素节点 → 图片地址（导出版里是很长的 data: 地址，不放进 DOM 属性）
+const imageSources = new WeakMap();
+const MASK_SIZE = { cover: 'cover', contain: 'contain', fill: '100% 100%' };
+
+// 图片内容：普通图片用 <img>；设了 tint（重新着色）时画成纯色块，用图片的透明度当遮罩，
+// 只适合单色的矢量标志（SVG）或透明底的单色 PNG / WebP。遮罩挂在内层，不影响元素自己的 effects.mask。
+function imageContent(node, element, src) {
+  const tint = typeof element.tint === 'string' && element.tint ? element.tint : null;
+  const fit = element.fit || 'cover';
+  let child = node.firstElementChild;
+  if (tint) {
+    if (!child || !child.dataset.vwTint) {
+      child = document.createElement('div');
+      child.dataset.vwTint = '1';
+      child.setAttribute('role', 'img');
+      node.replaceChildren(child);
+    }
+    const url = `url(${JSON.stringify(src)})`;
+    child.setAttribute('aria-label', element.name || '');
+    child.style.cssText = 'width:100%;height:100%;display:block';
+    child.style.backgroundColor = tint;
+    for (const prefix of ['', '-webkit-']) {
+      child.style.setProperty(`${prefix}mask-image`, url);
+      child.style.setProperty(`${prefix}mask-size`, MASK_SIZE[fit] || 'cover');
+      child.style.setProperty(`${prefix}mask-position`, 'center');
+      child.style.setProperty(`${prefix}mask-repeat`, 'no-repeat');
+    }
+    return;
+  }
+  if (!child || child.tagName !== 'IMG') {
+    child = document.createElement('img');
+    child.decoding = 'sync'; // 拖动时画面每一步都会重画：同步解码，Safari 里图片不会闪一下空白
+    child.src = src;
+    child.draggable = false;
+    node.replaceChildren(child);
+  }
+  child.alt = element.name || '';
+  child.style.cssText = `width:100%;height:100%;display:block;object-fit:${fit}`;
+}
+
 export function updateElementNode(node, element) {
   node.style.position = 'absolute';
   node.style.left = px(element.x); node.style.top = px(element.y);
@@ -110,7 +165,8 @@ export function updateElementNode(node, element) {
   node.style.maskImage = maskImage(element.effects?.mask);
   node.style.webkitMaskImage = node.style.maskImage;
   node.style.clipPath = clipPath(element.effects?.clip);
-  if (element.type === 'text') node.style.color = element.color || '#000000';
+  if (element.type === 'text') { node.style.color = element.color || '#000000'; applyTextStyle(node, element); }
+  if (element.type === 'image' && imageSources.has(node)) imageContent(node, element, imageSources.get(node));
   if (element.type === 'shape') {
     if (element.shape === 'line' || element.shape === 'polygon') {
       const figure = node.querySelector('polygon,line');
@@ -140,13 +196,7 @@ function renderElement(project, element, options, fontMap, assetMap) {
     node.style.letterSpacing = px(element.letterSpacing || 0);
     node.style.textAlign = element.align || 'left';
   } else if (element.type === 'image') {
-    const image = document.createElement('img');
-    image.decoding = 'sync'; // 拖动时画面每一步都会重画：同步解码，Safari 里图片不会闪一下空白
-    image.src = fileUrl(options, assetMap.get(element.asset)?.file || '');
-    image.alt = element.name || '';
-    image.draggable = false;
-    image.style.cssText = `width:100%;height:100%;display:block;object-fit:${element.fit || 'cover'}`;
-    node.append(image);
+    imageSources.set(node, fileUrl(options, assetMap.get(element.asset)?.file || ''));
   } else if (element.type === 'shape') shapeContent(node, element);
   else if (element.type === 'group') {
     for (const child of [...element.children].sort((a, b) => a.zIndex - b.zIndex)) node.append(renderElement(project, child, options, fontMap, assetMap));

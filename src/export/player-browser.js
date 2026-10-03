@@ -2,6 +2,7 @@
 // 页面渲染、点击推进、换页、动效检查都直接用工作台的 render.js / playback.js / motion-check.js，
 // 这里只负责：画板按窗口缩放、点击 / 按键 / 滑动推进、页码显示。
 // 换页流程与工作台 web/motion-stage.js 一致：先渲染下一页（隐藏），由当前页的 transition 负责过渡，再销毁当前页。
+// 后退到上一页时，那一页直接停在最后一步完成后的画面。
 import { renderPage } from './render.js';
 import { createPlayback } from './playback.js';
 import { checkMotion } from './motion-check.js';
@@ -45,6 +46,7 @@ function report(error) {
 const state = { index: -1, board: null, playback: null, busy: false, broken: false };
 function showCounter() { counter.textContent = `${state.index + 1} / ${project.pages.length}`; }
 
+// 后退时新页先在隐藏状态下快进到最后一步（像 PowerPoint 那样显示上一页的结束画面），再由当前页 transition 过渡；前进从第 0 步开始
 async function show(index, direction = 1) {
   state.busy = true;
   const previous = state.playback;
@@ -55,7 +57,15 @@ async function show(index, direction = 1) {
   board.style.inset = '0';
   board.style.visibility = oldRoot ? 'hidden' : 'visible';
   layer.append(board);
+  let broken = false;
+  // 动效初始化或某一步出错时，不让放映卡住：再点一下直接去下一页
+  const onError = error => { broken = true; if (state.playback === playback) state.broken = true; report(error); };
+  let playback = null;
   try {
+    if (direction < 0 && oldRoot) {
+      playback = createPlayback(project, page, { root: board, onError, startAtEnd: true });
+      await playback.ready.catch(() => { broken = true; });
+    }
     if (previous && oldRoot) {
       try {
         await previous.ready;
@@ -68,11 +78,13 @@ async function show(index, direction = 1) {
     board.style.visibility = 'visible';
     state.index = index;
     state.board = board;
-    state.broken = false;
+    state.broken = broken;
     showCounter();
-    // 动效初始化或某一步出错时，不让放映卡住：再点一下直接去下一页
-    state.playback = createPlayback(project, page, { root: board, onError: error => { state.broken = true; report(error); } });
-    await state.playback.ready.catch(() => { state.broken = true; });
+    if (!playback) {
+      playback = createPlayback(project, page, { root: board, onError });
+      state.playback = playback;
+      await playback.ready.catch(() => { state.broken = true; });
+    } else state.playback = playback;
   } finally { state.busy = false; }
 }
 

@@ -180,7 +180,39 @@
         "lineHeight": { "type": "number", "exclusiveMinimum": 0, "default": 1.4, "description": "行高倍数" },
         "letterSpacing": { "type": "number", "default": 0 },
         "align": { "enum": ["left", "center", "right"], "default": "left" },
-        "color": { "$ref": "#/$defs/color" }
+        "color": { "$ref": "#/$defs/color" },
+        "stroke": {
+          "description": "文字描边（外轮廓）；null 或不写 = 没有描边",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["color", "width"],
+              "properties": {
+                "color": { "$ref": "#/$defs/color" },
+                "width": { "type": "number", "minimum": 0, "description": "描边线宽，画板像素" }
+              }
+            }
+          ]
+        },
+        "shadow": {
+          "description": "文字阴影；null 或不写 = 没有阴影",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["color", "x", "y", "blur"],
+              "properties": {
+                "color": { "$ref": "#/$defs/color" },
+                "x": { "type": "number", "description": "向右偏移，画板像素" },
+                "y": { "type": "number", "description": "向下偏移，画板像素" },
+                "blur": { "type": "number", "minimum": 0, "description": "模糊半径，画板像素" }
+              }
+            }
+          ]
+        }
       }
     },
     "imageProps": {
@@ -189,7 +221,11 @@
       "properties": {
         "type": { "const": "image" },
         "asset": { "$ref": "#/$defs/assetId" },
-        "fit": { "enum": ["cover", "contain", "fill"], "default": "cover" }
+        "fit": { "enum": ["cover", "contain", "fill"], "default": "cover" },
+        "tint": {
+          "description": "重新着色：把图片画成这个纯色（按图片的透明度取形状）。用于单色矢量标志（SVG）或透明底的单色 PNG；null 或不写 = 原色",
+          "oneOf": [{ "$ref": "#/$defs/color" }, { "type": "null" }]
+        }
       }
     },
     "shapeProps": {

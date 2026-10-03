@@ -1,6 +1,6 @@
 // 项目文件校验：格式（JSON Schema）+ 语义（编号重复、素材与字体引用存在）。动效代码的执行另由 check-motion 检查。
 // 用法见 docs/format.md「校验」一章；命令行入口是 src/cli/validate.js。
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -16,7 +16,24 @@ export const ERROR_CODES = Object.freeze({
   MISSING_FONT_FILE: 'MISSING_FONT_FILE', // fonts[].file 在磁盘上不存在
   UNKNOWN_ASSET_REF: 'UNKNOWN_ASSET_REF', // 图片元素引用了不存在的素材编号
   UNKNOWN_FONT_REF: 'UNKNOWN_FONT_REF', // 文字元素引用了不存在的字体编号
+  TINT_NEEDS_ALPHA: 'TINT_NEEDS_ALPHA', // 图片元素设了 tint（重新着色），但素材是没有透明度的 JPEG
 });
+
+/** 素材是不是 JPEG：先看扩展名，给了项目文件夹时再看文件开头（FF D8 FF）。JPEG 没有透明度，不能重新着色。 */
+function isJpegAsset(asset, projectDir) {
+  if (!asset || typeof asset.file !== 'string') return false;
+  if (/\.jpe?g$/i.test(asset.file)) return true;
+  if (!projectDir) return false;
+  const abs = join(projectDir, asset.file);
+  let fd;
+  try {
+    if (!statSync(abs).isFile()) return false;
+    fd = openSync(abs, 'r');
+    const head = Buffer.alloc(3);
+    return readSync(fd, head, 0, 3, 0) === 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  } catch { return false; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
 
 let compiled = null;
 function schemaValidator() {
@@ -108,8 +125,12 @@ export function validateProjectData(data, opts = {}) {
   }
   assets.forEach((a) => { if (a && a.pendingLayout === true) info.pendingAssets.push(a.id); });
 
-  // 3. 元素引用的素材 / 字体存在
+  // 3. 元素引用的素材 / 字体存在；重新着色的图片必须有透明度
+  const assetById = new Map(assets.filter((a) => a && typeof a.id === 'string').map((a) => [a.id, a]));
   for (const { el, path } of allElements) {
+    if (el.type === 'image' && typeof el.tint === 'string' && isJpegAsset(assetById.get(el.asset), opts.projectDir)) {
+      errors.push({ code: ERROR_CODES.TINT_NEEDS_ALPHA, path: `${path}/tint`, message: `图片元素 ${el.id} 设了重新着色（tint），但素材 ${assetById.get(el.asset).file} 是 JPEG，没有透明部分，整块会变成纯色。请换成单色的 SVG 或透明底 PNG，或去掉 tint` });
+    }
     if (el.type === 'image' && !assetIds.has(el.asset)) {
       errors.push({ code: ERROR_CODES.UNKNOWN_ASSET_REF, path: `${path}/asset`, message: `图片元素 ${el.id} 引用了不存在的素材：${el.asset}` });
     }
