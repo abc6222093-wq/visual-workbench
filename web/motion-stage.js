@@ -38,9 +38,10 @@ export async function showMotionPage(state, id, { stage, label, assetBase, onErr
       await playback.ready.catch(() => {});
     }
     if (previous && oldRoot && oldId !== id) {
-      await previous.ready;
+      // Initialization errors were already reported; users must still be able to leave.
+      const initialized = await previous.ready.then(() => true, () => false);
       board.style.visibility = 'visible';
-      await previous.transition(board, direction);
+      if (initialized) await previous.transition(board, direction);
     }
     // Escape or a view change during an asynchronous transition must not restart playback.
     if (state.view !== 'play') { await playback?.destroy(); board.remove(); return; }
@@ -51,7 +52,8 @@ export async function showMotionPage(state, id, { stage, label, assetBase, onErr
     label.textContent = `${newIndex + 1} / ${state.project.pages.length}`;
     state.playback = playback || createPlayback(state.project, page, { root: board, assetBase, onError });
     playback = null;
-    await state.playback.ready;
+    // Playback reports initialization failures. Keep its page visible and navigable.
+    await state.playback.ready.catch(() => {});
   } catch (error) {
     onError(error);
     await playback?.destroy();

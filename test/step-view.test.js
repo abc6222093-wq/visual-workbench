@@ -73,7 +73,7 @@ test('步骤视图：静止显示所有元素；第 k 步后按动效显示；�
   const diskBefore = readFileSync(file, 'utf8');
   const memoryBefore = await memory(page);
   const select = page.locator('[data-step-view]');
-  assert.deepEqual(await select.locator('option').allTextContents(), ['静止', '第 1 步后', '第 2 步后']);
+  assert.deepEqual(await select.locator('option').allTextContents(), ['全部显示', '第 1 屏', '第 2 屏', '第 3 屏']);
   assert.equal(await select.inputValue(), '0');
 
   // 静止：和以前一样，放映开头会藏起来的副标题、第三条要点都看得见
@@ -128,7 +128,7 @@ test('步骤视图：拖动改元素自己的 x，松手后仍停在这一步、
   const after = await look(page, 'el_title1');
   assert.deepEqual([after.tx, after.translate], [100, ''], '重画后动效从新位置重新快进');
   assert.equal(await page.locator('#artboard [data-element-id="el_title1"]').evaluate(n => n.style.left), `${xAfter}px`);
-  assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 1, '选中框和缩放把手还在');
+  assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 8, '四角和四条边的缩放把手还在');
   assert.deepEqual(errors, []);
 });
 

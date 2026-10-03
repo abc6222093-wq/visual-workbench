@@ -87,7 +87,7 @@ test('拖不动：被整页形状盖住的元素，在图层里选中后按住�
   assert.notEqual(el(disk(file), 'el_title1').x, before.x, '选中的标题被拖动');
   assert.equal(el(disk(file), 'el_test_veil').x, 0, '盖在上面的形状没被拖');
   // 选中的元素在右下角的缩放把手也能用
-  const handle = await page.locator('#artboard [data-resize="el_title1"]').boundingBox();
+  const handle = await page.locator('#artboard [data-resize="el_title1"][data-handle="se"]').boundingBox();
   const w0 = el(disk(file), 'el_title1').width;
   await dragAndSave(page, { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }, 60, 0);
   assert.ok(el(disk(file), 'el_title1').width > w0, '缩放生效');

@@ -1642,3 +1642,22 @@ html.glass-mode .ed-focus-exit {
   height: 44px;
   padding: 0 4px;
 }
+
+/* Keep inspector preference independent of focus mode. */
+.ed-grid.is-inspector-collapsed { grid-template-columns: 244px minmax(0, 1fr) 48px; }
+.is-inspector-collapsed .ed-inspector { padding: 8px 5px; align-items: center; }
+.is-inspector-collapsed .ed-inspector > .g-seg,
+.is-inspector-collapsed .ed-inspector__body { display: none; }
+html.glass-mode .resize-handle { right: auto; bottom: auto; transform: translate(-50%, -50%); }
+.resize-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.resize-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.resize-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.resize-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.resize-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.resize-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.resize-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.resize-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+.ed-shell.is-focus .ed-grid.is-inspector-collapsed { grid-template-columns: minmax(0, 1fr); }
+.ed-work.is-outline .ed-tools > :not([data-action="toggle-outline"]):not([data-action="focus"]) { display: none; }
+.ed-work.is-outline .ed-well { display: block; padding: 12px; }
+#outline-host { width: 100%; min-height: 100%; }
