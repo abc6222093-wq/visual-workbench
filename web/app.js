@@ -1,3 +1,4 @@
+import { mountRuntimeSettings } from './runtime-settings.js';
 import { mountOutlinePanel } from "./outline-panel.js";
 import { captureOutlinePage } from "./outline-capture.js";
 import { reconcileDocument } from "./outline-document.js";
@@ -91,6 +92,7 @@ async function api(path, method = "GET", body) {
   if (!r.ok) {
     const e = new Error(data.error || data.message || `请求失败 ${r.status}`);
     e.status = r.status;
+    if(r.status===423) window.dispatchEvent(new Event("vw-session-blocked"));
     throw e;
   }
   return data;
@@ -190,7 +192,7 @@ async function home() {
     `<div class="hm-cell"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button></div>`;
   shell(
     "home",
-    `${head("项目总览", `${list.length} 个项目`, `<button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
+    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
   liven(app);
@@ -263,6 +265,7 @@ async function open(id, data) {
   S.view = "editor";
   renderEditor();
   connectEvents(S.project.id);
+  if(data.syncConflicts?.length) modal(`<h2>发现疑似同步冲突副本</h2><p class="g-sheet__note">这些文件可能是网盘留下的另一份修改，请先核对；工作台不会自动删除或合并。</p><ul>${data.syncConflicts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul><div class="g-sheet__actions">${gbtn("close","知道了")}</div>`);
 }
 function pageItem(p, i) {
   return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}" title="${esc(p.name)}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
@@ -1162,7 +1165,7 @@ function exportResult({ outDir, files }, label) {
   const target = files.length === 1 ? files[0].path : outDir;
   const total = files.reduce((n, f) => n + (f.bytes || 0), 0);
   modal(
-    `<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", "在访达中显示", { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`,
+    `<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", runtimeSettings.revealLabel, { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`,
   );
 }
 
@@ -1415,6 +1418,9 @@ app.addEventListener("click", async (e) => {
       case "export-start":
         await startExport(b);
         break;
+      case "data-settings":
+        await runtimeSettings.showSettings();
+        break;
       case "reveal":
         await api("/api/reveal", "POST", { path: b.dataset.path });
         break;
@@ -1656,7 +1662,8 @@ window.addEventListener("resize", () => {
   if (S.view === "editor") renderBoard();
   else if (S.view === "play") showPage(S.pageId);
 });
-home().catch((e) => {
+const runtimeSettings = mountRuntimeSettings({api,app,modal,closeModal,notice,glass:openModalGlass});
+runtimeSettings.ready().then(home).catch((e) => {
   app.innerHTML = '<div class="startup-error">无法打开工作台，请检查本地服务。</div>';
   notice(e.message);
 });

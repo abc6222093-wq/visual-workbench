@@ -28,3 +28,11 @@ test('check-motion 找不到浏览器时只输出中文提示，不出现英文�
   assert.equal(r.stderr.trim(), NO_BROWSER_MESSAGE);
   assert.doesNotMatch(r.stdout + r.stderr, /Executable|playwright install\b(?! chromium)|Error/);
 });
+
+test('Windows 系统和用户 Chrome、Edge 按顺序查找，路径环境可注入', () => {
+  const env = { PROGRAMFILES: 'C:\\Program Files', 'PROGRAMFILES(X86)': 'C:\\Program Files (x86)', LOCALAPPDATA: 'C:\\Users\\日本 用户\\AppData\\Local' };
+  const paths = new Set(['C:\\Users\\日本 用户\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe']);
+  const candidates = browserCandidates({ platform: 'win32', env, exists: (p) => paths.has(p), only: '' });
+  assert.deepEqual(candidates.map((c) => c.name), ['Google Chrome', 'Microsoft Edge']);
+  assert.equal(candidates[0].executablePath, [...paths][0]);
+});

@@ -3,7 +3,7 @@
 // 都没有时抛出一句中文说明和解决办法，不让エイ看到英文报错。
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { chromium, webkit } from 'playwright';
 
 const MAC_APPS = [
@@ -15,19 +15,24 @@ const LINUX_BINS = [
   ['Google Chrome', '/usr/bin/google-chrome-stable'],
 ];
 
-export const NO_BROWSER_MESSAGE = [
+export function noBrowserMessage(platform = process.platform) { return [
   '找不到可用的浏览器，动效检查和导出图片 / PDF 需要一个浏览器在后台打开页面。',
   '解决办法（任选一个）：',
   '  1. 安装 Google Chrome：https://www.google.com/chrome/ ，装好后重新运行；',
   '  2. 或在终端里进入工作台文件夹运行：npx playwright install chromium',
-].join('\n');
+].join('\n'); }
+export const NO_BROWSER_MESSAGE = noBrowserMessage();
 
 /** 列出本机能用的浏览器候选（按优先级）。env 可传 VW_BROWSER=chrome|chromium|webkit 只用指定的一种。 */
-export function browserCandidates({ platform = process.platform, home = homedir(), exists = existsSync, only = process.env.VW_BROWSER } = {}) {
+export function browserCandidates({ platform = process.platform, home = homedir(), exists = existsSync, env = process.env, only = env.VW_BROWSER } = {}) {
   const list = [];
   const system = platform === 'darwin'
     ? MAC_APPS.flatMap(([name, rel]) => ['/Applications', join(home, 'Applications')].map((dir) => [name, join(dir, rel)]))
-    : platform === 'linux' ? LINUX_BINS : [];
+    : platform === 'win32' ? ['Google Chrome', 'Microsoft Edge'].flatMap((name) => {
+      const rel = name === 'Google Chrome' ? 'Google/Chrome/Application/chrome.exe' : 'Microsoft/Edge/Application/msedge.exe';
+      return [env.PROGRAMFILES || env.ProgramFiles, env['PROGRAMFILES(X86)'] || env['ProgramFiles(x86)'], env.LOCALAPPDATA || win32.join(home, 'AppData', 'Local')]
+        .filter(Boolean).map((dir) => [name, win32.join(dir, rel)]);
+    }) : platform === 'linux' ? LINUX_BINS : [];
   for (const [name, path] of system) if (exists(path) && !list.some((c) => c.name === name)) list.push({ id: 'chrome', name, type: chromium, executablePath: path });
   const safePath = (type) => { try { return type.executablePath(); } catch { return null; } };
   const pwChromium = safePath(chromium);
