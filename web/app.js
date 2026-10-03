@@ -645,7 +645,6 @@ function selectCanvas(id, event, resize) {
     values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element), translate: getComputedStyle($(`#artboard [data-element-id="${CSS.escape(id)}"]`)).translate })),
   };
   event.preventDefault();
-  cancelSnapshot();
   S.dragging = true;
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
@@ -680,6 +679,7 @@ function selectCanvas(id, event, resize) {
       for (const { id } of start.values) clearDocumentDraft(findElement(page(), id).element);
       changed({ boardOnly: true });
     } else refreshSelection();
+    swapReadySnapshot();
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -1697,8 +1697,29 @@ function cancelSnapshot() {
   const pending=S.pendingSnapshot; S.pendingSnapshot=null;
   pending?.run.dispose(); pending?.staging.remove();
 }
+function swapReadySnapshot() {
+  const pending = S.pendingSnapshot;
+  if (!pending?.ready || S.dragging) return;
+  const { generation, view, pageId, old, oldRun, board, holder, run, staging, error } = pending;
+  if (generation !== snapshotGeneration || !old.isConnected || S.pageId !== pageId || S.stepView !== view) {
+    cancelSnapshot();
+    return;
+  }
+  S.pendingSnapshot = null;
+  if (error) {
+    run.dispose(); staging.remove();
+    notice(`动效错误：${error.message}`);
+    S.stepView = 0; syncStepSelect(); renderBoard();
+    return;
+  }
+  oldRun?.dispose();
+  S.stepRun = run; board.id = 'artboard'; board.dataset.stepShown = String(view);
+  holder.replaceChildren(board);
+  bindBoardPointer(holder, board);
+  markSelection();
+}
 async function refreshBoardSnapshot() {
-  cancelSnapshot();
+  cancelSnapshot(); // Each new request supersedes both preparing and ready frames.
   if (!S.stepView) { renderBoard(); return; }
   const holder = $('#artboard-holder'), old = $('#artboard'), oldRun = S.stepRun;
   if (!holder || !old) return;
@@ -1710,19 +1731,16 @@ async function refreshBoardSnapshot() {
   staging.style.cssText = 'position:absolute;inset:0;opacity:0;pointer-events:none';
   staging.append(board); holder.append(staging);
   const run = applyStepView({project:S.project,page:page(),root:board,assetBase:base(),count:Math.max(0,view)});
-  const pending={run,staging}; S.pendingSnapshot=pending;
+  const pending = { run, staging, board, holder, old, oldRun, generation, view, pageId, ready: false };
+  S.pendingSnapshot = pending;
   try {
     await run.ready;
-    if (generation !== snapshotGeneration || !old.isConnected || S.pageId !== pageId || S.stepView !== view || S.dragging) {run.dispose();staging.remove();return;}
-    oldRun?.dispose();
-    S.stepRun = run; board.id = 'artboard'; board.dataset.stepShown = String(view);
-    holder.replaceChildren(board);
-    bindBoardPointer(holder, board);
-    markSelection();
-  } catch(error) {
-    run.dispose(); staging.remove();
-    if (generation === snapshotGeneration && old.isConnected && S.stepView === view) { notice(`动效错误：${error.message}`); S.stepView=0;syncStepSelect();renderBoard(); }
-  } finally { if(S.pendingSnapshot===pending)S.pendingSnapshot=null; }
+  } catch (error) {
+    pending.error = error;
+  }
+  if (S.pendingSnapshot !== pending) return; // Superseded frames were already disposed.
+  pending.ready = true;
+  swapReadySnapshot(); // Retain the latest ready frame until the pointer is released.
 }
 // Live document mutations retain the textarea/caret and existing animated DOM.
 function patchDocumentCanvas(before) {
