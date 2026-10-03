@@ -22,3 +22,13 @@ test('新鲜电脑标记在界面要求确认；确认后才显示总览',async 
  await page.getByRole('alertdialog').waitFor();assert.match(await page.getByRole('alertdialog').textContent(),/另一台 Mac 上的工作台还开着/);assert.equal(await page.getByText('项目总览',{exact:true}).count(),0);
  await page.getByRole('button',{name:'我已确认，继续使用'}).click();await page.getByRole('button',{name:'数据文件夹',exact:true}).waitFor();assert.equal(await page.getByRole('alertdialog').count(),0);
 });
+
+test('大纲里可切换请填大纲与请排版，复制当前页的对应说明',async t=>{
+ const root=mkdtempSync(join(tmpdir(),'vw-brief-ui-')),server=createServer({dataDir:root});let browser;
+ t.after(async()=>{await browser?.close();await new Promise(r=>server.close(r));rmSync(root,{recursive:true,force:true});});await new Promise(r=>server.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${server.address().port}`;
+ await fetch(url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'brief-demo',name:'复制测试'})});
+ browser=await launchBrowser();const page=await browser.newPage();await page.goto(url);await page.locator('[data-action="open"][data-id="brief-demo"]').click();await page.locator('[data-action="tab-outline"]').click();
+ await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedBrief=text;}}}));
+ await page.locator('[data-outline-brief-mode]').selectOption('fill');await page.locator('[data-outline-action="copy-current"]').click();await page.waitForFunction(()=>window.copiedBrief?.includes('只填不排'));assert.match(await page.evaluate(()=>window.copiedBrief),/文档的完整路径/);
+ await page.locator('[data-outline-brief-mode]').selectOption('layout');await page.locator('[data-outline-action="copy-all"]').click();await page.waitForFunction(()=>window.copiedBrief?.includes('请按大纲排版'));assert.match(await page.evaluate(()=>window.copiedBrief),/motion.steps/);
+});

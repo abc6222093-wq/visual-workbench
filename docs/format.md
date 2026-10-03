@@ -17,7 +17,7 @@
 
 ### 2.1 数据目录
 
-默认 `~/Projects/visual-workbench-data`，可在仓库的 `workbench.config.json` 改 `dataDir`，也可用环境变量 `VW_DATA_DIR` 或命令行 `--data-dir` 覆盖。用 `npm run init-data` 建出初始结构：
+以总览「数据文件夹」显示的路径为准。优先级：命令行 `--data-dir` > 环境变量 `VW_DATA_DIR` > 用户主目录 `.visual-workbench/config.json` > 仓库 `workbench.config.json`；无本机配置时保留仓库默认值。用 `npm run init-data` 建出初始结构：
 
 ```
 <数据目录>/
@@ -355,7 +355,7 @@ export default async function (ctx) {
 
 ## 12. 导出
 
-命令：`npm run export -- <项目> [--html | --images | --pdf | --all] [--out <目录>]`，默认放在 `<数据目录>/exports/<项目编号>/`。工作台里点顶栏「导出」效果相同，导出完显示文件位置，可一键在访达中显示。导出文件夹在项目文件夹外，不会被当作 agent 的修改，也不进版本。
+命令：`npm run export -- <项目> [--html | --images | --pdf | --all] [--out <目录>]`，默认放在 `<数据目录>/exports/<项目编号>/`。工作台里点顶栏「导出」效果相同，导出完显示文件位置，可一键在访达或资源管理器中显示。导出文件夹在项目文件夹外，不会被当作 agent 的修改，也不进版本。
 
 | 类型 | 内容 |
 |---|---|
@@ -373,7 +373,7 @@ export default async function (ctx) {
 
 ## 13. 浏览器
 
-动效检查、导出图片 / PDF 要在后台开一个浏览器，按顺序找：Mac 上装的 Google Chrome → Microsoft Edge → Playwright 自带的 Chromium → Playwright 自带的 WebKit（Safari 内核）。都没有时给中文提示：安装 Chrome，或在工作台文件夹运行 `npx playwright install chromium`。环境变量 `VW_BROWSER=chrome|chromium|webkit` 可只用指定的一种。
+动效检查、导出图片 / PDF 要在后台开一个浏览器，按顺序找：当前系统安装的 Google Chrome → Microsoft Edge（Windows 包含系统级和用户级安装） → Playwright 自带的 Chromium → Playwright 自带的 WebKit（Safari 内核）。都没有时给中文提示：安装 Chrome，或在工作台文件夹运行 `npx playwright install chromium`。环境变量 `VW_BROWSER=chrome|chromium|webkit` 可只用指定的一种。
 
 ## 14. 示例
 
@@ -428,3 +428,11 @@ export default async function (ctx) {
 `GET /api/projects/:id/outline/brief?pageIds=…` 沿用现有复制接口，给出绝对文件路径与稳定页编号；省略编号表示全部页。旧 `POST /outline/extract`、`POST /outline/apply` 和隔离捕捉模块保留作为第 6 轮兼容接口，界面不再调用，也不是新工作流入口。
 
 校验继续检查字段类型、角色、编号、强调和屏范围、图片引用及重复映射；暂时找不到的旧映射允许打开以便迁移。多屏与动效尚未一致不阻止写文稿。完成排版必须核对映射、N 屏 = N−1 步，运行 validate 与 check-motion；改工作台代码另跑 npm test。
+
+
+## 本机配置、同步标记与填大纲（第 7 轮）
+项目格式仍为 v2，未新增必填项目字段。本机配置位于 `~/.visual-workbench/config.json`，形如 `{"dataDir":"本机绝对路径"}`；优先级是命令行 > VW_DATA_DIR > 本机 > 仓库。设置不进入项目、存版、复制页或导出，路径必须指向已有数据目录，保存后重启生效。
+
+数据根目录 `.workbench-sessions/*.json` 是运行状态，记录电脑、会话、开始与更新时间；15 秒心跳、90 秒过期，确认只认可当时看到的会话，新出现的会话仍需提示。标记不放进 project.json，不随项目存版/复制/导出。正常关闭删除自身标记。Google Drive 异步同步不能提供离线互斥保证。
+
+「请填大纲」沿用 pages[].outline 的 document 模式：按文档分页与 role、emphasis、images[].caption、notes 填写，每行 elementId 对应独立草稿文字。新元素 documentDraft:true，使用默认草稿位置；已有元素只按授权改 text，不改坐标和样式，不写 motion。行 baseline 是同步基准；outline.baseline 的已排版快照不能被未排版稿替换。「请排版」阶段再设计样式与 N−1 个动效步骤。两种复制说明都包含实际数据目录及项目路径。

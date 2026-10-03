@@ -1,0 +1,156 @@
+[
+  {
+    "id": "page_1c33e5e4aac6413f",
+    "name": "观察变化",
+    "outline": {
+      "screens": 1,
+      "notes": "适合课堂提问，留出思考时间。",
+      "rows": [
+        {
+          "id": "row_f3d0ac34257a44a3",
+          "role": "title",
+          "text": "观察变化",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_924be771747c4261",
+          "baseline": {
+            "role": "title",
+            "text": "观察变化",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        },
+        {
+          "id": "row_6e4765ba101f41c7",
+          "role": "english",
+          "text": "Observe the change",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_691125b6df514e00",
+          "baseline": {
+            "role": "english",
+            "text": "Observe the change",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        },
+        {
+          "id": "row_c3c77a79c3c948dc",
+          "role": "body",
+          "text": "先看清眼前的形状，再描述它的变化。",
+          "emphasis": [
+            {
+              "start": 1,
+              "end": 3
+            }
+          ],
+          "from": 1,
+          "until": null,
+          "elementId": "el_8816be3bbe7344e2",
+          "baseline": {
+            "role": "body",
+            "text": "先看清眼前的形状，再描述它的变化。",
+            "emphasis": [
+              {
+                "start": 1,
+                "end": 3
+              }
+            ],
+            "from": 1,
+            "until": null
+          }
+        }
+      ],
+      "images": [
+        {
+          "id": "image_observe",
+          "asset": "asset_city01",
+          "caption": "使用项目里已有的第一张图片，后续排版时作为观察对象。",
+          "from": 1,
+          "until": null
+        }
+      ],
+      "mode": "document"
+    }
+  },
+  {
+    "id": "page_05a62f1e1e4c45e5",
+    "name": "说出发现",
+    "outline": {
+      "screens": 1,
+      "notes": "这一页暂时只要文案，不写动效。",
+      "rows": [
+        {
+          "id": "row_efe225e5139a49e9",
+          "role": "title",
+          "text": "说出发现",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_7f2ea3b630ba407c",
+          "baseline": {
+            "role": "title",
+            "text": "说出发现",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        },
+        {
+          "id": "row_efa1a94a359c4aca",
+          "role": "body",
+          "text": "你注意到了什么？",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_0d028fcf346840f1",
+          "baseline": {
+            "role": "body",
+            "text": "你注意到了什么？",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        },
+        {
+          "id": "row_12a3a9ec6d744d66",
+          "role": "body",
+          "text": "试着用一句话说明理由。",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_4b464805d3354f68",
+          "baseline": {
+            "role": "body",
+            "text": "试着用一句话说明理由。",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        },
+        {
+          "id": "row_b3a74890d44e4c9e",
+          "role": "note",
+          "text": "没有唯一答案。",
+          "emphasis": [],
+          "from": 1,
+          "until": null,
+          "elementId": "el_0fd635ff92cc4fa6",
+          "baseline": {
+            "role": "note",
+            "text": "没有唯一答案。",
+            "emphasis": [],
+            "from": 1,
+            "until": null
+          }
+        }
+      ],
+      "images": [],
+      "mode": "document"
+    }
+  }
+]
