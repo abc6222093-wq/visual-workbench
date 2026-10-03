@@ -63,8 +63,10 @@ test('sample-deck: actual outline extraction, edit two texts, apply without chan
   assert.deepEqual(afterApply.pages.map(p => p.elements), expectedPages.map(p => p.elements));
   const versions = await (await fetch(`${origin}/api/projects/sample-deck/versions`)).json();
   assert.equal(versions.length, 2, 'extract and apply each save a version first');
+  const briefs = [];
   for (const ids of [afterApply.pages.map(p => p.id), ['page_cover1']]) {
     const brief = await (await fetch(`${origin}/api/projects/sample-deck/outline/brief?pageIds=${ids.join(',')}`)).json();
+    briefs.push(brief.text);
     assert.ok(brief.text.includes(file));
     for (const id of ids) assert.ok(brief.text.includes(id));
     if (ids.length === 1) assert.ok(!brief.text.includes('page_scene2'));
@@ -89,5 +91,6 @@ test('sample-deck: actual outline extraction, edit two texts, apply without chan
   assert.equal(withImage.pages[0].outline.images.at(-1).caption,'这张做主图');
   assert.deepEqual(withImage.pages.map(p=>p.elements),expectedPages.map(p=>p.elements), 'library outline image never places or changes canvas elements');
   assert.deepEqual(errors, []);
+  console.log('ROUND6_COPY_BRIEFS=' + JSON.stringify(briefs));
   console.log('ROUND6_SAMPLE_ELEMENT_COMPARISON=' + JSON.stringify(pairs));
 });

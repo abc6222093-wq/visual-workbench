@@ -257,37 +257,18 @@ export function copyBrief(
   project,
   pageIds = project.pages.map((p) => p.id),
   filePath = "project.json",
+  repoDir,
 ) {
   const lines = [
-    `项目 ${project.id} · ${project.name}`,
+    `请按大纲排版：${project.name}（${project.id}）。只处理下面列出的页面。`,
     `项目文件：${filePath}`,
-    "请先读 CLAUDE.md、docs/format.md、schema/project.schema.json 和最新 project.json，再运行 npm run save-version -- <项目路径> -m <说明>。",
-    "保留使用者调整的位置、大小、颜色、字体和层级；按大纲排版并编写动效。N 个画面对应该页 motion.steps = N−1；画面 1 是初始化后的状态。",
-    "排版完成后，给每条文字和图片写 elementId，并更新条目 baseline 与 outline.baseline 为本次实际排版的快照；包含 screens、rows 和 images，以便识别新增、删除和未应用变化。",
+    ...(repoDir ? [`工作台仓库与规则：${repoDir}`] : []),
+    "大纲在 project.json 的 pages[].outline；先读最新文件、CLAUDE.md、docs/format.md 与 schema/project.schema.json，改前运行 npm run save-version -- <项目路径> -m <说明>。",
+    ...project.pages.filter(p => pageIds.includes(p.id)).map(p =>
+      `第 ${project.pages.indexOf(p) + 1} 页（${p.id}） · ${p.name} · ${p.outline ? `${p.outline.screens} 屏` : '尚无大纲，请保留此页并说明'}`),
+    "按大纲里的层级、强调、图片说明和备注排版；保留エイ 调整的位置、大小、颜色、字体、层级和其他页面。N 屏写 motion.steps = N−1，第 1 屏是初始化后、step(0) 前。",
+    "排好后为每条文字和图片写 elementId；更新条目 baseline 及 outline.baseline（screens、rows、images）的已落实快照，供以后只应用文字和识别删除条目。",
     "完成后运行 npm run validate -- <项目路径> 与 npm run check-motion -- <项目路径>，两者通过再交付。",
   ];
-  for (const p of project.pages.filter((p) => pageIds.includes(p.id))) {
-    lines.push(
-      `\n第 ${project.pages.indexOf(p) + 1} 页（${p.id}） · ${p.name}`,
-    );
-    const o = p.outline;
-    if (!o) {
-      lines.push("尚无大纲");
-      continue;
-    }
-    lines.push(`画面数：${o.screens}`, `备注：${o.notes}`);
-    for (let s = 1; s <= o.screens; s++) {
-      lines.push(`画面 ${s}`);
-      const v = visibleItems(o, s);
-      for (const r of v.rows)
-        lines.push(
-          `[${r.role}] ${r.text}（${r.id}${r.elementId ? ` → ${r.elementId}` : ""}；强调 ${JSON.stringify(r.emphasis)}）`,
-        );
-      for (const i of v.images)
-        lines.push(
-          `[图片] ${i.caption} · ${i.asset} · ${project.assets.find((a) => a.id === i.asset)?.file || ""}`,
-        );
-    }
-  }
   return lines.join("\n");
 }

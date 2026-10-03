@@ -166,7 +166,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       }
       if(parts[3]==='outline'&&parts.length===5) {
         const action=parts[4];
-        if(action==='brief'&&req.method==='GET') {const {project}=readProject(dir); const ids=url.searchParams.get('pageIds')?.split(',').filter(Boolean)||project.pages.map(p=>p.id); if(ids.some(id=>!project.pages.some(p=>p.id===id)))throw fail(400,'Invalid pageIds'); const filePath=join(dir,'project.json');return json(res,200,{text:copyBrief(project,ids,filePath),filePath});}
+        if(action==='brief'&&req.method==='GET') {const {project}=readProject(dir); const ids=url.searchParams.get('pageIds')?.split(',').filter(Boolean)||project.pages.map(p=>p.id); if(ids.some(id=>!project.pages.some(p=>p.id===id)))throw fail(400,'Invalid pageIds'); const filePath=join(dir,'project.json');return json(res,200,{text:copyBrief(project,ids,filePath,REPO),filePath});}
         if(['extract','apply'].includes(action)&&req.method==='POST') {
           const b=await body(req),old=readProject(dir);checkRevision(b.revision,old.revision);let project=structuredClone(old.project),result={};
           if(action==='extract') {if(!b.outlines||typeof b.outlines!=='object'||Array.isArray(b.outlines)||!Object.keys(b.outlines).length)throw fail(400,'Outlines required');for(const [pageId,outline] of Object.entries(b.outlines)){const page=project.pages.find(p=>p.id===pageId);if(!page||!outline)throw fail(400,'Invalid outline page');page.outline=outline;}}
