@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 const cli = new URL('../src/cli/check-motion.js', import.meta.url);
-const run = args => spawnSync(process.execPath, [cli.pathname, ...args], { encoding: 'utf8', timeout: 10000 });
+const run = args => spawnSync(process.execPath, [fileURLToPath(cli), ...args], { encoding: 'utf8', timeout: 10000 });
 test('CLI rejects invalid flags and timeout values before starting browser', () => {
   const badFlag = run(['--unknown']);
   assert.equal(badFlag.status, 1);
@@ -39,7 +40,7 @@ test('CLI reports a stuck page and continues checking later pages', t => {
     project.pages[1].motion = { steps: 0, source: 'export default () => ({})' };
     project.pages[2].motion = { steps: 0, source: 'export default () => ({})' };
     writeFileSync(join(dir, 'project.json'), JSON.stringify(project));
-    const result = spawnSync(process.execPath, [cli.pathname, dir, '--timeout-ms', '100', '--total-timeout-ms', '1000'], { encoding: 'utf8', timeout: 30000 });
+    const result = spawnSync(process.execPath, [fileURLToPath(cli), dir, '--timeout-ms', '100', '--total-timeout-ms', '1000'], { encoding: 'utf8', timeout: 30000 });
     if (/listen EPERM/.test(result.stderr)) t.skip('本地沙箱禁止监听 loopback');
     else {
       assert.equal(result.status, 1, result.stderr);

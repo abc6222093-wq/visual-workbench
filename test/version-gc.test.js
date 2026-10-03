@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AUTO_BACKUP_KEEP,
@@ -27,7 +27,7 @@ function withProject(fn) {
   }
 }
 
-const idOf = (v) => v.versionDir.split('/').pop();
+const idOf = (v) => basename(v.versionDir);
 const objs = (dir) => readdirSync(join(dir, 'versions', '.objects')).filter((n) => !n.startsWith('.'));
 const hashOf = (v, rel) => v.meta.objects[rel];
 const put = (dir, rel, text) => {
@@ -78,7 +78,7 @@ test('连续退回 12 次：只留最近 10 个自动存档，用户/agent 版�
       backups.push({ id: idOf(r.backup), hash: r.backup.meta.objects['assets/tmp.txt'] });
     }
     assert.equal(AUTO_BACKUP_KEEP, 10);
-    const metas = listVersions(dir).map((v) => ({ id: v.split('/').pop(), m: JSON.parse(readFileSync(join(v, 'meta.json'), 'utf8')) }));
+    const metas = listVersions(dir).map((v) => ({ id: basename(v), m: JSON.parse(readFileSync(join(v, 'meta.json'), 'utf8')) }));
     const autos = metas.filter((x) => x.m.by === 'system');
     assert.equal(autos.length, 10);
     // 版本编号被删后会被复用，所以按内容（每次状态不同的 tmp.txt）判断留下的是最近 10 个

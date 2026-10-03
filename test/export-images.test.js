@@ -3,12 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, cpSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { exportImages, exportPdf, safeFileName } from '../src/export/images.js';
 import { buildPdf, jpegInfo } from '../src/export/pdf.js';
 
-const SAMPLE = new URL('../examples/sample-deck/', import.meta.url).pathname;
+const SAMPLE = fileURLToPath(new URL('../examples/sample-deck/', import.meta.url));
 
 function tempDir(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));

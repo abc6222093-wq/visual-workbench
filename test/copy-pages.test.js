@@ -23,7 +23,7 @@ function snapshot(dir, base = dir, out = new Map()) {
   for (const ent of readdirSync(dir, { withFileTypes: true })) {
     const abs = join(dir, ent.name);
     if (ent.isDirectory()) snapshot(abs, base, out);
-    else out.set(abs.slice(base.length + 1), readFileSync(abs));
+    else out.set(abs.slice(base.length + 1).replaceAll('\\', '/'), readFileSync(abs));
   }
   return out;
 }

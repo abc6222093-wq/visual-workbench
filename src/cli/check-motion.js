@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { resolve, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { launchBrowserServer } from '../browser.js';
@@ -47,7 +47,7 @@ const server = http.createServer((request, response) => {
     const isProject = path.startsWith('/project/');
     const root = isProject ? projectDir : webRoot;
     const target = resolve(root, '.' + (isProject ? path.slice('/project'.length) : path));
-    if (!target.startsWith(root + '/') && target !== root) throw new Error('Invalid path');
+    if (!target.startsWith(root + sep) && target !== root) throw new Error('Invalid path');
     const bytes = readFileSync(target);
     response.writeHead(200, { 'Content-Type': mime[target.slice(target.lastIndexOf('.'))] || 'application/octet-stream' }); response.end(bytes);
   } catch { response.writeHead(404); response.end('Not found'); }

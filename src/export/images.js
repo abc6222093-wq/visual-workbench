@@ -3,7 +3,7 @@
 // 做法和动效检查一样：本地起一个只给后台浏览器用的 http 服务（web/ 目录 + 项目目录挂在 /project），
 // 打开 web/export-render.html 逐页渲染、播完动效，再按画板尺寸截图。PDF 由 src/export/pdf.js 自己拼，不依赖 Chrome 的打印功能。
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { resolve, dirname, join, extname } from 'node:path';
+import { resolve, dirname, join, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { launchBrowserServer } from '../browser.js';
@@ -48,7 +48,7 @@ function startServer(projectDir) {
       const isProject = path.startsWith('/project/');
       const root = isProject ? projectDir : WEB_ROOT;
       const target = resolve(root, '.' + (isProject ? path.slice('/project'.length) : path));
-      if (!target.startsWith(root + '/') && target !== root) throw new Error('Invalid path');
+      if (!target.startsWith(root + sep) && target !== root) throw new Error('Invalid path');
       const bytes = readFileSync(target);
       response.writeHead(200, { 'Content-Type': MIME[extname(target).toLowerCase()] || 'application/octet-stream' });
       response.end(bytes);
