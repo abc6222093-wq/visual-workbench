@@ -2,6 +2,7 @@ import { renderPage } from './render.js';
 import { createPlayback } from './playback.js';
 
 // Scaling belongs to the stage, leaving both page roots free for agent transitions.
+// 后退（新页序号小于旧页）时，新页先在隐藏状态下快进到最后一步，再由旧页的 transition 过渡；前进仍从第 0 步开始。
 export async function showMotionPage(state, id, { stage, label, assetBase, onError }) {
   if (state.motionChanging) return;
   state.motionChanging = true;
@@ -25,23 +26,35 @@ export async function showMotionPage(state, id, { stage, label, assetBase, onErr
   board.style.inset = '0';
   board.style.visibility = oldRoot ? 'hidden' : 'visible';
   layer.append(board);
+  const oldIndex = state.project.pages.findIndex(p => p.id === oldId);
+  const newIndex = state.project.pages.indexOf(page);
+  const direction = newIndex > oldIndex ? 1 : -1;
+  const backward = previous && oldRoot && oldId !== id && newIndex < oldIndex;
+  let playback = null;
   try {
+    if (backward) {
+      // 快进出错已由 playback 通过 onError 报告；页面照常显示
+      playback = createPlayback(state.project, page, { root: board, assetBase, onError, startAtEnd: true });
+      await playback.ready.catch(() => {});
+    }
     if (previous && oldRoot && oldId !== id) {
       await previous.ready;
       board.style.visibility = 'visible';
-      await previous.transition(board, state.project.pages.findIndex(p => p.id === id) > state.project.pages.findIndex(p => p.id === oldId) ? 1 : -1);
+      await previous.transition(board, direction);
     }
     // Escape or a view change during an asynchronous transition must not restart playback.
-    if (state.view !== 'play') { board.remove(); return; }
+    if (state.view !== 'play') { await playback?.destroy(); board.remove(); return; }
     await previous?.destroy();
     oldRoot?.remove();
     board.style.visibility = 'visible';
     state.pageId = id;
-    label.textContent = `${state.project.pages.indexOf(page) + 1} / ${state.project.pages.length}`;
-    state.playback = createPlayback(state.project, page, { root: board, assetBase, onError });
+    label.textContent = `${newIndex + 1} / ${state.project.pages.length}`;
+    state.playback = playback || createPlayback(state.project, page, { root: board, assetBase, onError });
+    playback = null;
     await state.playback.ready;
   } catch (error) {
     onError(error);
+    await playback?.destroy();
     board.remove();
   } finally { state.motionChanging = false; }
 }
