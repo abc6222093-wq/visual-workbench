@@ -10,7 +10,7 @@ export function adjustEmphasis(before, after, ranges = []) {
   let end=before.length, nextEnd=after.length;
   while(end>start&&nextEnd>start&&before[end-1]===after[nextEnd-1]){end--;nextEnd--;}
   const delta=nextEnd-end;
-  return ranges.map(r=>({start:r.start>=end?r.start+delta:r.start>start?start:r.start,end:r.end>=end?r.end+delta:r.end>start?nextEnd:r.end})).filter(r=>r.end>r.start&&r.start>=0&&r.end<=after.length);
+  return ranges.map(r=>({start:r.start>=end?r.start+delta:r.start>start?start:r.start,end:r.end>=end?r.end+delta:r.end>start?nextEnd:r.end})).filter(r=>r.end>r.start&&r.start>=0&&r.end<=after.length).sort((a,b)=>a.start-b.start).reduce((merged,range)=>{const last=merged.at(-1);if(last&&last.end>=range.start)last.end=Math.max(last.end,range.end);else merged.push(range);return merged;},[]);
 }
 export function markedText(row) {
   const text = row.text || '';
@@ -22,6 +22,17 @@ export function markedText(row) {
     if ((row.emphasis || []).some(r => r.end === i + 1)) output += '</mark>';
   }
   return output;
+}
+// A quiet page-shaped sketch shows content weight; editing controls live below it.
+function composition(project, page, screen, assetUrl) {
+  const outline = page.outline;
+  if (!outline?.rows.length && !outline?.images.length) return '<p class="ed-note">从这里写下这一页的文案</p>';
+  return (outline.rows || []).filter(row => model.isVisible(row, screen) || row.until === screen).map(row =>
+    `<div class="outline-sketch-${esc(row.role)} ${model.isVisible(row,screen) ? '' : 'outline-row-hidden'}">${row.until===screen ? '<small>本屏消失 · </small>' : row.from===screen && screen>1 ? '<small>本屏新增 · </small>' : ''}${markedText(row)}</div>`
+  ).join('') + (outline.images || []).filter(image => model.isVisible(image, screen)).map(image => {
+    const asset = project.assets.find(a => a.id === image.asset);
+    return `<div class="outline-sketch-image">${asset ? `<img src="${esc(assetUrl?.(asset.file) || '')}" alt="">` : ''}<span>${esc(image.caption)}</span></div>`;
+  }).join('');
 }
 export function mountOutlineView(options) {
   const { host, getProject, mutate, notice = () => {} } = options;
@@ -45,13 +56,13 @@ export function mountOutlineView(options) {
     if (host.contains(document.activeElement) && /^(TEXTAREA|INPUT)$/.test(document.activeElement.tagName)) return;
     host.innerHTML = `<div class="outline-toolbar">${button('add-page','添加页面')}${button('extract','从画布提取大纲')}${button('apply','把文字改动应用到画布')}${button('copy-all','复制全部给 agent')}${button('copy-selected','复制选中页给 agent')}<span data-outline-status role="status"></span></div><div class="outline-report" role="status">${unapplied.length?`<p>以下改动需要 agent 排版：</p><ul>${unapplied.map(change=>`<li>${esc(change.pageId)} · ${esc(change.id||'页面')} · ${esc(({new:'新增内容',deleted:'删除内容',role:'文字角色',emphasis:'强调',from:'出现屏',until:'消失屏',visibleOn:'显示屏',image:'图片与说明',screens:'屏数','missing-element':'对应元素已删除','text-conflict':'画布文字另有修改，已保留','unmapped-baseline':'缺少排版基准'})[change.type]||change.type)}</li>`).join('')}</ul>${button('copy-all','复制修改说明给 agent')}`:''}</div><div class="outline-pages">${project.pages.map((page, index) => {
       const outline = page.outline, screen = current(page);
-      return `<article class="outline-page" data-outline-page="${page.id}"><header><input type="checkbox" data-outline-check ${checked.has(page.id)?'checked':''} aria-label="选择 ${esc(page.name)}"><input data-outline-field="page-name" value="${esc(page.name)}" aria-label="页面名称"><span>${index + 1}</span>${button('up','↑', index ? '' : 'disabled')}${button('down','↓', index < project.pages.length - 1 ? '' : 'disabled')}${button('delete-page','删除页', project.pages.length > 1 ? '' : 'disabled')}</header><div class="outline-pair"><section class="outline-card" style="aspect-ratio:${project.artboard.width}/${project.artboard.height}"><div class="outline-screens"><label>第 <select data-outline-screen>${Array.from({length:outline?.screens || 1},(_,i)=>`<option value="${i+1}" ${i+1===screen?'selected':''}>${i+1}</option>`).join('')}</select> 屏</label>${button('screen-add','添加下一屏')}</div>${!outline ? '<p class="ed-note">尚无大纲。可添加文字，或从排版提取。</p>' : ''}<div class="outline-rows">${(outline?.rows || []).filter(row=>model.isVisible(row,screen)||row.until===screen).map(row => {
+      return `<article class="outline-page" data-outline-page="${page.id}"><header><input type="checkbox" data-outline-check ${checked.has(page.id)?'checked':''} aria-label="选择 ${esc(page.name)}"><input data-outline-field="page-name" value="${esc(page.name)}" aria-label="页面名称"><span>${index + 1}</span>${button('up','↑', index ? '' : 'disabled')}${button('down','↓', index < project.pages.length - 1 ? '' : 'disabled')}${button('delete-page','删除页', project.pages.length > 1 ? '' : 'disabled')}</header><div class="outline-pair"><div class="outline-column"><div class="outline-composition" data-outline-composition style="aspect-ratio:${project.artboard.width}/${project.artboard.height}">${composition(project,page,screen,options.assetUrl)}</div><section class="outline-card"><div class="outline-screens"><label>第 <select data-outline-screen>${Array.from({length:outline?.screens || 1},(_,i)=>`<option value="${i+1}" ${i+1===screen?'selected':''}>${i+1}</option>`).join('')}</select> 屏</label>${button('screen-add','添加下一屏')}</div>${!outline ? '<p class="ed-note">尚无大纲。可添加文字，或从排版提取。</p>' : ''}<div class="outline-rows">${(outline?.rows || []).filter(row=>model.isVisible(row,screen)||row.until===screen).map(row => {
         const visible = model.isVisible(row, screen);
         return `<div class="outline-row outline-role-${esc(row.role)} ${visible?'':'outline-row-hidden'}" data-outline-row="${row.id}"><div class="outline-row-tools"><select data-outline-field="role" aria-label="文字角色">${Object.entries(roles).map(([key,label])=>`<option value="${key}" ${row.role===key?'selected':''}>${label}</option>`).join('')}</select><span>${row.from===screen?'新出现':''}${row.until===screen?'本屏消失':''}${!visible?' · 当前不显示':''}</span>${button('emphasis','强调选中文字')}${button('disappear',row.until===screen?'恢复显示':'从本屏消失')}${button('delete-row','删除')}</div><div class="outline-text-editor"><textarea data-outline-field="text" aria-label="${roles[row.role]}文字">${esc(row.text)}</textarea><div class="outline-marked" aria-hidden="true">${markedText(row)}</div></div></div>`;
       }).join('')}</div>${button('add-row','添加文字')}<div class="outline-images">${(outline?.images || []).filter(image=>model.isVisible(image,screen)||image.until===screen).map(image => {
         const asset = project.assets.find(a=>a.id===image.asset);
         return `<div data-outline-image="${image.id}" class="outline-image ${model.isVisible(image,screen)?'':'outline-row-hidden'}">${asset?`<img src="${esc(options.assetUrl?.(asset.file) || '')}" alt="">`:''}<input data-outline-field="caption" aria-label="图片说明" value="${esc(image.caption)}">${button('image-disappear',image.until===screen?'恢复显示':'从本屏消失')}${button('delete-image','删除图片')}</div>`;
-      }).join('')}</div>${button('add-image','从素材库添加图片')}<label class="outline-notes">给 agent 的页面备注<textarea data-outline-field="notes">${esc(outline?.notes || '')}</textarea></label></section>${page.elements?.length?'<aside class="outline-layout"><span>实际排版</span><div data-outline-thumbnail></div></aside>':''}</div></article>`;
+      }).join('')}</div>${button('add-image','从素材库添加图片')}<label class="outline-notes">给 agent 的页面备注<textarea data-outline-field="notes">${esc(outline?.notes || '')}</textarea></label></section></div>${page.elements?.length?'<aside class="outline-layout"><span>实际排版</span><div data-outline-thumbnail></div></aside>':''}</div></article>`;
     }).join('')}</div>`;
     for (const card of host.querySelectorAll('[data-outline-page]')) {
       const page = project.pages.find(p=>p.id===card.dataset.outlinePage);
@@ -82,8 +93,11 @@ export function mountOutlineView(options) {
       else { const row=outline.rows.find(r=>r.id===rowId); if(field==='text'){row.emphasis=adjustEmphasis(row.text,event.target.value,row.emphasis);}row[field]=event.target.value; }
     },false);
     if(field==='text') event.target.nextElementSibling.innerHTML=markedText(getProject().pages.find(p=>p.id===page.id).outline.rows.find(r=>r.id===rowId));
+    const sketch=event.target.closest('[data-outline-page]').querySelector('[data-outline-composition]');
+    sketch.innerHTML=composition(getProject(),getProject().pages.find(p=>p.id===page.id),current(page),options.assetUrl);
   },{signal:controller.signal});
   host.addEventListener('change',event=>{
+    if(event.target.dataset.outlineField==='role') refresh();
     if(event.target.matches('[data-outline-check]')){const {page}=locate(event.target);if(event.target.checked)checked.add(page.id);else checked.delete(page.id);}
     if(event.target.matches('[data-outline-screen]')) { const {page}=locate(event.target); screens.set(page.id,Number(event.target.value)); refresh(); }
   },{signal:controller.signal});
@@ -98,6 +112,7 @@ export function mountOutlineView(options) {
         if(start===end) { notice('先在这一行中选中文字'); return; }
         edit(page.id,o=>model.toggleEmphasis(o.rows.find(r=>r.id===rowId),start,end),false);
         textarea.nextElementSibling.innerHTML=markedText(getProject().pages.find(p=>p.id===page.id).outline.rows.find(r=>r.id===rowId));
+        target.closest('[data-outline-page]').querySelector('[data-outline-composition]').innerHTML=composition(getProject(),getProject().pages.find(p=>p.id===page.id),current(page),options.assetUrl);
         textarea.focus();textarea.setSelectionRange(start,end);return;
       }
       if(action==='add-page') mutate(project=>project.pages.push({id:id('page'),name:'新页面',background:'#ffffff',elements:[],outline:{screens:1,rows:[],images:[],notes:''}}));

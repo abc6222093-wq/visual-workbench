@@ -2,9 +2,11 @@ import { renderPage } from './render.js';
 import { applyStepView } from './step-view.js';
 
 export function nodeIsVisible(node, root) {
+  const visibility = getComputedStyle(node).visibility;
+  if (visibility === 'hidden' || visibility === 'collapse') return false;
   for (let current = node; current; current = current.parentElement) {
     const style = getComputedStyle(current);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
+    if (style.display === 'none' || style.contentVisibility === 'hidden' || Number(style.opacity) === 0) return false;
     if (current === root) return true;
   }
   return false;

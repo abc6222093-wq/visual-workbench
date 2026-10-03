@@ -15,7 +15,7 @@ test('failed initialization can leave the page forward and backward', async t =>
   const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
   const result=await page.evaluate(async()=>{
     const {showMotionPage}=await import('/motion-stage.js');
-    const project={artboard:{width:800,height:600},assets:[],fonts:[],pages:[
+    const project={formatVersion:2,artboard:{width:800,height:600},assets:[],fonts:[],pages:[
       {id:'page_before',background:'#fff',elements:[]},
       {id:'page_failed',background:'#fff',elements:[],motion:{steps:0,source:'export default () => {throw new Error("bad initialization")}' }},
       {id:'page_after',background:'#fff',elements:[]}

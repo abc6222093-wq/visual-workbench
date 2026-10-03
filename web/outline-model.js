@@ -115,7 +115,7 @@ export function extractOutline(project, page, map) {
     screens = Math.max(1, (page.motion?.steps || 0) + 1),
     o = {
       screens,
-      notes: old?.notes || page.notes || "",
+      notes: old?.notes ?? page.notes ?? "",
       rows: [],
       images: [],
     },

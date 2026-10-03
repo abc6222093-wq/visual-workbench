@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, cpSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from '../src/server.js';
@@ -58,6 +58,9 @@ test('sample-deck: actual outline extraction, edit two texts, apply without chan
     assert.deepEqual(pair.after, { ...pair.before, text: pair.text });
     delete pair.text;
   }
+  const expectedPages = structuredClone(original.pages);
+  for (const pair of pairs) expectedPages[0].elements.find(e => e.id === pair.elementId).text = pair.after.text;
+  assert.deepEqual(afterApply.pages.map(p => p.elements), expectedPages.map(p => p.elements));
   const versions = await (await fetch(`${origin}/api/projects/sample-deck/versions`)).json();
   assert.equal(versions.length, 2, 'extract and apply each save a version first');
   for (const ids of [afterApply.pages.map(p => p.id), ['page_cover1']]) {
@@ -66,6 +69,10 @@ test('sample-deck: actual outline extraction, edit two texts, apply without chan
     for (const id of ids) assert.ok(brief.text.includes(id));
     if (ids.length === 1) assert.ok(!brief.text.includes('page_scene2'));
   }
+  const external = structuredClone(afterApply);
+  external.pages[1].outline.notes = 'agent 从文件写入的新备注';
+  writeFileSync(file, JSON.stringify(external));
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-outline-field=notes]')].some(n => n.value === 'agent 从文件写入的新备注'));
   assert.deepEqual(errors, []);
   console.log('ROUND6_SAMPLE_ELEMENT_COMPARISON=' + JSON.stringify(pairs));
 });

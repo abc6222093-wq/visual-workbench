@@ -6,3 +6,16 @@
 .outline-text-editor textarea{z-index:1;background:transparent;color:transparent;caret-color:var(--ink,#2c2c37);resize:vertical;overflow:hidden}
 .outline-text-editor textarea::selection{color:#252530;background:#c8d9ef}
 .outline-text-editor .outline-marked{z-index:0;pointer-events:none;min-height:68px}
+
+.outline-column{min-width:0}
+.outline-composition{box-sizing:border-box;width:100%;container-type:inline-size;overflow:auto;padding:5%;border:1px solid rgba(100,100,120,.18);border-radius:10px;background:rgba(255,255,255,.65);display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.outline-composition>div{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.35}
+.outline-composition mark{background:#f5dd86;color:inherit}
+.outline-composition small{font-size:.55em;font-weight:400;color:var(--ink-3)}
+.outline-sketch-title{font-size:6cqw;font-weight:700}
+.outline-sketch-subtitle{font-size:4.5cqw;font-weight:600}
+.outline-sketch-english{font-size:3.6cqw}
+.outline-sketch-body{font-size:3.2cqw}
+.outline-sketch-note{font-size:2.6cqw}
+.outline-sketch-image{display:flex;align-items:center;gap:2cqw;font-size:2.6cqw}
+.outline-sketch-image img{max-height:14cqw;max-width:25%;object-fit:contain}

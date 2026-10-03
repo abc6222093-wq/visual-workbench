@@ -311,7 +311,7 @@ function isBusy() {
   if (S.dragging || S.saving || S.assetPromise || S.preview || S.outlineBusy) return true;
   if ($("#modal-root")?.childElementCount) return true;
   const field = document.activeElement;
-  if (field?.matches?.("input[data-prop],textarea[data-prop]") && field.value !== field.defaultValue)
+  if (field?.matches?.("input[data-prop],textarea[data-prop],input[data-outline-field],textarea[data-outline-field],select[data-outline-field]") && field.value !== field.defaultValue)
     return true;
   return false;
 }

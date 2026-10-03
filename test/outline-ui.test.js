@@ -64,9 +64,11 @@ test('大纲提取：运行初始化和各步，尊重祖先 opacity，清理离
     page.elements=[{id:'el_groupcapture',type:'group',x:0,y:0,width:800,height:600,rotation:0,opacity:1,zIndex:0,children:[text]}];
     page.motion={steps:2,source:`export default ctx=>{const n=ctx.element('el_groupcapture').node;n.style.opacity='0';return {step(i){n.style.opacity=i===0?'1':'0';}}}`};
     const frames=await captureOutlinePage(p,page,'/data/projects/sample-deck');
-    return {visible:frames.map(f=>f[0].visible),text:frames[0][0].text,holders:[...document.body.children].filter(n=>n.style.left==='-100000px').length};
+    const {nodeIsVisible}=await import('/outline-capture.js');
+    const parent=document.createElement('div'),child=document.createElement('div'); parent.style.visibility='hidden';child.style.visibility='visible';parent.append(child);document.body.append(parent);const overrideVisible=nodeIsVisible(child,parent);parent.remove();
+    return {overrideVisible,visible:frames.map(f=>f[0].visible),text:frames[0][0].text,holders:[...document.body.children].filter(n=>n.style.left==='-100000px').length};
   });
-  assert.deepEqual(result.visible,[false,true,false]);assert.equal(result.holders,0);assert.ok(result.text);
+  assert.equal(result.overrideVisible,true);assert.deepEqual(result.visible,[false,true,false]);assert.equal(result.holders,0);assert.ok(result.text);
 });
 
 test('大纲强调范围：前方插入移动范围，末尾追加保留范围，删除选中字去掉空范围',async()=>{
@@ -74,5 +76,6 @@ test('大纲强调范围：前方插入移动范围，末尾追加保留范围�
   assert.deepEqual(adjustEmphasis('hello world','xx hello world',[{start:6,end:11}]),[{start:9,end:14}]);
   assert.deepEqual(adjustEmphasis('hello world','hello world!',[{start:0,end:5}]),[{start:0,end:5}]);
   assert.deepEqual(adjustEmphasis('hello world','hello ',[{start:6,end:11}]),[]);
+  assert.deepEqual(adjustEmphasis('abcdef','aXXXXf',[{start:0,end:2},{start:4,end:6}]),[{start:0,end:6}]);
   assert.equal(markedText({text:'<script>"x"</script>',emphasis:[{start:1,end:7}]}),'&lt;<mark>script</mark>&gt;&quot;x&quot;&lt;/script&gt;');
 });
