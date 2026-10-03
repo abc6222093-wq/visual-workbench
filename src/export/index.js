@@ -14,7 +14,8 @@ export function fileBaseName(name, fallback = 'project') {
     .replace(/^[\s.-]+|[\s.]+$/g, '')
     .slice(0, 120)
     .trim();
-  return cleaned || fallback;
+  const base = cleaned || fallback;
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(base) ? `_${base}` : base;
 }
 
 /**
