@@ -11,13 +11,13 @@
 
 ## 旧测试的跨系统修改（断言保留）
 1. `test/check-motion-cli.test.js`：URL.pathname 在 Windows 变成 /D:/…，改为 fileURLToPath；不改错误与超时断言。
-2. `test/export-images.test.js`：示例文件夹同样改为 fileURLToPath；所有渲染断言保留。
+2. `test/export-images.test.js`：示例文件夹同样改为 fileURLToPath；文件名检查用 basename 去掉平台相关目录分隔符，文件名及所有渲染断言保留。
 3. `test/version.test.js`：split('/') 取版本名改为 basename，编号正则不变。
 4. `test/version-gc.test.js`：两个版本名提取点改为 basename，回收与退回断言不变。
 5. `test/copy-pages.test.js`：快照键把本机分隔符规范为 /，逐字节比较和素材存在断言不变。
 `test/browser.test.js` 原 Mac 模拟断言未改，修的是生产 browserCandidates 按指定平台使用 posix 路径；新增 Windows 各安装位置与中文说明测试。
 
-真实代码问题：`src/export/images.js`、`src/cli/check-motion.js` 的目录边界检查写死 `/`，Windows 上正常文件全被拒绝；已改用本机 sep。未改 watch 测试断言或时长。
+真实代码问题：`src/export/images.js`、`src/cli/check-motion.js` 的目录边界检查写死 `/`，Windows 上正常文件全被拒绝；已改用本机 sep。浏览器超时改用 Playwright 的 kill() 清理整个进程树，避免 Windows 留下子进程；离线放映在同步装载器里立即提供 vwReady Promise，涵盖异步模块载入。离线放映测试断言未改。未改 watch 测试断言或时长。
 
 ## 本机测试原始摘要
 基线非浏览器：

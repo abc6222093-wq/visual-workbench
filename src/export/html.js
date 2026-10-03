@@ -190,12 +190,14 @@ const LOADER = `(() => {
       return load(path);
     }
   };
-  load('/player.js').catch(error => {
+  globalThis.vwReady = load('/player.js').then(module => module.ready).catch(error => {
     console.error(error);
     const toast = document.getElementById('vw-toast');
     toast.textContent = '放映文件打不开：' + (error && error.message || error);
     toast.hidden = false;
+    throw error;
   });
+  globalThis.vwReady.catch(() => {});
 })();`;
 
 const CSS = `html,body{margin:0;height:100%;background:#000;overflow:hidden;overscroll-behavior:none}

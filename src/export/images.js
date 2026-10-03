@@ -97,7 +97,7 @@ async function captureProject({ projectDir, type, quality, timeout = 5000, onSho
         const shot = await Promise.race([work, deadline]);
         await onShot(index, item, shot, project.pages.length);
       } catch (error) {
-        if (error.vwTimeout) { killed = true; browserServer.process()?.kill('SIGKILL'); }
+        if (error.vwTimeout) { killed = true; await browserServer.kill().catch(() => {}); }
         else if (!String(error.message).startsWith(`${label}`)) error.message = `${label}导出失败：${error.message}`;
         throw error;
       } finally {

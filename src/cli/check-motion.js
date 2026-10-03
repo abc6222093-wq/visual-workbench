@@ -90,7 +90,7 @@ try {
         if (!timedOut) await Promise.race([browser.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 2000))]);
       }
       if (browserServer) {
-        if (timedOut) browserServer.process().kill('SIGKILL');
+        if (timedOut) await browserServer.kill().catch(() => {});
         await Promise.race([browserServer.close().catch(() => {}), new Promise(resolve => setTimeout(resolve, 2000))]);
       }
     }
