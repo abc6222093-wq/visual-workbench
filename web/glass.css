@@ -1606,3 +1606,39 @@ button.hm-card--add:hover {
 .g-field input[type="number"] {
   -moz-appearance: textfield;
 }
+
+/* ---------- 步骤视图（第 5 轮）：工具条里的小下拉 ---------- */
+.ed-stepview {
+  height: 30px;
+  margin-right: 4px;
+}
+.ed-stepview select {
+  min-width: 78px;
+}
+
+/* ---------- 专注模式（第 5 轮）：藏起顶栏和左右面板，只留画布 ---------- */
+.ed-shell.is-focus {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ed-shell.is-focus .ed-rail,
+.ed-shell.is-focus .ed-top,
+.ed-shell.is-focus .ed-pages,
+.ed-shell.is-focus .ed-inspector {
+  display: none;
+}
+.ed-shell.is-focus .ed-main {
+  padding: 14px;
+}
+.ed-shell.is-focus .ed-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+/* 右下角浮着一个玻璃小钮：点它退出专注模式 */
+.ed-focus-exit,
+html.glass-mode .ed-focus-exit {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 30;
+  height: 44px;
+  padding: 0 4px;
+}
