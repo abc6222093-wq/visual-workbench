@@ -131,7 +131,8 @@
         "notes": { "type": "string", "description": "给 agent 或 エイ 的备注，不渲染" },
         "background": { "$ref": "#/$defs/fill" },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
-        "motion": { "$ref": "#/$defs/motion" }
+        "motion": { "$ref": "#/$defs/motion" },
+        "outline": { "$ref": "#/$defs/outline" }
       }
     },
 
@@ -174,6 +175,8 @@
       "properties": {
         "type": { "const": "text" },
         "text": { "type": "string" },
+        "documentDraft": { "type": "boolean", "description": "Default document draft; clear after manual styling or agent layout" },
+        "decorative": { "type": "boolean", "default": false, "description": "Exclude decorative text from the page document" },
         "font": { "oneOf": [{ "$ref": "#/$defs/fontId" }, { "type": "null" }], "description": "引用 fonts[].id；null = 系统默认字体" },
         "fontSize": { "type": "number", "exclusiveMinimum": 0 },
         "fontWeight": { "type": "integer", "minimum": 100, "maximum": 900, "default": 400 },
@@ -343,6 +346,285 @@
         "steps": { "type": "integer", "minimum": 0, "description": "点击推进次数。完成最后一步后下一次点击开始换页。" },
         "source": { "type": "string", "minLength": 1, "description": "export default async function(ctx) 返回 step、transition、dispose 函数。" }
       }
-    }
+    },
+      "outlineRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "role",
+          "text",
+          "emphasis",
+          "from",
+          "until"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^row_[a-z0-9_]{4,32}$"
+          },
+          "role": {
+            "enum": [
+              "title",
+              "subtitle",
+              "english",
+              "body",
+              "note"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "emphasis": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "start",
+                "end"
+              ],
+              "properties": {
+                "start": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 2
+          },
+          "elementId": {
+            "$ref": "#/$defs/elementId"
+          },
+          "baseline": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "text",
+              "emphasis",
+              "from",
+              "until"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "title",
+                  "subtitle",
+                  "english",
+                  "body",
+                  "note"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "emphasis": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "start": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "end": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              "from": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "until": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 2
+              },
+              "visibleOn": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "visibleOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "outlineImage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "asset",
+          "caption",
+          "from",
+          "until"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^image_[a-z0-9_]{4,32}$"
+          },
+          "asset": {
+            "$ref": "#/$defs/assetId"
+          },
+          "caption": {
+            "type": "string"
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 2
+          },
+          "elementId": {
+            "$ref": "#/$defs/elementId"
+          },
+          "baseline": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "asset",
+              "caption",
+              "from",
+              "until"
+            ],
+            "properties": {
+              "asset": {
+                "$ref": "#/$defs/assetId"
+              },
+              "caption": {
+                "type": "string"
+              },
+              "from": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "until": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 2
+              },
+              "visibleOn": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "visibleOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "outline": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "screens",
+          "notes",
+          "rows",
+          "images"
+        ],
+        "properties": {
+          "mode": { "const": "document", "description": "Live bidirectional current-page document" },
+          "screens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "notes": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/outlineRow"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/outlineImage"
+            }
+          },
+          "baseline": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "screens",
+              "rows",
+              "images"
+            ],
+            "properties": {
+              "screens": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/outlineRow"
+                }
+              },
+              "images": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/outlineImage"
+                }
+              }
+            }
+          }
+        }
+      }
   }
 }

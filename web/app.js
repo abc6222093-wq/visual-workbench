@@ -1,3 +1,7 @@
+import { mountOutlinePanel } from "./outline-panel.js";
+import { captureOutlinePage } from "./outline-capture.js";
+import { reconcileDocument } from "./outline-document.js";
+import { pickCanvasElement } from "./editor-hit-test.js";
 import { renderPage, updateElementNode } from "./render.js";
 import { showMotionPage } from "./motion-stage.js";
 import { mountMotionStatus } from "./motion-status.js";
@@ -18,6 +22,7 @@ import {
   createHistory,
   rootSelection,
   resizeGroup,
+  resizeBounds,
   referenceText,
 } from "./editor.js";
 // 实时连接（第 3 轮）：合并エイ 和 agent 的修改
@@ -61,9 +66,14 @@ const S = {
   stale: new Map(), // 被 agent 换过内容的素材文件 → 时间戳（让图片重新加载）
   preview: null, // 正在预览动效时：{ stop, done }
   exportKind: "pdf", // 导出弹窗上次选的类型
-  stepView: 0, // 步骤视图：0 = 静止；k = 第 k 步之后
+  stepView: 0, // 0 = 全部显示；-1 = 初始化；k >= 1 = 第 k 步之后
   stepPage: null, // 步骤视图对应的页面（换页就回到静止）
+  pendingSnapshot: null,
   stepRun: null, // 正在画板上生效的步骤视图 { ready, dispose }
+  inspectorCollapsed: localStorage.getItem("vw-inspector-collapsed") === "true",
+  pagesCollapsed: localStorage.getItem("vw-pages-collapsed") === "true",
+  outlineView: null,
+  outlineBusy: false,
   focus: false, // 专注模式：藏起顶栏和左右面板，画板放大（刷新后不记得）
 };
 const esc = (s) =>
@@ -164,6 +174,8 @@ function thumb(project, p) {
 async function home() {
   await flush();
   S.view = "home";
+  S.outlineView?.dispose();
+  S.outlineView = null;
   S.project = null;
   S.focus = false;
   disconnectEvents();
@@ -241,16 +253,19 @@ async function open(id, data) {
   S.dirty = S.saved = 0;
   S.conflict = false;
   S.base = clone(S.project);
+  const reconciled = reconcileLinkedPages();
+  if (reconciled) { S.history.commit(S.project); S.dirty++; schedule(); }
   S.lastConflict = null;
   S.stale.clear();
   S.stepView = 0;
+
   S.focus = false;
   S.view = "editor";
   renderEditor();
   connectEvents(S.project.id);
 }
 function pageItem(p, i) {
-  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
+  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}" title="${esc(p.name)}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
 }
 function layers(items, depth = 0) {
   return [...items]
@@ -299,10 +314,10 @@ function setAgent(state) {
 // エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
 function isBusy() {
   if (S.view !== "editor" || !S.project) return true;
-  if (S.dragging || S.saving || S.assetPromise || S.preview) return true;
+  if (S.dragging || S.saving || S.assetPromise || S.preview || S.outlineBusy) return true;
   if ($("#modal-root")?.childElementCount) return true;
   const field = document.activeElement;
-  if (field?.matches?.("input[data-prop],textarea[data-prop]") && field.value !== field.defaultValue)
+  if (field?.matches?.("input[data-prop],textarea[data-prop],input[data-outline-field],textarea[data-outline-field],select[data-outline-field],textarea[data-outline-document],textarea[data-outline-notes]") && field.value !== field.defaultValue)
     return true;
   return false;
 }
@@ -312,17 +327,24 @@ function keepSelection() {
   for (const id of [...S.checked]) if (!S.project.pages.some((p) => p.id === id)) S.checked.delete(id);
 }
 // 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留エイ 的并提示
+function reconcileLinkedPages() {
+  let changed = false;
+  for (const p of S.project.pages) if (p.outline?.mode === 'document') changed = reconcileDocument(S.project,p).changed || changed;
+  return changed;
+}
 function applySync({ project, base, revision, remoteChanged, needsSave, conflicts }) {
   const before = { base: S.base, local: clone(S.project), remote: clone(base) };
   S.base = clone(base);
   S.revision = revision;
   S.conflict = false;
+  let reconciled = false;
   if (remoteChanged) {
     S.project = clone(project);
+    reconciled = reconcileLinkedPages();
     S.history.commit(S.project);
     keepSelection();
   }
-  if (needsSave) {
+  if (needsSave || reconciled) {
     S.dirty++;
     schedule();
   } else S.saved = S.dirty;
@@ -409,6 +431,7 @@ function disconnectEvents() {
   agentUI.state = "idle";
 }
 function inspectorBody(p) {
+  if (S.tab === "outline") return '<div id="outline-host"></div>';
   if (S.tab === "library") {
     const list = S.libraryChoices || [];
     return `<div class="ed-assets">${list.length ? list.map((a, i) => `<button class="g-row g-row--tall" data-action="library-copy" data-index="${i}" draggable="true" data-library-file="${esc(a.file)}"><img class="g-row__thumb" src="${esc(a.url)}" alt=""><span class="g-row__text">${esc(a.name)}</span></button>`).join("") : `<p class="ed-note">公共素材库里还没有素材</p>`}</div>`;
@@ -420,14 +443,17 @@ function inspectorBody(p) {
 function renderEditor() {
   if (!S.project) return;
   stopPreview();
+  S.outlineView?.dispose();
+  S.outlineView = null;
   clampStepView();
   const p = page();
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost><div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost><div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="versions">版本</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>${S.focus ? `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>` : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid${S.inspectorCollapsed ? " is-inspector-collapsed" : ""}${S.pagesCollapsed ? " is-pages-collapsed" : ""}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${ibtn("toggle-pages", S.pagesCollapsed ? "chevronRight" : "chevronLeft", S.pagesCollapsed ? "展开页面栏" : "收起页面栏", `aria-expanded="${!S.pagesCollapsed}"`)}<div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${ibtn("toggle-inspector", S.inspectorCollapsed ? "chevronLeft" : "chevronRight", S.inspectorCollapsed ? "展开属性栏" : "收起属性栏", `aria-expanded="${!S.inspectorCollapsed}"`)}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>${S.focus ? `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>` : ""}`,
   );
   renderBoard();
+  if (S.tab === "outline") mountEditorOutline();
   mountMotionStatus(S.project, base(), $(".ed-toolbar"));
   S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
   bindDrag();
@@ -492,44 +518,35 @@ function renderBoard() {
   bustStale(holder);
   // 按下时自己挑要操作的元素（捕获阶段，先于各元素自己的处理）：
   // 锁定的元素（例如盖满整页的纸纹）点不中、也不挡住下面的元素；已选中的元素优先，被别的元素盖住也能接着拖、拉把手。
-  board.addEventListener(
-    "pointerdown",
-    (e) => {
-      const { id, resize } = pickElement(board, e);
-      e.stopPropagation();
-      if (id) return selectCanvas(id, e, resize);
-      if (S.selected.length) {
-        S.selected = [];
-        renderEditor();
-      }
-    },
-    true,
-  );
-  board.querySelectorAll("[data-element-id]").forEach((n) => {
-    if (S.selected.includes(n.dataset.elementId)) {
-      const h = document.createElement("span");
-      h.className = "resize-handle";
-      h.dataset.resize = n.dataset.elementId;
-      n.append(h);
-    }
-  });
+  bindBoardPointer(holder, board);
+  markSelection();
   if (S.stepView) startStepView(board);
+}
+function bindBoardPointer(holder, board) {
+  holder._pickController?.abort();
+  const controller = new AbortController(); holder._pickController = controller;
+  holder.addEventListener('pointerdown', e => {
+    if (S.preview) { e.preventDefault();e.stopPropagation();return; }
+    const {id,resize}=pickElement(board,e);e.stopPropagation();
+    if(id)selectCanvas(id,e,resize);else if(S.selected.length){S.selected=[];refreshSelection();}
+  }, {capture:true,signal:controller.signal});
 }
 // ---------- 步骤视图 ----------
 // 下拉选「第 k 步后」：画板按本页动效快进到第 k 步之后的样子（还没出现的元素藏着、移动过的在移动后的位置）。
-// 拖动、缩放照样改元素自己的 x / y / 宽 / 高；松手保存后重画画板，动效从新的位置重新快进。
+// 拖动、缩放照样改元素自己的 x / y / 宽 / 高；松手后在隐藏容器准备新快照，完成后一次替换。
 function stepSwitcher(p) {
-  const steps = p.motion?.steps || 0;
-  if (!steps) return "";
-  const options = [`<option value="0" ${S.stepView ? "" : "selected"}>静止</option>`];
+  const steps = p.outline?.mode === "document" ? p.outline.screens - 1 : Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
+  if (!p.motion && !p.outline) return "";
+  const options = [`<option value="0" ${S.stepView ? "" : "selected"}>全部显示</option>`, `<option value="-1" ${S.stepView === -1 ? "selected" : ""}>第 1 屏</option>`];
   for (let k = 1; k <= steps; k++)
-    options.push(`<option value="${k}" ${S.stepView === k ? "selected" : ""}>第 ${k} 步后</option>`);
-  return `<label class="g-field ed-stepview" title="按动效步骤查看这一页（只是看，不改动效）"><span>步骤</span><select data-step-view aria-label="步骤视图">${options.join("")}</select></label>`;
+    options.push(`<option value="${k}" ${S.stepView === k ? "selected" : ""}>第 ${k + 1} 屏</option>`);
+  return `<label class="g-field ed-stepview" title="按动效步骤查看这一页（只是看，不改动效）"><span>屏幕</span><select data-step-view aria-label="屏幕视图">${options.join("")}</select></label>`;
 }
 function clampStepView() {
   if (!S.project) return;
-  const steps = page().motion?.steps || 0;
-  if (S.stepPage !== S.pageId || !Number.isInteger(S.stepView) || S.stepView < 0 || S.stepView > steps)
+  const p = page();
+  const steps = p.outline?.mode === "document" ? p.outline.screens - 1 : Math.max(p.motion?.steps || 0, (p.outline?.screens || 1) - 1);
+  if (S.stepPage !== S.pageId || !Number.isInteger(S.stepView) || S.stepView < -1 || S.stepView > steps || (!page().motion && !page().outline))
     S.stepView = 0;
   S.stepPage = S.pageId;
 }
@@ -538,18 +555,19 @@ function syncStepSelect() {
   if (select) select.value = String(S.stepView);
 }
 function disposeStepView() {
+  cancelSnapshot();
   const run = S.stepRun;
   S.stepRun = null;
   run?.dispose();
 }
 function startStepView(board) {
-  const count = S.stepView;
+  const count = Math.max(0, S.stepView);
   const run = applyStepView({ project: S.project, page: page(), root: board, assetBase: base(), count });
   S.stepRun = run;
   run.ready.then(
     () => {
       if (S.stepRun !== run) return;
-      board.dataset.stepShown = String(count);
+      board.dataset.stepShown = String(S.stepView);
       markSelection(); // 动效改了节点内容时，选中框和缩放把手补回来
     },
     (error) => {
@@ -569,13 +587,12 @@ function resetStepView() {
   return true;
 }
 // 步骤视图里拖动：只用 CSS translate 跟手（和动效写的 transform 叠加，不冲掉动效的样式）；缩放时直接改宽高
-function paintStepDragged(target, old, resizing) {
+function paintStepDragged(target, old, resizing, translate = "none") {
   const node = $(`#artboard [data-element-id="${CSS.escape(target.id)}"]`);
   if (!node) return;
-  if (!resizing) {
-    node.style.translate = `${target.x - old.x}px ${target.y - old.y}px`;
-    return;
-  }
+  const [tx = '0px', ty = '0px'] = translate === 'none' ? [] : translate.split(/\s+/);
+  node.style.translate = `calc(${tx} + ${target.x-old.x}px) calc(${ty} + ${target.y-old.y}px)`;
+  if (!resizing) return;
   node.style.width = `${target.width}px`;
   node.style.height = `${target.height}px`;
   if (target.type === "text") node.style.fontSize = `${target.fontSize}px`;
@@ -597,25 +614,7 @@ function setFocus(on) {
 }
 // 点下去的位置上从上到下有哪些元素；跳过锁定的（含锁定分组里的），选中的元素排在最前面
 function pickElement(board, e) {
-  const p = page(),
-    hits = [];
-  let handle = null;
-  for (const node of document.elementsFromPoint(e.clientX, e.clientY)) {
-    if (!board.contains(node)) continue;
-    if (node.dataset.resize && S.selected.includes(node.dataset.resize)) handle ??= node.dataset.resize;
-    const owner = node.closest("[data-element-id]"),
-      id = owner?.dataset.elementId;
-    // 步骤视图里还没出现（透明）的元素点不中，除非已经选中它
-    if (S.stepView && id && !S.selected.includes(id) && getComputedStyle(owner).opacity === "0") continue;
-    if (id && !hits.includes(id) && editable(p, id)) hits.push(id);
-  }
-  // 缩放把手在指针下面就是要缩放它（即使把手被别的元素盖住）
-  if (handle && !e.shiftKey) return { id: handle, resize: true };
-  if (!e.shiftKey) {
-    const chosen = hits.find((id) => S.selected.includes(id));
-    if (chosen) return { id: chosen, resize: false };
-  }
-  return { id: hits[0] || null, resize: false };
+  return pickCanvasElement({ board, page: page(), selected: S.selected, screen: !!S.stepView, event: e });
 }
 // 拖动中只改画面上对应节点的样式，不重画整块画板（重画会让图片重新加载，画面一闪一闪）
 function paintDragged(target) {
@@ -636,45 +635,37 @@ function selectCanvas(id, event, resize) {
       : [...S.selected, id]
     : [id];
   const ids = rootSelection(page(), S.selected);
-  const resizing = resize ?? !!event.target.closest("[data-resize]");
+  const resizing = resize ?? event.target.closest("[data-resize]")?.dataset.handle;
   const start = {
     x: event.clientX,
     y: event.clientY,
-    values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element) })),
+    values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element), translate: getComputedStyle($(`#artboard [data-element-id="${CSS.escape(id)}"]`)).translate })),
   };
   event.preventDefault();
+  cancelSnapshot();
   S.dragging = true;
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
-    for (const { id, element: old } of start.values) {
+    for (const { id, element: old, translate } of start.values) {
       const found = findElement(page(), id),
         target = found?.element;
       if (!target) continue;
       const angle =
-          ((found.ancestors.reduce((sum, a) => sum + (a.rotation || 0), 0) +
-            (resizing ? target.rotation || 0 : 0)) *
+          (found.ancestors.reduce((sum, a) => sum + (a.rotation || 0), 0) *
             Math.PI) /
           180,
         localX = dx * Math.cos(angle) + dy * Math.sin(angle),
         localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
       if (resizing) {
-        if (target.type === "group")
-          resizeGroup(
-            target,
-            old,
-            Math.max(0, old.width + localX),
-            Math.max(0, old.height + localY),
-          );
-        else {
-          target.width = Math.max(0, Math.round(old.width + localX));
-          target.height = Math.max(0, Math.round(old.height + localY));
-        }
+        const bounds = resizeBounds(old, resizing, localX, localY);
+        if (target.type === "group") resizeGroup(target, old, bounds.width, bounds.height);
+        Object.assign(target, bounds);
       } else {
         target.x = Math.round(old.x + localX);
         target.y = Math.round(old.y + localY);
       }
-      if (S.stepView) paintStepDragged(target, old, resizing);
+      if (S.stepView) paintStepDragged(target, old, resizing, translate);
       else paintDragged(target);
     }
   };
@@ -682,8 +673,10 @@ function selectCanvas(id, event, resize) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     S.dragging = false;
-    if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) changed();
-    else renderEditor();
+    if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) {
+      for (const { id } of start.values) clearDocumentDraft(findElement(page(), id).element);
+      changed({ boardOnly: true });
+    } else refreshSelection();
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
@@ -694,20 +687,25 @@ function markSelection() {
   document.querySelectorAll("#artboard [data-element-id]").forEach((n) => {
     const on = S.selected.includes(n.dataset.elementId);
     n.style.outline = on ? "2px solid #38bdf8" : "";
-    const handle = n.querySelector(":scope > [data-resize]");
-    if (on && !handle) {
-      const h = document.createElement("span");
-      h.className = "resize-handle";
-      h.dataset.resize = n.dataset.elementId;
-      n.append(h);
-    } else if (!on && handle) handle.remove();
+    const handles = n.querySelectorAll(":scope > [data-resize]");
+    if (on && !handles.length) {
+      for (const edge of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+        const h = document.createElement("span");
+        h.className = "resize-handle";
+        h.dataset.resize = n.dataset.elementId;
+        h.dataset.handle = edge;
+        n.append(h);
+      }
+    } else if (!on) handles.forEach(handle => handle.remove());
   });
 }
-function changed() {
+function changed({ boardOnly = false } = {}) {
+  for (const p of S.project.pages) if (p.outline?.mode === 'document') reconcileDocument(S.project, p);
   S.history.commit(S.project);
   S.dirty++;
   schedule();
-  renderEditor();
+  if (boardOnly) { refreshSelection(); refreshBoardSnapshot(); }
+  else renderEditor();
 }
 function schedule() {
   clearTimeout(S.timer);
@@ -1255,15 +1253,15 @@ app.addEventListener("click", async (e) => {
           break;
         }
         S.selected = e.shiftKey ? [...new Set([...S.selected, id])] : [id];
-        renderEditor();
+        refreshSelection();
         break;
       case "tab-layers":
         S.tab = "layers";
-        renderEditor();
+        refreshInspector();
         break;
       case "tab-assets":
         S.tab = "assets";
-        renderEditor();
+        refreshInspector();
         break;
       case "undo":
         if (S.history.canUndo) {
@@ -1388,6 +1386,20 @@ app.addEventListener("click", async (e) => {
       case "preview-motion":
         togglePreview();
         break;
+      case "tab-outline":
+        S.tab = "outline";
+        refreshInspector();
+        break;
+      case "toggle-pages":
+        S.pagesCollapsed = !S.pagesCollapsed;
+        localStorage.setItem("vw-pages-collapsed", String(S.pagesCollapsed));
+        renderEditor();
+        break;
+      case "toggle-inspector":
+        S.inspectorCollapsed = !S.inspectorCollapsed;
+        localStorage.setItem("vw-inspector-collapsed", String(S.inspectorCollapsed));
+        renderEditor();
+        break;
       case "focus":
         setFocus(!S.focus);
         break;
@@ -1501,6 +1513,10 @@ function clearStyle(root) {
   });
   if (different) changed();
 }
+function clearDocumentDraft(element) {
+  delete element.documentDraft;
+  for (const child of element.children || []) clearDocumentDraft(child);
+}
 function updateProp(input) {
   const key = input.dataset.prop;
   if (!S.selected.length) return;
@@ -1537,15 +1553,28 @@ function updateProp(input) {
           key === "height" ? value : e.height,
         );
       else e[key] = value;
+      if (key !== "text") clearDocumentDraft(e);
       different = true;
     }
   });
   if (different) changed();
 }
+app.addEventListener("input", (event) => {
+  const input = event.target;
+  if (!input.matches('textarea[data-prop="text"]') || event.isComposing) return;
+  const before=clone(page()); let different=false;
+  mutateElements(page(),rootSelection(page(),S.selected),element=>{
+    if(element.type==='text' && element.text!==input.value){element.text=input.value;different=true;}
+  });
+  if(!different)return;
+  reconcileLinkedPages();S.history.commit(S.project);S.dirty++;schedule();
+  patchDocumentCanvas(before);refreshHistoryButtons();S.outlineView?.refresh();
+});
 app.addEventListener("change", (e) => {
   if (e.target.matches("[data-step-view]")) {
     S.stepView = Number(e.target.value) || 0;
     renderBoard();
+    S.outlineView?.refresh();
     return;
   }
   if (e.target.matches("[data-check]")) {
@@ -1572,6 +1601,7 @@ document.addEventListener("fullscreenchange", () => {
   renderEditor();
 });
 window.addEventListener("keydown", (e) => {
+  if (S.outlineBusy) return;
   if (e.key === "Escape" && S.preview) {
     e.preventDefault();
     stopPreview();
@@ -1602,7 +1632,12 @@ window.addEventListener("keydown", (e) => {
     nextPage(-1);
     return;
   }
-  if (S.view !== "editor" || S.preview || e.target.matches("input,textarea,select")) return;
+  if (S.view === 'editor' && e.target.matches('[data-outline-document]') && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); const start=e.target.selectionStart;
+    $(`[data-action="${e.shiftKey ? 'redo' : 'undo'}"]`)?.click();
+    const input=$('[data-outline-document]');input?.focus();input?.setSelectionRange(start,start);return;
+  }
+  if (S.view !== "editor" || S.preview || S.outlineBusy || e.target.matches("input,textarea,select")) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
     $(`[data-action="${e.shiftKey ? "redo" : "undo"}"]`)?.click();
@@ -1625,3 +1660,158 @@ home().catch((e) => {
   app.innerHTML = '<div class="startup-error">无法打开工作台，请检查本地服务。</div>';
   notice(e.message);
 });
+
+// Selection changes only update controls: never restart page motion on a click.
+function refreshInspector() {
+  S.outlineView?.dispose(); S.outlineView = null;
+  const body = $('.ed-inspector__body');
+  if (!body) return;
+  body.innerHTML = inspectorBody(page());
+  document.querySelectorAll('.ed-inspector .g-seg button').forEach(b => b.classList.toggle('active', b.dataset.action === `tab-${S.tab === 'library' ? 'assets' : S.tab}`));
+  if (S.tab === 'outline') mountEditorOutline();
+  syncGlass(app);
+}
+function refreshSelection() {
+  markSelection();
+  if (S.tab === 'outline') S.outlineView?.refresh();
+  else if (S.tab === 'layers') refreshInspector();
+  refreshHistoryButtons();
+}
+function refreshHistoryButtons() {
+  const undo = $('[data-action="undo"]'), redo = $('[data-action="redo"]');
+  if (undo) undo.disabled = !S.history.canUndo;
+  if (redo) redo.disabled = !S.history.canRedo;
+}
+// After geometry edits, prepare a new motion snapshot beside the still-visible old
+// board, then swap only when ready. Async initializers never expose a blank frame.
+let snapshotGeneration = 0;
+function cancelSnapshot() {
+  snapshotGeneration++;
+  const pending=S.pendingSnapshot; S.pendingSnapshot=null;
+  pending?.run.dispose(); pending?.staging.remove();
+}
+async function refreshBoardSnapshot() {
+  cancelSnapshot();
+  if (!S.stepView) { renderBoard(); return; }
+  const holder = $('#artboard-holder'), old = $('#artboard'), oldRun = S.stepRun;
+  if (!holder || !old) return;
+  const generation = ++snapshotGeneration, view = S.stepView, pageId = S.pageId;
+  const board = renderPage(S.project, page(), { assetBase: base() });
+  board.style.transform = old.style.transform;
+  board.style.transformOrigin = 'top left';
+  const staging = document.createElement('div');
+  staging.style.cssText = 'position:absolute;inset:0;opacity:0;pointer-events:none';
+  staging.append(board); holder.append(staging);
+  const run = applyStepView({project:S.project,page:page(),root:board,assetBase:base(),count:Math.max(0,view)});
+  const pending={run,staging}; S.pendingSnapshot=pending;
+  try {
+    await run.ready;
+    if (generation !== snapshotGeneration || !old.isConnected || S.pageId !== pageId || S.stepView !== view || S.dragging) {run.dispose();staging.remove();return;}
+    oldRun?.dispose();
+    S.stepRun = run; board.id = 'artboard'; board.dataset.stepShown = String(view);
+    holder.replaceChildren(board);
+    bindBoardPointer(holder, board);
+    markSelection();
+  } catch(error) {
+    run.dispose(); staging.remove();
+    if (generation === snapshotGeneration && old.isConnected && S.stepView === view) { notice(`动效错误：${error.message}`); S.stepView=0;syncStepSelect();renderBoard(); }
+  } finally { if(S.pendingSnapshot===pending)S.pendingSnapshot=null; }
+}
+// Live document mutations retain the textarea/caret and existing animated DOM.
+function patchDocumentCanvas(before) {
+  cancelSnapshot();
+  const board = $('#artboard'); if (!board) return;
+  const current = allElements(page()), prior = new Map(allElements(before).map(e=>[e.id,e]));
+  const ids = new Set(current.map(e=>e.id));
+  board.querySelectorAll('[data-element-id]').forEach(node=>{if(!ids.has(node.dataset.elementId))node.remove();});
+  const rendered = renderPage(S.project,page(),{assetBase:base()});
+  for (const element of current) {
+    let node = board.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`);
+    const old = prior.get(element.id);
+    if (!node) {
+      const fresh = rendered.querySelector(`[data-element-id="${CSS.escape(element.id)}"]`);
+      if (fresh && !findElement(page(),element.id).ancestors.length) board.append(fresh);
+      continue;
+    }
+    if (element.type === 'text' && old?.text !== element.text) {
+      node.replaceChildren(document.createTextNode(element.text));
+    }
+    if (old && ['fontSize','fontWeight','height','width','x','y'].some(k=>old[k]!==element[k])) {
+      for (const key of ['fontSize','height','width']) node.style[key]=`${element[key]}px`;
+      node.style.fontWeight=String(element.fontWeight);
+      node.style.left=`${element.x}px`;node.style.top=`${element.y}px`;
+    }
+  }
+  S.selected = S.selected.filter(id=>ids.has(id)); markSelection();
+}
+async function mountEditorOutline() {
+  const host = $('#outline-host'), currentPage = page(), projectId = S.project.id;
+  if (!host) return;
+  // Migration is automatic but preserves a restore point for legacy pending edits.
+  if (currentPage.outline?.mode !== 'document') {
+    S.outlineBusy = true; host.textContent='正在准备文稿…';
+    try {
+      await flush();
+      if (currentPage.outline) await api(`${path()}/versions`, 'POST', {note:'大纲文档联动前自动存版'});
+      if (S.project.id !== projectId || page().id !== currentPage.id || !host.isConnected) return;
+      const before = clone(page());
+      let frames;
+      if (!before.outline && before.motion) {
+        try { frames = await captureOutlinePage(S.project,before,base()); }
+        catch(error) { notice(`文稿已显示全部文字；屏幕可见性待 agent 校对：${error.message}`); }
+        if (!host.isConnected || page().id !== before.id) return;
+        if (JSON.stringify(page()) !== JSON.stringify(before)) { queueMicrotask(mountEditorOutline); return; }
+      }
+      reconcileDocument(S.project,page());
+      if (frames) for (const row of page().outline.rows) {
+        row.visibleOn=frames.flatMap((items,index)=>items.some(e=>e.id===row.elementId && e.visible)?[index+1]:[]);
+        row.from=row.visibleOn[0]||1;row.until=null;
+      }
+      reconcileDocument(S.project,page()); S.history.commit(S.project); S.dirty++;schedule();
+      patchDocumentCanvas(before);
+      const priorView=S.stepView;clampStepView();if(priorView!==S.stepView)renderBoard();
+      const switcher = $('.ed-stepview');
+      if (switcher) switcher.outerHTML=stepSwitcher(page());
+      else $('.ed-tools')?.insertAdjacentHTML('afterbegin',stepSwitcher(page()));
+      refreshHistoryButtons();
+    } catch(error) {host.textContent=error.message;return;}
+    finally {S.outlineBusy=false;}
+  }
+  if (!host.isConnected) return;
+  S.outlineView = mountOutlinePanel({
+    host, getProject:()=>S.project, getPage:page,
+    getScreen:()=>S.stepView===0?null:S.stepView===-1?1:S.stepView+1,
+    setScreen:screen=>{S.stepView=screen==null?0:screen===1?-1:screen-1;syncStepSelect();renderBoard();S.outlineView?.refresh();},
+    mutate: (fn,{kind}={})=>{
+      const before = clone(page()), result=fn(S.project,page());
+      if (JSON.stringify(before)===JSON.stringify(page())) return result;
+      S.history.commit(S.project);S.dirty++;schedule();refreshHistoryButtons();
+      if (kind!=='metadata' || JSON.stringify(before.elements)!==JSON.stringify(page().elements)) patchDocumentCanvas(before);
+      const switcher=$('.ed-stepview');if(switcher)switcher.outerHTML=stepSwitcher(page());
+      S.outlineView?.refresh(); return result;
+    },
+    flush, request:(suffix,method,body)=>api(`${path()}${suffix}`,method,body),
+    notice,openLibrary:outlineLibrary,
+  });
+}
+async function outlineLibrary() {
+  const choices = await api("/api/library");
+  return new Promise(resolve => {
+    modal(`<h2>选择大纲图片</h2><div class="g-sheet__list">${choices.map((a,i) => `<button class="g-row" data-outline-library="${i}"><img class="g-row__thumb" src="${esc(a.url)}" alt=""><span>${esc(a.name || a.file)}</span></button>`).join("")}</div><div class="g-sheet__actions"><button class="g-btn" data-outline-library-cancel>取消</button></div>`);
+    const root = $("#modal-root");
+    let settled = false;
+    const finish = asset => { if (settled) return; settled = true; observer.disconnect(); resolve(asset); };
+    const observer = new MutationObserver(() => { if (!root.querySelector('[data-outline-library-cancel]')) finish(null); });
+    observer.observe(root, {childList:true});
+    root.querySelector('[data-outline-library-cancel]').onclick = () => { closeModal(); finish(null); };
+    root.querySelectorAll('[data-outline-library]').forEach(button => button.onclick = async () => {
+      try {
+        await flush();
+        const asset = choices[Number(button.dataset.outlineLibrary)];
+        const result = await api(`${path()}/assets`, "POST", {libraryFile:asset.file,width:asset.width,height:asset.height,revision:S.revision});
+        S.project = result.project; S.revision = result.revision; S.base = clone(S.project); S.history.commit(S.project);
+        closeModal(); finish(result.asset);
+      } catch(error) { notice(error.message); }
+    });
+  });
+}

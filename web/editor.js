@@ -85,3 +85,16 @@ export function referenceText(project, { checkedPageIds = [], currentPageId, sel
     return page === current && elementIds.length ? `${line} · ${elementIds.join('、')}` : line;
   }).join('\n');
 }
+
+// Delta is in parent coordinates; the opposite edge remains fixed under rotation.
+export function resizeBounds(old, edge, dx, dy) {
+  const angle = (old.rotation || 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
+  const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+  const w = edge.includes('w'), e = edge.includes('e'), n = edge.includes('n'), south = edge.includes('s');
+  const width = w || e ? Math.max(0, Math.round(old.width + (w ? -lx : lx))) : old.width;
+  const height = n || south ? Math.max(0, Math.round(old.height + (n ? -ly : ly))) : old.height;
+  const sx = (width - old.width) * (w ? -1 : e ? 1 : 0) / 2;
+  const sy = (height - old.height) * (n ? -1 : south ? 1 : 0) / 2;
+  return { width, height, x: old.x + (old.width - width) / 2 + sx*c - sy*s,
+    y: old.y + (old.height - height) / 2 + sx*s + sy*c };
+}
