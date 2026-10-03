@@ -1,4 +1,4 @@
-import { renderPage } from "./render.js";
+import { renderPage, updateElementNode } from "./render.js";
 import { showMotionPage } from "./motion-stage.js";
 import { mountMotionStatus } from "./motion-status.js";
 // 编辑器里预览本页动效（第 4 轮）：临时层里播一遍，播完拿掉，不改项目
@@ -459,12 +459,21 @@ function renderBoard() {
   holder.style.height = `${S.project.artboard.height * S.scale}px`;
   $("#zoom-label").textContent = `${Math.round(S.scale * 100)}%`;
   bustStale(holder);
-  board.onpointerdown = (e) => {
-    if (e.target === board) {
-      S.selected = [];
-      renderEditor();
-    }
-  };
+  // 按下时自己挑要操作的元素（捕获阶段，先于各元素自己的处理）：
+  // 锁定的元素（例如盖满整页的纸纹）点不中、也不挡住下面的元素；已选中的元素优先，被别的元素盖住也能接着拖、拉把手。
+  board.addEventListener(
+    "pointerdown",
+    (e) => {
+      const { id, resize } = pickElement(board, e);
+      e.stopPropagation();
+      if (id) return selectCanvas(id, e, resize);
+      if (S.selected.length) {
+        S.selected = [];
+        renderEditor();
+      }
+    },
+    true,
+  );
   board.querySelectorAll("[data-element-id]").forEach((n) => {
     if (S.selected.includes(n.dataset.elementId)) {
       const h = document.createElement("span");
@@ -474,7 +483,34 @@ function renderBoard() {
     }
   });
 }
-function selectCanvas(id, event) {
+// 点下去的位置上从上到下有哪些元素；跳过锁定的（含锁定分组里的），选中的元素排在最前面
+function pickElement(board, e) {
+  const p = page(),
+    hits = [];
+  let handle = null;
+  for (const node of document.elementsFromPoint(e.clientX, e.clientY)) {
+    if (!board.contains(node)) continue;
+    if (node.dataset.resize && S.selected.includes(node.dataset.resize)) handle ??= node.dataset.resize;
+    const id = node.closest("[data-element-id]")?.dataset.elementId;
+    if (id && !hits.includes(id) && editable(p, id)) hits.push(id);
+  }
+  // 缩放把手在指针下面就是要缩放它（即使把手被别的元素盖住）
+  if (handle && !e.shiftKey) return { id: handle, resize: true };
+  if (!e.shiftKey) {
+    const chosen = hits.find((id) => S.selected.includes(id));
+    if (chosen) return { id: chosen, resize: false };
+  }
+  return { id: hits[0] || null, resize: false };
+}
+// 拖动中只改画面上对应节点的样式，不重画整块画板（重画会让图片重新加载，画面一闪一闪）
+function paintDragged(target) {
+  const node = $(`#artboard [data-element-id="${CSS.escape(target.id)}"]`);
+  if (!node) return;
+  updateElementNode(node, target);
+  if (target.type === "text") node.style.fontSize = `${target.fontSize}px`;
+  for (const child of target.children || []) paintDragged(child);
+}
+function selectCanvas(id, event, resize) {
   if (!editable(page(), id)) {
     notice("这个元素或所在分组已锁定");
     return;
@@ -485,7 +521,7 @@ function selectCanvas(id, event) {
       : [...S.selected, id]
     : [id];
   const ids = rootSelection(page(), S.selected);
-  const resizing = !!event.target.closest("[data-resize]");
+  const resizing = resize ?? !!event.target.closest("[data-resize]");
   const start = {
     x: event.clientX,
     y: event.clientY,
@@ -523,8 +559,8 @@ function selectCanvas(id, event) {
         target.x = Math.round(old.x + localX);
         target.y = Math.round(old.y + localY);
       }
+      paintDragged(target);
     }
-    renderBoard();
   };
   const up = (e) => {
     window.removeEventListener("pointermove", move);
@@ -535,7 +571,21 @@ function selectCanvas(id, event) {
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
-  renderBoard();
+  markSelection();
+}
+// 按下时只在原节点上换选中框和缩放把手，不重画画板
+function markSelection() {
+  document.querySelectorAll("#artboard [data-element-id]").forEach((n) => {
+    const on = S.selected.includes(n.dataset.elementId);
+    n.style.outline = on ? "2px solid #38bdf8" : "";
+    const handle = n.querySelector(":scope > [data-resize]");
+    if (on && !handle) {
+      const h = document.createElement("span");
+      h.className = "resize-handle";
+      h.dataset.resize = n.dataset.elementId;
+      n.append(h);
+    } else if (!on && handle) handle.remove();
+  });
 }
 function changed() {
   S.history.commit(S.project);
