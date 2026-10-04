@@ -122,3 +122,66 @@ export function snapTransformedResize(options) {
   const world=visualBounds(project(bounds));
   return {bounds,gaps:[],guides:guides.filter(g=>marks(world,g.axis).some(value=>Math.abs(value-g.value)<1e-5))};
 }
+
+// Pointer deltas are expressed in the element's parent coordinates. Keep them
+// continuous so several elements can share a single world-space snap correction.
+export function resizeFromPointer(element,handle,dx,dy) {
+  const angle=(element.rotation||0)*Math.PI/180,c=Math.cos(angle),s=Math.sin(angle);
+  const lx=dx*c+dy*s,ly=-dx*s+dy*c;
+  const width=/[we]/.test(handle)?Math.max(0,element.width+(handle.includes('w')?-lx:lx)):element.width;
+  const height=/[ns]/.test(handle)?Math.max(0,element.height+(handle.includes('n')?-ly:ly)):element.height;
+  return anchoredSize(element,handle,width,height);
+}
+
+// project(dx,dy) returns the combined world AABB after continuously resizing the
+// selection. Solve up to two independent guide constraints in pointer space.
+export function snapPointerResize(options) {
+  let dx=options.dx,dy=options.dy;
+  const guides=[],gaps=[];
+  if(options.disabled)return {dx,dy,guides,gaps};
+  const threshold=(options.threshold??6)/Math.max(options.scale||1,.001);
+  const targets=refs(options);
+  if(options.page)targets.push({id:'page',x:0,y:0,...options.page});
+  const epsilon=.01,tolerance=1e-5;
+  let first=null;
+  for(let round=0;round<2;round++) {
+    const world=options.project(dx,dy);
+    const probeX=options.project(dx+epsilon,dy),probeY=options.project(dx,dy+epsilon);
+    const candidates=[];
+    for(const axis of ['x','y']) {
+      const own=marks(world,axis),mx=marks(probeX,axis),my=marks(probeY,axis);
+      for(let index=0;index<3;index++) {
+        const gradient=[(mx[index]-own[index])/epsilon,(my[index]-own[index])/epsilon];
+        let direction=gradient.slice();
+        if(first) {
+          const projection=(direction[0]*first.gradient[0]+direction[1]*first.gradient[1])/first.norm;
+          direction=[direction[0]-projection*first.gradient[0],direction[1]-projection*first.gradient[1]];
+        }
+        const coefficient=gradient[0]*direction[0]+gradient[1]*direction[1];
+        if(coefficient<1e-10)continue;
+        for(const target of targets)for(const value of marks(target,axis)) {
+          const distance=value-own[index];
+          if(Math.abs(distance)>threshold)continue;
+          const correction=direction.map(v=>v*distance/coefficient);
+          const magnitude=Math.hypot(...correction);
+          if(magnitude>threshold*2)continue;
+          // Avoid spending the first degree of freedom on an already-aligned guide.
+          if(magnitude<tolerance)continue;
+          const nextDx=dx+correction[0],nextDy=dy+correction[1];
+          if(Math.hypot(nextDx-options.dx,nextDy-options.dy)>threshold*2)continue;
+          const next=options.project(nextDx,nextDy);
+          if(Math.abs(marks(next,axis)[index]-value)>tolerance)continue;
+          if(first&&Math.abs(marks(next,first.axis)[first.index]-first.value)>tolerance)continue;
+          candidates.push({axis,index,value,targetId:target.id,gradient,dx:nextDx,dy:nextDy,magnitude});
+        }
+      }
+    }
+    candidates.sort((a,b)=>a.magnitude-b.magnitude);
+    const best=candidates[0];if(!best)break;
+    dx=best.dx;dy=best.dy;
+    guides.push({type:'guide',axis:best.axis,value:best.value,targetId:best.targetId});
+    if(!first)first={...best,norm:best.gradient[0]**2+best.gradient[1]**2};
+  }
+  const final=options.project(dx,dy);
+  return {dx,dy,gaps,guides:guides.filter(g=>marks(final,g.axis).some(value=>Math.abs(value-g.value)<tolerance))};
+}

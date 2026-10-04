@@ -54,3 +54,33 @@ test('resizing inside flipped rotated parents projects guides onto the page and 
  const anchor=e=>{const a=e.rotation*Math.PI/180;return {x:e.x+e.width/2-e.width/2*Math.cos(a),y:e.y+e.height/2-e.width/2*Math.sin(a),width:0,height:0};};
  const a=project(anchor(old)),z=project(anchor(result.bounds));assert.ok(Math.abs(a.x-z.x)<1e-8);assert.ok(Math.abs(a.y-z.y)<1e-8);assert.equal(result.bounds.height,old.height);
 });
+
+test('multi-selection pointer resizing snaps combined right edge 497 to page 500',async()=>{
+ const {resizeFromPointer,snapPointerResize,selectionBounds}=await import('../web/layout-tools.js');
+ const elements=[{x:20,y:40,width:80,height:40},{x:397,y:100,width:100,height:40}];
+ const project=(dx,dy)=>selectionBounds(elements.map(e=>resizeFromPointer(e,'e',dx,dy)));
+ const result=snapPointerResize({dx:0,dy:0,project,page:{width:500,height:400}});
+ assert.ok(Math.abs(result.dx-3)<1e-8);assert.equal(result.dy,0);
+ assert.ok(Math.abs(project(result.dx,result.dy).x+project(result.dx,result.dy).width-500)<1e-8);
+ assert.ok(result.guides.some(g=>g.axis==='x'&&g.value===500));
+ assert.deepEqual(snapPointerResize({dx:1.25,dy:-2,project,page:{width:500,height:400},disabled:true}),{dx:1.25,dy:-2,guides:[],gaps:[]});
+});
+test('continuous resizing of several rotated boxes leaves every opposite corner fixed',async()=>{
+ const {resizeFromPointer,snapPointerResize,selectionBounds}=await import('../web/layout-tools.js');
+ const elements=[{x:70,y:80,width:80,height:40,rotation:25},{x:210,y:150,width:120,height:70,rotation:-35}];
+ const anchor=e=>{const a=e.rotation*Math.PI/180,c=Math.cos(a),s=Math.sin(a);return [e.x+e.width/2-e.width*c/2+e.height*s/2,e.y+e.height/2-e.width*s/2-e.height*c/2];};
+ const project=(dx,dy)=>selectionBounds(elements.map(e=>resizeFromPointer(e,'se',dx,dy)));
+ const original=project(2.25,1.5),right=original.x+original.width;
+ const result=snapPointerResize({dx:2.25,dy:1.5,project,references:[{id:'r',x:right+2,y:900,width:30,height:20}],threshold:3});
+ assert.ok(result.guides.some(g=>g.axis==='x'&&Math.abs(g.value-right-2)<1e-8));
+ for(const e of elements){const resized=resizeFromPointer(e,'se',result.dx,result.dy);anchor(e).forEach((v,i)=>assert.ok(Math.abs(v-anchor(resized)[i])<1e-8));assert.notEqual(resized.width,Math.round(resized.width));}
+});
+test('pointer constraints preserve first guide and avoid excessive shallow-angle correction',async()=>{
+ const {snapPointerResize}=await import('../web/layout-tools.js');
+ const project=(dx,dy)=>({x:50,y:50,width:147+dx,height:246+dy});
+ const result=snapPointerResize({dx:0,dy:0,project,page:{width:200,height:300}});
+ assert.ok(Math.abs(result.dx-3)<1e-8);assert.ok(Math.abs(result.dy-4)<1e-8);assert.equal(result.guides.length,2);
+ const shallow=(dx,dy)=>({x:50,y:80,width:147+.01*dx,height:20});
+ const unchanged=snapPointerResize({dx:0,dy:0,project:shallow,page:{width:200,height:300}});
+ assert.equal(unchanged.dx,0);assert.equal(unchanged.dy,0);assert.equal(unchanged.guides.length,0);
+});

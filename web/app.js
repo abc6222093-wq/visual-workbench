@@ -2,7 +2,7 @@ import { copyElements, pasteElements, elementInPage, elementWithParents, selecta
 import { copyPages, pastePages, duplicatePages, deletePages, movePages, insertPage } from './page-operations.js';
 import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewPreference } from './page-views.js';
 import { showContextMenu, closeContextMenu } from './context-menu.js';
-import { snapMove, snapResize, snapTransformedResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
+import { snapMove, snapResize, snapTransformedResize, resizeFromPointer, snapPointerResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
 import { appearanceControls } from './appearance-controls.js';
 import { createProjectManagement } from './project-management.js';
 import { createWorkbenchClose } from './workbench-close.js';
@@ -658,6 +658,15 @@ function paintDragged(target) {
   if (target.type === "text") node.style.fontSize = `${target.fontSize}px`;
   for (const child of target.children || []) paintDragged(child);
 }
+function deltaInParents(dx, dy, ancestors) {
+  for (const ancestor of ancestors) {
+    const angle = -(ancestor.rotation || 0) * Math.PI / 180;
+    [dx, dy] = [dx * Math.cos(angle) - dy * Math.sin(angle), dx * Math.sin(angle) + dy * Math.cos(angle)];
+    if (ancestor.flipX) dx = -dx;
+    if (ancestor.flipY) dy = -dy;
+  }
+  return [dx, dy];
+}
 function selectCanvas(id, event, resize) {
   finishNudge();
   if (!editable(page(), id)) {
@@ -683,25 +692,29 @@ function selectCanvas(id, event, resize) {
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
     let snappedDx=dx,snappedDy=dy;
-    const roots=start.values.map(v=>v.element), bounds=selectionBounds(start.globalElements);
+    const bounds=selectionBounds(start.globalElements);
     const references=allElements(page()).filter(e=>!ids.includes(e.id)&&!findElement(page(),e.id).ancestors.some(a=>ids.includes(a.id))&&!ids.some(id=>findElement(page(),id).ancestors.some(a=>a.id===e.id))).map(e=>elementInPage(page(),e.id));
     const hasParent=start.values.some(v=>findElement(page(),v.id)?.parent);
     if(!resizing) {
       const snap=snapMove({bounds:{...bounds,x:bounds.x+dx,y:bounds.y+dy},references,page:S.project.artboard,scale:S.scale,disabled:e.altKey,movingIds:ids});
       snappedDx=snap.bounds.x-bounds.x;snappedDy=snap.bounds.y-bounds.y;paintGuides(snap);
+    } else if (ids.length > 1) {
+      const project = (pointerX, pointerY) => selectionBounds(start.values.map(({ id, element }) => {
+        const { ancestors } = findElement(page(), id);
+        const [localX, localY] = deltaInParents(pointerX, pointerY, ancestors);
+        return elementWithParents(resizeFromPointer(element, resizing, localX, localY), ancestors);
+      }));
+      const snap = snapPointerResize({ dx, dy, project, references, page: S.project.artboard, scale: S.scale, disabled: e.altKey, movingIds: ids });
+      snappedDx = snap.dx; snappedDy = snap.dy; paintGuides(snap);
     } else clearGuides();
     for (const { id, element: old, translate } of start.values) {
       const found = findElement(page(), id),
         target = found?.element;
       if (!target) continue;
-      let localX=snappedDx,localY=snappedDy;
-      for(const ancestor of found.ancestors){
-        const angle=-(ancestor.rotation||0)*Math.PI/180;
-        [localX,localY]=[localX*Math.cos(angle)-localY*Math.sin(angle),localX*Math.sin(angle)+localY*Math.cos(angle)];
-        if(ancestor.flipX)localX=-localX;if(ancestor.flipY)localY=-localY;
-      }
+      const [localX, localY] = deltaInParents(snappedDx, snappedDy, found.ancestors);
       if (resizing) {
-        let bounds = resizeBounds(old, resizing, localX, localY);
+        const resized = ids.length > 1 ? resizeFromPointer(old, resizing, localX, localY) : resizeBounds(old, resizing, localX, localY);
+        let bounds = { x: resized.x, y: resized.y, width: resized.width, height: resized.height };
         if(ids.length===1){
           const options={bounds:{...old,...bounds},references,page:S.project.artboard,scale:S.scale,handle:resizing,rotation:old.rotation||0,disabled:e.altKey,movingIds:ids};
           const snap=hasParent||old.rotation?snapTransformedResize({...options,project:element=>elementWithParents(element,found.ancestors)}):snapResize(options);

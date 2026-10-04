@@ -125,3 +125,19 @@ test('round8 motion warning stays on one line at narrow width and legacy formats
  await page.evaluate(async()=>{const {mountMotionStatus}=await import('/motion-status.js');mountMotionStatus({formatVersion:1},'',document.querySelector('.ed-toolbar'));});
  const old=page.locator('.ed-motion-status').last();assert.equal(await old.textContent(),'这是旧格式的项目，暂时检查不了动效');assert.equal(await old.evaluate(n=>getComputedStyle(n).whiteSpace),'nowrap');assert.equal(readFileSync(file,'utf8'),before);
 });
+
+
+test('round8 multiple elements resize together, snap their combined edge, retain opposite anchors and undo once',async t=>{
+ const {page,file,errors}=await editor(t);const original=disk(file).pages[0].elements;
+ await select(page,'el_first');await page.locator('[data-action="select"][data-id="el_second"]').click({modifiers:['Shift']});
+ const scale=await page.locator('#artboard').evaluate(n=>new DOMMatrix(getComputedStyle(n).transform).a);
+ async function resize(){const handle=await page.locator('[data-resize="el_second"][data-handle="e"]').boundingBox();await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();await page.mouse.move(handle.x+handle.width/2+77*scale,handle.y+handle.height/2);}
+ await resize();assert.ok(await page.locator('.ed-guide[data-axis="x"]').count()>0);await saved(page,()=>page.mouse.up());
+ const after=disk(file).pages[0].elements;
+ for(const id of ['el_first','el_second']){const old=original.find(e=>e.id===id),next=after.find(e=>e.id===id);assert.ok(Math.abs(next.width-200)<1e-6);assert.equal(next.x,old.x);assert.equal(next.y,old.y);assert.equal(next.height,old.height);assert.deepEqual({...next,width:old.width},old);}
+ assert.deepEqual(after.slice(2),original.slice(2));assert.equal(await page.locator('.ed-guide').count(),0);
+ await saved(page,()=>page.keyboard.press('ControlOrMeta+z'));assert.deepEqual(disk(file).pages[0].elements,original);
+ await page.keyboard.down('Alt');await resize();assert.equal(await page.locator('.ed-guide').count(),0);await saved(page,()=>page.mouse.up());await page.keyboard.up('Alt');
+ for(const id of ['el_first','el_second'])assert.ok(Math.abs(disk(file).pages[0].elements.find(e=>e.id===id).width-197)<1e-6);
+ assert.deepEqual(errors,[]);
+});
