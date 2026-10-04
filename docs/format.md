@@ -157,6 +157,19 @@
   "asset": "asset_logo01", "fit": "contain", "tint": "#ffffff" }
 ```
 
+- `crop`（可选，第 10 轮）：裁切，`null` / 不写 = 不裁切；否则 `{ "x", "y", "width", "height" }`，都是**源图的比例**（0–1，左上角为 0），表示取源图的这一块、拉伸铺满元素框。要求 `width`、`height` > 0，`x + width ≤ 1`、`y + height ≤ 1`（超出时校验报 `CROP_RANGE`）。
+  - 有 `crop` 时忽略 `fit`。为了不变形，裁切块的宽高比应等于元素框的宽高比：`(crop.width × 源图宽) / (crop.height × 源图高) = width / height`（工作台的裁切工具总是这样写）。
+  - 元素框（`x`/`y`/`width`/`height`/`rotation`）仍是画板上看得到的框，`ctx.element(id).base` 照旧是这个框，动效不受裁切影响；`tint`、`flipX`/`flipY`、`opacity` 可以和 `crop` 同时用。
+  - agent 一般**不手写裁切**：用户在编辑器里双击图片（或右键「裁切」）拖框、拖图、缩放来裁。确实需要时按比例写，例如取源图中间偏上的一半：`"crop": { "x": 0.25, "y": 0.1, "width": 0.5, "height": 0.5 }`，再按上面的比例关系定元素框的宽高。用户裁过的 `crop` 和框，除非她要求，不要改。
+  - 导出放映版 HTML 时按裁切后的放大倍数决定图片压缩尺寸，放大后不糊；图片 / PDF 导出与编辑器画面一致。
+
+```json
+{ "id": "el_portrait", "type": "image", "x": 1200, "y": 90, "width": 480, "height": 900, "zIndex": 5,
+  "asset": "asset_city01", "crop": { "x": 0.35, "y": 0, "width": 0.3, "height": 1 } }
+```
+
+（源图 1920×1080：裁切块 576×1080，与 480×900 的框同比例。）
+
 - 素材可以是 SVG（`assets/xxx.svg`）。工作台只收纯图形的 SVG：含脚本、`on…` 事件属性、`javascript:`、`<foreignObject>` 或引用网络地址的会被拒绝。
 
 ### 6.4 形状 `shape`
@@ -350,6 +363,7 @@ export default async function (ctx) {
 | `OUTLINE_RANGE` | 大纲出现 / 消失屏或精确可见屏范围无效 |
 | `OUTLINE_EMPHASIS` | 强调范围重叠或超出文字 |
 | `TINT_NEEDS_ALPHA` | 图片设了 `tint`，但素材是没有透明部分的 JPEG |
+| `CROP_RANGE` | 图片的 `crop` 超出源图（`x + width > 1` 或 `y + height > 1`） |
 
 通过时会额外列出待排版素材。程序内用法：`import { validateProject, validateProjectData } from './src/validate.js'`。
 

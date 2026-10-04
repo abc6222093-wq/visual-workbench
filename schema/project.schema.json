@@ -230,6 +230,23 @@
         "tint": {
           "description": "重新着色：把图片画成这个纯色（按图片的透明度取形状）。用于单色矢量标志（SVG）或透明底的单色 PNG；null 或不写 = 原色",
           "oneOf": [{ "$ref": "#/$defs/color" }, { "type": "null" }]
+        },
+        "crop": {
+          "description": "裁切：取源图的这一块（比例 0–1）拉伸铺满元素框；有 crop 时忽略 fit。要求 x+width ≤ 1、y+height ≤ 1（由校验检查）。null 或不写 = 不裁切",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["x", "y", "width", "height"],
+              "additionalProperties": false,
+              "properties": {
+                "x": { "type": "number", "minimum": 0, "maximum": 1, "description": "左边缘在源图里的位置（比例）" },
+                "y": { "type": "number", "minimum": 0, "maximum": 1, "description": "上边缘在源图里的位置（比例）" },
+                "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "宽度占源图的比例" },
+                "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "高度占源图的比例" }
+              }
+            }
+          ]
         }
       }
     },
