@@ -18,6 +18,7 @@ import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief } from './brief.js';
 import { exportHandoff, defaultHandoffDir } from './export/changes.js';
+import { WEB_DEVICES, WEB_DEFAULT_ARTBOARD, webPageDefaults } from '../web/project-kinds.js';
 import { cleanupTrash, listTrash, deleteProject, restoreProject, purgeProject, duplicateProject } from './project-management.js';
 import { createImportJobs, IMPORT_MAX_BYTES } from './import-html/jobs.js';
 
@@ -179,6 +180,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         if(!masterList().includes(b.fromMaster)) throw fail(400,'这个项目不是系列母版');
         let out; try { out=createFromMaster({masterDir:projectPath(dataDir,b.fromMaster),destProjectDir:dir,newId:id,newName:b.name.trim()}); } catch(e) { throw e.status?e:fail(400,e.message); }
         return json(res,201,{project:out.project,revision:readProject(dir).revision,fromMaster:b.fromMaster});
+      }
+      if(b.kind==='web') { // 第 11 轮：网页项目——画板只当默认窗口；初始两页：首页的电脑端（窗口高 ×2）与手机端（窗口高 ×2）
+        mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString();
+          const pages=[{id:'page_home_desk',name:'首页 · 电脑端',background:'#ffffff',...webPageDefaults('desktop',WEB_DEVICES.desktop.height*2),elements:[]},{id:'page_home_mob',name:'首页 · 手机端',background:'#ffffff',...webPageDefaults('mobile',WEB_DEVICES.mobile.height*2),elements:[]}];
+          const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),kind:'web',createdAt:now,updatedAt:now,artboard:{...WEB_DEFAULT_ARTBOARD},assets:[],fonts:[],pages}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;}
       }
       const preset=b.preset||'slide-16x9'; if(!PRESETS[preset]) throw fail(400,'Invalid preset'); const [dw,dh]=PRESETS[preset], width=b.width??dw,height=b.height??dh; dims({width,height}); mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString(); const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),createdAt:now,updatedAt:now,artboard:{preset,width,height},assets:[],fonts:[],pages:[blankPage('#ffffff')]}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
     if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]) { const id=parts[2],dir=projectPath(dataDir,id);
