@@ -35,6 +35,9 @@ function snap(options, resize = false) {
       // Pairwise equal-gap candidates include insertion between and continuation on either end.
       for (let i=0;i<sorted.length;i++) for (let j=i+1;j<sorted.length;j++) {
         const a=sorted[i], b=sorted[j], gap=b[axis]-a[axis]-a[size];
+        const cross=axis==='x'?'y':'x',crossSize=cross==='x'?'width':'height';
+        const overlaps=(u,v)=>u[cross]<v[cross]+v[crossSize]&&u[cross]+u[crossSize]>v[cross];
+        if(!overlaps(a,b)||!overlaps(bounds,a)||!overlaps(bounds,b))continue;
         if (gap < 0) continue;
         const candidates=[a[axis]-gap-bounds[size], b[axis]+b[size]+gap, (a[axis]+a[size]+b[axis]-bounds[size])/2];
         candidates.forEach((value,index)=> {

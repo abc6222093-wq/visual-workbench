@@ -1,4 +1,4 @@
-import { copyElements, pasteElements, selectableIds, marqueeIds, nudgeElements, groupElements, ungroupElements, escapeSelection, isTypingTarget } from './element-operations.js';
+import { copyElements, pasteElements, elementInPage, selectableIds, marqueeIds, nudgeElements, groupElements, ungroupElements, escapeSelection, isTypingTarget } from './element-operations.js';
 import { copyPages, pastePages, duplicatePages, deletePages, movePages, insertPage } from './page-operations.js';
 import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewPreference } from './page-views.js';
 import { showContextMenu, closeContextMenu } from './context-menu.js';
@@ -674,6 +674,7 @@ function selectCanvas(id, event, resize) {
   const start = {
     x: event.clientX,
     y: event.clientY,
+    globalElements: ids.map(id=>elementInPage(page(),id)),
     values: ids.map((id) => ({ id, element: clone(findElement(page(), id).element), translate: getComputedStyle($(`#artboard [data-element-id="${CSS.escape(id)}"]`)).translate })),
   };
   event.preventDefault();
@@ -682,10 +683,10 @@ function selectCanvas(id, event, resize) {
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
     let snappedDx=dx,snappedDy=dy;
-    const roots=start.values.map(v=>v.element), bounds=selectionBounds(roots);
-    const references=page().elements.filter(e=>!ids.includes(e.id));
+    const roots=start.values.map(v=>v.element), bounds=selectionBounds(start.globalElements);
+    const references=allElements(page()).filter(e=>!ids.includes(e.id)&&!findElement(page(),e.id).ancestors.some(a=>ids.includes(a.id))&&!ids.some(id=>findElement(page(),id).ancestors.some(a=>a.id===e.id))).map(e=>elementInPage(page(),e.id));
     const hasParent=start.values.some(v=>findElement(page(),v.id)?.parent);
-    if(!resizing && !hasParent) {
+    if(!resizing) {
       const snap=snapMove({bounds:{...bounds,x:bounds.x+dx,y:bounds.y+dy},references,page:S.project.artboard,scale:S.scale,disabled:e.altKey,movingIds:ids});
       snappedDx=snap.bounds.x-bounds.x;snappedDy=snap.bounds.y-bounds.y;paintGuides(snap);
     } else clearGuides();
@@ -1782,7 +1783,7 @@ function mountAppearance(){
   if(elements.length<2)return;
   const controls=document.createElement('section');controls.className='ed-section';controls.innerHTML='<h3 class="ed-heading">对齐与分布</h3><div class="ed-align"></div>';
   const choices=[['left','左对齐'],['center','水平居中'],['right','右对齐'],['top','顶对齐'],['middle','垂直居中'],['bottom','底对齐'],['distribute-x','水平分布'],['distribute-y','垂直分布']];
-  for(const [mode,label]of choices){const b=document.createElement('button');b.className='g-btn';b.textContent=label;b.dataset.align=mode;b.disabled=mode.startsWith('distribute')&&elements.length<3;b.onclick=()=>{finishNudge();const result=mode.startsWith('distribute')?distributeElements(elements,mode.endsWith('x')?'x':'y'):alignElements(elements,mode);for(const e of result){const target=findElement(page(),e.id)?.element;if(target){Object.assign(target,e);clearDocumentDraft(target);}}changed({boardOnly:true});};controls.querySelector('.ed-align').append(b);}host.append(controls);
+  for(const [mode,label]of choices){const b=document.createElement('button');b.className='g-btn';b.textContent=label;b.dataset.align=mode;b.disabled=mode.startsWith('distribute')&&elements.length<3;b.onclick=()=>{finishNudge();const globalElements=elements.map(e=>elementInPage(page(),e.id));const result=mode.startsWith('distribute')?distributeElements(globalElements,mode.endsWith('x')?'x':'y'):alignElements(globalElements,mode);for(let i=0;i<result.length;i++){const e=result[i],target=findElement(page(),e.id)?.element;if(target){nudgeElements(page(),[e.id],e.x-globalElements[i].x,e.y-globalElements[i].y);clearDocumentDraft(target);}}changed({boardOnly:true});};controls.querySelector('.ed-align').append(b);}host.append(controls);
 }
 function confirmAction(message,description="") {
   return new Promise(resolve=>{modal(`<h2>${esc(message)}</h2><p class="g-sheet__note">${esc(description)}</p><div class="g-sheet__actions"><button class="g-btn" data-confirm-no>取消</button><button class="g-btn g-btn--prism" data-confirm-yes>确认</button></div>`);const root=$('#modal-root');S.confirmResolve=resolve;const finish=value=>{S.confirmResolve=null;closeModal();resolve(value);};root.querySelector('[data-confirm-no]').onclick=()=>finish(false);root.querySelector('[data-confirm-yes]').onclick=()=>finish(true);root.onclick=e=>{if(e.target===root)finish(false);};});

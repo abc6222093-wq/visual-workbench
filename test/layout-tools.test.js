@@ -28,3 +28,9 @@ test('rotated reference and selection use their screen-axis bounding boxes',()=>
  const snap=snapMove({bounds:b(111,40),references:[rotated],threshold:2});assert.equal(snap.bounds.x,110);
  const aligned=alignElements([rotated,{id:'plain',...b(0,0)}],'left');assert.equal(aligned[0].x,-10);assert.equal(aligned[1].x,0);
 });
+test('all six alignments use the combined bounds and vertical distribution uses equal gaps',()=>{
+ const elements=[{id:'a',...b(10,20,20,30)},{id:'b',...b(50,70,40,10)},{id:'c',...b(120,130,20,20)}];
+ for(const mode of ['left','center','right','top','middle','bottom']){const result=alignElements(elements,mode),axis=['left','center','right'].includes(mode)?'x':'y',size=axis==='x'?'width':'height',factor=['left','top'].includes(mode)?0:['center','middle'].includes(mode)?.5:1;const marks=result.map(e=>e[axis]+factor*e[size]);assert.ok(marks.every(v=>Math.abs(v-marks[0])<1e-8),mode);}
+ const result=distributeElements(elements,'y');assert.equal(result[1].y-result[0].y-result[0].height,result[2].y-result[1].y-result[1].height);assert.deepEqual(elements.map(e=>e.y),[20,70,130]);
+ const offRow=snapMove({bounds:b(83,200),references:[{id:'a',...b(0)},{id:'b',...b(40)}],threshold:4});assert.equal(offRow.gaps.length,0);
+});

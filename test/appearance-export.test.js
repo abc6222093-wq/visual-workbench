@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import {createServer} from './helpers/isolated-server.js';
 import {launchBrowser} from '../src/browser.js';
 import {exportHtml} from '../src/export/html.js';
-import {exportImages} from '../src/export/images.js';
+import {exportImages,exportPdf} from '../src/export/images.js';
 const now='2026-10-01T12:00:00.000Z';
 function appearanceProject() {
  const base=(id,type,x)=>({id,type,x,y:20,width:60,height:60,zIndex:1,opacity:0.5,flipX:true,flipY:true});
@@ -51,4 +51,5 @@ test('appearance survives motion transforms, current base snapshots, offline and
  const raw=await sharp(shot).removeAlpha().raw().toBuffer({resolveWithObject:true});const exported=await sharp(image).removeAlpha().raw().toBuffer({resolveWithObject:true});assert.equal(raw.info.width,400);assert.deepEqual(raw.data,exported.data);assert.deepEqual(blocked,[]);
  // Flipped asymmetric image occupies right half, with opacity composited against white.
  const pixel=(x,y)=>[...raw.data.subarray((y*400+x)*3,(y*400+x)*3+3)];assert.deepEqual(pixel(110,40),[255,255,255]);assert.ok(pixel(150,40)[1]>=125&&pixel(150,40)[1]<=130);
+ const pdf=await exportPdf({projectDir,outFile:join(dir,'appearance.pdf')});assert.ok(readFileSync(pdf.file).subarray(0,5).equals(Buffer.from('%PDF-')));assert.ok(pdf.bytes>0);
 });

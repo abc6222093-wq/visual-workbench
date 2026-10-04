@@ -69,3 +69,32 @@ test('round8 overview rename, duplicate, trash restore, and close save and clear
  await page.locator('[data-action="project-delete"][data-id="demo"]').click();await page.locator('[data-confirm-yes]').click();await page.waitForFunction(()=>!document.querySelector('[data-action="open"][data-id="demo"]'));await page.locator('[data-action="project-trash"]').click();await page.locator('[data-restore]').click();await page.waitForSelector('[data-action="open"][data-id="demo"]');await page.locator('[data-trash-close]').click();await page.locator('[data-action="open"][data-id="demo"]').click();
  await select(page,'el_first');await page.locator('[data-prop="text"]').fill('关闭前的最后修改');await page.locator('[data-action="close-workbench"]').click();await page.locator('[data-confirm-yes]').click();await page.getByText('工作台已关闭，可以关掉这个窗口了').waitFor();assert.equal(disk(file).pages[0].elements[0].text,'关闭前的最后修改');assert.equal(server.listening,false);const {readdirSync}=await import('node:fs');assert.equal(readdirSync(join(dir,'.workbench-sessions')).length,0);assert.deepEqual(errors,[]);
 });
+
+test('round8 page batches sort, duplicate and delete in each view and grid Escape returns',async t=>{
+ const {page,file,errors}=await editor(t);
+ for(const mode of ['list','timeline','grid']){
+  if(mode==='timeline')await page.locator('.ed-tools [data-action="page-timeline"]').click();
+  if(mode==='grid')await page.locator('.ed-tools [data-action="page-grid"]').click();
+  const selector=mode==='list'?'.page-list':mode==='timeline'?'.ed-page-timeline':'.ed-page-grid';
+  const first=page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`),third=page.locator(`${selector} [data-page-id="page_third"] .ed-page__open`);
+  await first.click();await third.click({modifiers:['ControlOrMeta']});assert.equal(await page.locator(`${selector} .is-selected`).count(),2);
+  await saved(page,()=>page.locator(`${selector} [data-page-id="page_first"]`).evaluate((node,{selector})=>{
+   const transfer=new DataTransfer();node.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));const target=document.querySelector(`${selector} [data-page-id="page_second"]`),box=target.getBoundingClientRect();target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:box.right-1,clientY:box.bottom-1}));
+  },{selector}));
+  assert.deepEqual(disk(file).pages.map(p=>p.id),['page_second','page_first','page_third']);
+  await page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`).click({button:'right'});
+  await saved(page,()=>page.getByRole('menuitem',{name:'创建副本'}).click());assert.equal(disk(file).pages.length,5);
+  await page.locator(`${selector} .is-selected .ed-page__open`).first().focus();await saved(page,()=>page.keyboard.press('Delete'));assert.equal(disk(file).pages.length,3);
+  // Undo deletion, duplication and sorting to reuse the original fixture in the next surface.
+  for(let i=0;i<3;i++)await saved(page,()=>page.locator('[data-action="undo"]').click());assert.deepEqual(disk(file).pages.map(p=>p.id),['page_first','page_second','page_third']);
+  if(mode==='grid'){await page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`).focus();await page.keyboard.press('Escape');assert.equal(await page.locator('.ed-page-grid').count(),0);assert.equal(await page.locator('.ed-page-timeline').count(),1);}
+ }
+ assert.deepEqual(errors,[]);
+});
+
+test('round8 right click lock, unlock, blank paste and group-free selection keep editable history',async t=>{
+ const {page,file,errors}=await editor(t);const p=await center(page,'el_first');await page.mouse.click(p.x,p.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'锁定',exact:true}).click());assert.equal(disk(file).pages[0].elements.find(e=>e.id==='el_first').locked,true);
+ await page.mouse.click(p.x,p.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'解锁',exact:true}).click());assert.equal(disk(file).pages[0].elements.find(e=>e.id==='el_first').locked,false);
+ await select(page,'el_first');await page.keyboard.press('ControlOrMeta+c');const box=await page.locator('#artboard').boundingBox();await page.mouse.click(box.x+box.width-15,box.y+box.height-15,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'粘贴',exact:true}).click());const elements=disk(file).pages[0].elements;assert.equal(elements.length,6);assert.equal(elements.at(-1).x,104);
+ await saved(page,()=>page.keyboard.press('ControlOrMeta+z'));assert.equal(disk(file).pages[0].elements.length,5);await saved(page,()=>page.keyboard.press('ControlOrMeta+Shift+z'));assert.equal(disk(file).pages[0].elements.length,6);assert.deepEqual(errors,[]);
+});

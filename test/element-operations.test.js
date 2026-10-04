@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {selectableIds,marqueeIds,copyElements,pasteElements,groupElements,ungroupElements,nudgeElements,escapeSelection,isTypingTarget} from '../web/element-operations.js';
 import {createHistory,deleteElements} from '../web/editor.js';
-const el=(id,x=10,y=20)=>({id,type:'text',x,y,width:50,height:30,zIndex:1,text:id,fontSize:20});
+const el=(id,x=10,y=20)=>({id,type:'text',x,y,width:50,height:30,zIndex:1,text:id,fontSize:20,color:'#111111'});
 function fixture(){return {id:'sample',pages:[{id:'page_one',elements:[el('el_one'),el('el_two',80),{...el('el_locked',0),locked:true},{id:'group_one',type:'group',x:150,y:80,width:100,height:60,zIndex:2,children:[el('el_child',0,0)]}]},{id:'page_two',elements:[]}]};}
 test('marquee and select all exclude locks and keep groups whole, shift union is stable',()=>{
  const page=fixture().pages[0];assert.deepEqual(selectableIds(page),['el_one','el_two','group_one']);
@@ -34,6 +34,9 @@ test('ungroup flipped and rotated group preserves child center and composited op
 test('typing guard includes native inputs, outline and rich documents',()=>{for(const name of ['input','textarea','select','[contenteditable]','[data-outline-document]'])assert.equal(isTypingTarget({closest:query=>query.includes(name)?{}:null}),true);assert.equal(isTypingTarget({closest:()=>null}),false);});
 test('grouping and ungrouping remain valid project format with integer layers',async()=>{
  const {validateProjectData}=await import('../src/validate.js');const now='2026-10-01T12:00:00.000Z';
- const project={format:'visual-workbench/project',formatVersion:2,id:'model-demo',name:'模型',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:500,height:500},fonts:[],assets:[],pages:[{id:'page_model',name:'一页',background:'#fff',elements:[el('el_first'),el('el_second',80)]}]};
+ const project={format:'visual-workbench/project',formatVersion:2,id:'model-demo',name:'模型',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:500,height:500},fonts:[],assets:[],pages:[{id:'page_model',name:'一页',background:'#ffffff',elements:[el('el_first'),el('el_second',80)]}]};
  const page=project.pages[0],ids=groupElements(page,['el_second','el_first']);assert.match(ids[0],/^el_/);assert.equal(validateProjectData(project).ok,true);assert.deepEqual(page.elements[0].children.map(e=>e.id),['el_first','el_second']);ungroupElements(page,ids);assert.equal(validateProjectData(project).ok,true);assert.ok(page.elements.every(e=>Number.isInteger(e.zIndex)));
+});
+test('copying a child retains its visible page position and inherited rotation / opacity',()=>{
+ const p={id:'page_one',elements:[{id:'el_group',type:'group',x:100,y:200,width:100,height:100,rotation:90,flipX:true,opacity:.5,zIndex:1,children:[{...el('el_child',0,0),width:20,height:20,opacity:.4}]}]};const project={id:'demo'};const clip=copyElements(project,p,['el_child']);assert.equal(clip.elements[0].x,180);assert.equal(clip.elements[0].y,280);assert.equal(clip.elements[0].rotation,90);assert.equal(clip.elements[0].flipX,true);assert.equal(clip.elements[0].opacity,.2);assert.equal(p.elements[0].children[0].x,0);
 });
