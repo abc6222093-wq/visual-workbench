@@ -123,7 +123,7 @@
 ### 6.2 文字 `text`
 
 ```json
-{ "id": "el_title1", "type": "text", "x": 160, "y": 300, "width": 1600, "height": 160, "zIndex": 10,
+{ "id": "el_title1", "type": "text", "x": 160, "y": 300, "width": 1600, "height": 144, "zIndex": 10,
   "text": "视觉工作台", "font": "font_inter", "fontSize": 120, "fontWeight": 700,
   "lineHeight": 1.2, "letterSpacing": 0, "align": "left", "color": "#ffffff" }
 ```
@@ -133,6 +133,7 @@
 - `stroke`（可选）：文字描边，`{ "color": "#RRGGBB[AA]", "width": 数字 ≥ 0 }` 或 `null`（没有描边）。`width` 是线宽（画板像素），线沿字形边缘居中画，字的填充色盖在描边上面，所以描边不会吃掉字形，露在字外的约为线宽的一半。
 - `shadow`（可选）：文字阴影，`{ "color": "#RRGGBB[AA]", "x": 数字, "y": 数字, "blur": 数字 ≥ 0 }` 或 `null`（没有阴影）。`x` 向右、`y` 向下偏移，`blur` 模糊半径，单位都是画板像素。
 - 描边和阴影是**元素属性**：编辑、放映、动效检查、导出（放映版 HTML、图片、PDF）都按同一份画法显示。不要再在动效代码里临时加描边 / 阴影（那样只在放映时出现）。用户可以在工作台里改它们，改过的值 agent 不动。
+- **高度由内容决定（第 10 轮）**：文字框的 `width` 由用户（或 agent 排版）决定，`height` 永远等于文字按这个宽度排出来的内容高度（行数 × `fontSize` × `lineHeight`，向上取整；空文字算一行；末尾换行算一行）。工作台在改字、改字号 / 行高 / 字距 / 字体、拉宽拉窄、就地编辑时即时重算并写回 `height`，进撤销、保存、同步；渲染和导出只读 `height`，三处一致。**agent 排版时只定位置和宽度**，`height` 可以先写一个估计值（比如 `fontSize × lineHeight × 预计行数`），工作台打开后会按内容校正；旧项目第一次打开时如果框高和内容不一致，会先自动存一版再校正。不要用拉高文字框来留白，想留空间就移动下面的元素。
 
 ```json
 { "id": "el_title2", "type": "text", "x": 160, "y": 300, "width": 1600, "height": 160, "zIndex": 10,
