@@ -36,15 +36,15 @@ test('round8 elements: marquee, whole groups, drill in, Escape, clipboard and ba
 });
 
 test('round8 pages: list multiselect, batch clipboard, grid exit, timeline persistence, context insertion and undo',async t=>{
- const {page,file,errors}=await editor(t);const first=page.locator('.page-list [data-page-id="page_first"] .ed-page__open'),third=page.locator('.page-list [data-page-id="page_third"] .ed-page__open');
- await first.click();await third.click({modifiers:['Shift']});assert.equal(await page.locator('.page-list .is-selected').count(),3);
+ const {page,file,errors}=await editor(t);assert.equal(await page.locator('.page-list [data-preview] [data-page-id]').count(),0);assert.equal(await page.locator('.page-list [data-preview] .is-selected').count(),0);const first=page.locator('.page-list [data-page-index][data-page-id="page_first"] .ed-page__open'),third=page.locator('.page-list [data-page-index][data-page-id="page_third"] .ed-page__open');
+ await first.click();await third.click({modifiers:['Shift']});assert.equal(await page.locator('.page-list [data-page-index].is-selected').count(),3);
  await third.focus();await page.keyboard.press('ControlOrMeta+c');await saved(page,()=>page.keyboard.press('ControlOrMeta+v'));assert.equal(disk(file).pages.length,6);
- await page.locator('.ed-tools [data-action="page-grid"]').click();assert.equal(await page.locator('.ed-page-grid [data-page-id]').count(),6);assert.equal(await page.locator('#canvas-well').isVisible(),false);
- await page.locator('.ed-page-grid [data-page-id="page_second"] .ed-page__open').dblclick();assert.equal(await page.locator('#artboard').getAttribute('data-page-id'),'page_second');assert.equal(await page.locator('.ed-page-grid').count(),0);
- await page.locator('.ed-tools [data-action="page-timeline"]').click();assert.equal(await page.locator('.ed-page-timeline [data-page-id]').count(),6);assert.equal(await page.locator('.ed-pages .page-list').isVisible(),false);
+ await page.locator('.ed-tools [data-action="page-grid"]').click();assert.equal(await page.locator('.ed-page-grid [data-page-index][data-page-id]').count(),6);assert.equal(await page.locator('#canvas-well').isVisible(),false);
+ await page.locator('.ed-page-grid [data-page-index][data-page-id="page_second"] .ed-page__open').dblclick();assert.equal(await page.locator('#artboard').getAttribute('data-page-id'),'page_second');assert.equal(await page.locator('.ed-page-grid').count(),0);
+ await page.locator('.ed-tools [data-action="page-timeline"]').click();assert.equal(await page.locator('.ed-page-timeline [data-page-index][data-page-id]').count(),6);assert.equal(await page.locator('.ed-pages .page-list').isVisible(),false);
  await page.reload();await page.locator('[data-action="open"][data-id="demo"]').click();assert.equal(await page.locator('.ed-page-timeline').count(),1);
- const row=page.locator('.ed-page-timeline [data-page-id="page_first"] .ed-page__open');await row.click({button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'在后面插入页面'}).click());assert.equal(disk(file).pages.length,7);assert.equal(disk(file).pages[1].name,'新页面');
- await page.locator('[data-action="undo"]').click();await page.waitForFunction(()=>document.querySelectorAll('.ed-page-timeline [data-page-id]').length===6);assert.deepEqual(errors,[]);
+ const row=page.locator('.ed-page-timeline [data-page-index][data-page-id="page_first"] .ed-page__open');await row.click({button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'在后面插入页面'}).click());assert.equal(disk(file).pages.length,7);assert.equal(disk(file).pages[1].name,'新页面');
+ await page.locator('[data-action="undo"]').click();await page.waitForFunction(()=>document.querySelectorAll('.ed-page-timeline [data-page-index][data-page-id]').length===6);assert.deepEqual(errors,[]);
 });
 
 test('round8 canvas context grouping, appearance, alignment and typing guard share history',async t=>{
@@ -76,18 +76,18 @@ test('round8 page batches sort, duplicate and delete in each view and grid Escap
   if(mode==='timeline')await page.locator('.ed-tools [data-action="page-timeline"]').click();
   if(mode==='grid')await page.locator('.ed-tools [data-action="page-grid"]').click();
   const selector=mode==='list'?'.page-list':mode==='timeline'?'.ed-page-timeline':'.ed-page-grid';
-  const first=page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`),third=page.locator(`${selector} [data-page-id="page_third"] .ed-page__open`);
-  await first.click();await third.click({modifiers:['ControlOrMeta']});assert.equal(await page.locator(`${selector} .is-selected`).count(),2);
-  await saved(page,()=>page.locator(`${selector} [data-page-id="page_first"]`).evaluate((node,{selector})=>{
-   const transfer=new DataTransfer();node.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));const target=document.querySelector(`${selector} [data-page-id="page_second"]`),box=target.getBoundingClientRect();target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:box.right-1,clientY:box.bottom-1}));
+  const first=page.locator(`${selector} [data-page-index][data-page-id="page_first"] .ed-page__open`),third=page.locator(`${selector} [data-page-index][data-page-id="page_third"] .ed-page__open`);
+  await first.click();await third.click({modifiers:['ControlOrMeta']});assert.equal(await page.locator(`${selector} [data-page-index].is-selected`).count(),2);
+  await saved(page,()=>page.locator(`${selector} [data-page-index][data-page-id="page_first"]`).evaluate((node,{selector})=>{
+   const transfer=new DataTransfer();node.dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:transfer}));const target=document.querySelector(`${selector} [data-page-index][data-page-id="page_second"]`),box=target.getBoundingClientRect();target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer,clientX:box.right-1,clientY:box.bottom-1}));
   },{selector}));
   assert.deepEqual(disk(file).pages.map(p=>p.id),['page_second','page_first','page_third']);
-  await page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`).click({button:'right'});
+  await page.locator(`${selector} [data-page-index][data-page-id="page_first"] .ed-page__open`).click({button:'right'});
   await saved(page,()=>page.getByRole('menuitem',{name:'创建副本'}).click());assert.equal(disk(file).pages.length,5);
-  await page.locator(`${selector} .is-selected .ed-page__open`).first().focus();await saved(page,()=>page.keyboard.press('Delete'));assert.equal(disk(file).pages.length,3);
+  await page.locator(`${selector} [data-page-index].is-selected .ed-page__open`).first().focus();await saved(page,()=>page.keyboard.press('Delete'));assert.equal(disk(file).pages.length,3);
   // Undo deletion, duplication and sorting to reuse the original fixture in the next surface.
   for(let i=0;i<3;i++)await saved(page,()=>page.locator('[data-action="undo"]').click());assert.deepEqual(disk(file).pages.map(p=>p.id),['page_first','page_second','page_third']);
-  if(mode==='grid'){await page.locator(`${selector} [data-page-id="page_first"] .ed-page__open`).focus();await page.keyboard.press('Escape');assert.equal(await page.locator('.ed-page-grid').count(),0);assert.equal(await page.locator('.ed-page-timeline').count(),1);}
+  if(mode==='grid'){await page.locator(`${selector} [data-page-index][data-page-id="page_first"] .ed-page__open`).focus();await page.keyboard.press('Escape');assert.equal(await page.locator('.ed-page-grid').count(),0);assert.equal(await page.locator('.ed-page-timeline').count(),1);}
  }
  assert.deepEqual(errors,[]);
 });
@@ -97,4 +97,20 @@ test('round8 right click lock, unlock, blank paste and group-free selection keep
  await page.mouse.click(p.x,p.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'解锁',exact:true}).click());assert.equal(disk(file).pages[0].elements.find(e=>e.id==='el_first').locked,false);
  await select(page,'el_first');await page.keyboard.press('ControlOrMeta+c');const box=await page.locator('#artboard').boundingBox();await page.mouse.click(box.x+box.width-15,box.y+box.height-15,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'粘贴',exact:true}).click());const elements=disk(file).pages[0].elements;assert.equal(elements.length,6);assert.equal(elements.at(-1).x,104);
  await saved(page,()=>page.keyboard.press('ControlOrMeta+z'));assert.equal(disk(file).pages[0].elements.length,5);await saved(page,()=>page.keyboard.press('ControlOrMeta+Shift+z'));assert.equal(disk(file).pages[0].elements.length,6);assert.deepEqual(errors,[]);
+});
+
+test('round8 page view event delegation uses cards when a thumbnail contains page metadata',async()=>{
+ const {mountPageViews}=await import('../web/page-views.js');const handlers=new Map(),calls=[];
+ const row={dataset:{pageId:'page_first',pageIndex:'0'},getBoundingClientRect:()=>({left:0,top:0,width:100,height:100})};
+ const nested={dataset:{pageId:'preview_only'}};
+ const target={closest:selector=>selector==='[data-page-index][data-page-id]'?row:nested,matches:()=>false};
+ const root={addEventListener:(name,handler)=>handlers.set(name,handler)};
+ const context={project:{pages:[{id:'page_first'},{id:'page_second'}]},selectedPageIds:['page_second'],currentPageId:'page_second',mode:'list'};
+ const dispose=mountPageViews(root,{getContext:()=>context,callbacks:{selection:ids=>calls.push(['selection',ids]),openPage:id=>calls.push(['open',id]),action:(name,payload)=>calls.push([name,payload])}});
+ const event={target,stopPropagation(){},preventDefault(){}};
+ handlers.get('click')(event);assert.deepEqual(calls,[['selection',['page_first']],['open','page_first']]);
+ const transfer={setData:(type,data)=>calls.push([type,JSON.parse(data)]),getData:()=>JSON.stringify(['page_second'])};
+ handlers.get('dragstart')({...event,dataTransfer:transfer});assert.deepEqual(calls.at(-1),['application/x-vw-pages',['page_first']]);
+ handlers.get('drop')({...event,dataTransfer:transfer,clientY:90});assert.deepEqual(calls.at(-1),['move-pages',{ids:['page_second'],targetId:'page_first',position:'after'}]);
+ dispose();
 });

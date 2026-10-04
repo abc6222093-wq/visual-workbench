@@ -51,10 +51,13 @@ async function dragAndSave(page, from, dx, dy) {
   await Promise.all([page.waitForResponse(r => r.request().method() === 'PUT' && r.ok()), drag(page, from, dx, dy)]);
 }
 async function drag(page, from, dx, dy, steps = 10) {
+  // Verify raw drag distance with the documented temporary snapping override.
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= steps; i++) await page.mouse.move(from.x + (dx * i) / steps, from.y + (dy * i) / steps);
   await page.mouse.up();
+  await page.keyboard.up("Alt");
 }
 
 test('拖不动：最上面有锁定的整页图时，照样能直接按住下面的元素拖动', async t => {

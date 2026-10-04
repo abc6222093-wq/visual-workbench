@@ -47,7 +47,10 @@ test('appearance survives motion transforms, current base snapshots, offline and
  assert.equal(result.initializedX,'120');assert.equal(result.handleCount,8);assert.equal(result.freshHandles,8);assert.ok(result.styles.every(s=>s.opacity==='0.5'&&s.flip==='scale(-1, -1)'));assert.equal(result.before,100);assert.equal(result.after,120);assert.equal(result.baseFlip,true);assert.equal(result.flip,'scale(-1, -1)');assert.equal(result.tint,'rgb(0, 255, 0)');assert.equal(result.childFound,true);assert.deepEqual(result.patches,[{opacity:0.2},{opacity:0.2},{flipX:false},{flipX:false}]);
  const offline=await browser.newPage({viewport:{width:400,height:140}});const blocked=[];await offline.route('**/*',route=> /^(file|data|blob):/.test(route.request().url())?route.continue():(blocked.push(route.request().url()),route.abort()));await offline.goto(pathToFileURL(html.file).href);await offline.waitForSelector('#vw-stage [data-vw-flip]');
  const output=await exportImages({projectDir,outDir:join(dir,'images')});
- const shot=await offline.locator('#vw-stage .vw-artboard').screenshot();const image=readFileSync(output.files[0].path);
+ // Compare artboard pixels without the playback UI counter overlay.
+ assert.equal(await offline.locator('#vw-counter').textContent(),'1 / 1');
+ assert.equal(await offline.locator('#vw-counter').evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0.4)');
+ const shot=await offline.locator('#vw-stage .vw-artboard').screenshot({style:'#vw-counter, #vw-toast { visibility: hidden !important; }'});const image=readFileSync(output.files[0].path);
  const raw=await sharp(shot).removeAlpha().raw().toBuffer({resolveWithObject:true});const exported=await sharp(image).removeAlpha().raw().toBuffer({resolveWithObject:true});assert.equal(raw.info.width,400);assert.deepEqual(raw.data,exported.data);assert.deepEqual(blocked,[]);
  // Flipped asymmetric image occupies right half, with opacity composited against white.
  const pixel=(x,y)=>[...raw.data.subarray((y*400+x)*3,(y*400+x)*3+3)];assert.deepEqual(pixel(110,40),[255,255,255]);assert.ok(pixel(150,40)[1]>=125&&pixel(150,40)[1]<=130);

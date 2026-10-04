@@ -41,10 +41,13 @@ test('专注模式：面板藏起、画板变大；Esc 恢复；专注模式里�
   const box = await page.locator('#artboard [data-element-id="el_title1"]').boundingBox();
   const from = { x: box.x + 20, y: box.y + box.height / 2 };
   const saved = page.waitForResponse(r => r.request().method() === 'PUT' && r.ok());
+  // Keep the original movement assertions independent of the new snapping feature.
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= 10; i++) await page.mouse.move(from.x + 15 * i, from.y);
   await page.mouse.up();
+  await page.keyboard.up("Alt");
   await saved;
   const x1 = JSON.parse(readFileSync(file, 'utf8')).pages[0].elements.find(e => e.id === 'el_title1').x;
   assert.equal(x1, x0 + Math.round(150 / focused));
