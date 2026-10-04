@@ -3,11 +3,12 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
 const now='2026-10-01T12:00:00.000Z';
 const text=(id,x,y)=>({id,type:'text',x,y,width:120,height:60,zIndex:1,text:id,fontSize:24,color:'#111111'});
-async function editor(t,{transformed=false}={}){
+async function editor(t,{transformed=false,motionFailure=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'vw-round8-editor-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  mkdirSync(join(dir,'projects/demo'),{recursive:true});const file=join(dir,'projects/demo/project.json');
  const project={format:'visual-workbench/project',formatVersion:2,id:'demo',name:'编辑操作验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1000,height:700},assets:[],fonts:[],pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[text('el_first',80,80),text('el_second',300,80),text('el_third',500,240),{...text('el_locked',700,80),locked:true},{id:'el_group_first',type:'group',x:100,y:400,width:300,height:100,zIndex:2,children:[text('el_child',0,0),{...text('el_childtwo',160,0),zIndex:2}]}]},{id:'page_second',name:'第二页',background:'#ffffff',elements:[]},{id:'page_third',name:'第三页',background:'#ffffff',elements:[]}]};
+ if(motionFailure)project.pages[0].motion={steps:0,source:'export default ()=>{throw new Error("motion warning fixture")}'};
  if(transformed){
   const {elementInPage}=await import('../web/element-operations.js'),{visualBounds}=await import('../web/layout-tools.js');
   project.pages[0].elements=[{id:'el_group_first',type:'group',x:120,y:200,width:400,height:240,zIndex:2,rotation:30,flipX:true,children:[{...text('el_child',60,70),width:80,height:40,rotation:20}]}];
@@ -114,4 +115,13 @@ test('round8 group child resize uses page snap guides and keeps its opposite rot
  await page.mouse.move(handle.x+handle.width/2-3*Math.cos(a)*scale,handle.y+handle.height/2-3*Math.sin(a)*scale);assert.ok(await page.locator('.ed-guide').count()>0);
  await saved(page,()=>page.mouse.up());const final=disk(file).pages[0],child=final.elements[0].children[0],after=anchor(child);
  assert.ok(Math.abs(after.x-fixed.x)<1e-6);assert.ok(Math.abs(after.y-fixed.y)<1e-6);assert.equal(child.height,old.height);assert.ok(Math.abs(visualBounds(elementInPage(final,'el_child')).x-original.elements[1].x)<1e-6);assert.deepEqual(errors,[]);
+});
+
+test('round8 motion warning stays on one line at narrow width and legacy formats show plain Chinese',async t=>{
+ const {page,file}=await editor(t,{motionFailure:true});const before=readFileSync(file,'utf8');await page.setViewportSize({width:1000,height:850});
+ const chip=page.locator('.ed-motion-status');await chip.filter({hasText:'动效检查未通过'}).waitFor();
+ const size=await chip.evaluate(n=>{const css=getComputedStyle(n);return {height:n.getBoundingClientRect().height,line:parseFloat(css.lineHeight),whiteSpace:css.whiteSpace};});
+ assert.equal(size.whiteSpace,'nowrap');assert.ok(size.height<size.line*2);assert.match(await chip.getAttribute('title'),/motion warning fixture/);
+ await page.evaluate(async()=>{const {mountMotionStatus}=await import('/motion-status.js');mountMotionStatus({formatVersion:1},'',document.querySelector('.ed-toolbar'));});
+ const old=page.locator('.ed-motion-status').last();assert.equal(await old.textContent(),'这是旧格式的项目，暂时检查不了动效');assert.equal(await old.evaluate(n=>getComputedStyle(n).whiteSpace),'nowrap');assert.equal(readFileSync(file,'utf8'),before);
 });

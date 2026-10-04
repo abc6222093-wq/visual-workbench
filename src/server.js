@@ -137,7 +137,8 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
   if(!dataDir) throw new Error('dataDir is required');
   dataDir=resolve(dataDir); checkDataRoots(dataDir); initDataDir(dataDir);
   const usage = createUsageSession({dataDir,...usageOptions});
-  try {if(!usage.status().blocked) cleanupTrash(dataDir);}catch(e){usage.close();throw e;}
+  let trashCleaned=false;
+  try {if(!usage.status().blocked){cleanupTrash(dataDir);trashCleaned=true;}}catch(e){usage.close();throw e;}
   // 实时连接：监听项目文件夹，文件被工作台以外的程序（agent）改动时推送给开着的界面
   const watcher = createProjectWatcher({ projectsDir:join(dataDir,'projects'), agentIdleMs, pollMs:watchPollMs });
   const streams = new Set();
@@ -153,7 +154,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     const url=new URL(req.url,'http://localhost'); const parts=url.pathname.split('/').filter(Boolean);
     if(req.method==='GET'&&url.pathname==='/api/health') return json(res,200,{app:'visual-workbench',protocol:1,repoDir:REPO,pid:process.pid,fingerprint:CODE_FINGERPRINT});
     if(req.method==='GET'&&url.pathname==='/api/session') return json(res,200,usage.status());
-    if(req.method==='POST'&&url.pathname==='/api/session/confirm') {const b=await body(req);if(!Array.isArray(b.tokens)||!b.tokens.every(t=>typeof t==='string'))throw fail(400,'请先查看正在使用的电脑，再确认继续');return json(res,200,usage.confirm(b.tokens));}
+    if(req.method==='POST'&&url.pathname==='/api/session/confirm') {const b=await body(req);if(!Array.isArray(b.tokens)||!b.tokens.every(t=>typeof t==='string'))throw fail(400,'请先查看正在使用的电脑，再确认继续');const status=usage.confirm(b.tokens);if(!status.blocked&&!trashCleaned){cleanupTrash(dataDir);trashCleaned=true;}return json(res,200,status);}
     if(req.method==='GET'&&url.pathname==='/api/settings') return json(res,200,{dataDir,source:configSource,localConfigPath:getLocalConfigPath({home:configHome}),platform:process.platform,revealLabel:process.platform==='win32'?'在资源管理器中显示':process.platform==='darwin'?'在访达中显示':'在文件管理器中显示'});
     if((url.pathname.startsWith('/api/')||url.pathname.startsWith('/data/'))&&usage.status().blocked) throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',usage.status());
     if(req.method==='POST'&&url.pathname==='/api/shutdown') { await checkedBody(req); shuttingDown=true; res.once('finish',()=>{const timer=setTimeout(()=>server.closeAllConnections?.(),3000);timer.unref();server.close(()=>{clearTimeout(timer);onShutdown?.();});}); json(res,200,{closed:true}); return; }

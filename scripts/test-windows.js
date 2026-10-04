@@ -13,6 +13,8 @@ export const WINDOWS_TEST_FILES = Object.freeze([
   'test/machine-config.test.js',
   'test/platform.test.js',
   'test/portable-export-name.test.js',
+  'test/project-management.test.js', // Cross-platform move/copy/restore and retention.
+  'test/shutdown.test.js', // Release the session and close pending HTTP writes.
   'test/session.test.js',
   'test/sync-conflicts.test.js',
   'test/two-devices-server.test.js',
