@@ -163,7 +163,7 @@ function appearanceContent(node, element) {
     content.dataset.vwFlip = '1';
     content.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;transform-origin:center center';
     for (const child of [...node.childNodes]) {
-      if (child.nodeType === 1 && child.hasAttribute('data-resize')) continue;
+      if (child.nodeType === 1 && (child.hasAttribute('data-resize') || child.hasAttribute('data-rotate'))) continue;
       content.append(child);
     }
     for (const key of ['background', 'border', 'boxSizing', 'borderRadius']) {
@@ -311,7 +311,7 @@ function patchChildren(container, project, elements, options, fontMap, assetMap)
   }
   for (const node of existing.values()) node.remove();
   const kept = [...container.children].filter(isElementNode);
-  let ref = kept.length ? kept.at(-1).nextSibling : [...container.children].find(child => child.hasAttribute('data-resize')) || null;
+  let ref = kept.length ? kept.at(-1).nextSibling : [...container.children].find(child => (child.hasAttribute('data-resize') || child.hasAttribute('data-rotate'))) || null;
   for (let i = desired.length - 1; i >= 0; i--) {
     const node = desired[i];
     if (node.parentNode !== container || node.nextSibling !== ref) container.insertBefore(node, ref);

@@ -11,6 +11,10 @@ import { mountOutlinePanel } from "./outline-panel.js";
 import { captureOutlinePage } from "./outline-capture.js";
 import { reconcileDocument } from "./outline-document.js";
 import { pickCanvasElement } from "./editor-hit-test.js";
+// 第 9 轮：画布上就地编辑文字、旋转把手、总览选择
+import { startTextEdit, isEditingTextNode } from "./text-edit.js";
+import { rotateFromPointer } from "./rotate-tool.js";
+import { mountHomeSelection } from "./home-selection.js";
 import { renderPage, patchPage, updateElementNode } from "./render.js";
 import { patchPageItems } from "./page-items.js";
 import { showMotionPage } from "./motion-stage.js";
@@ -144,6 +148,9 @@ function tbtn(a, label, name, cls = "", extra = "") {
 const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group" };
 function shell(active, body) {
   document.documentElement.classList.add("glass-mode");
+  S.textEdit?.finish();
+  S.homeSel?.dispose();
+  S.homeSel = null;
   stopPreview(); // 换画面时，正在播的动效预览一起结束
   stopLoops();
   closeModalGlass();
@@ -256,14 +263,26 @@ async function home() {
     return r >= 1 ? `width:100%;height:${100 / r}%` : `width:${100 * r}%;height:100%`;
   };
   const card = (item, i) =>
-    `<div class="hm-cell"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[ ["project-rename","重命名"],["project-duplicate","复制项目"],["project-delete","删除项目"] ].map(([action,label])=>`<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
+    `<div class="hm-cell" data-project-id="${esc(item.id)}"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[ ["project-rename","重命名"],["project-duplicate","复制项目"],["project-delete","删除项目"] ].map(([action,label])=>`<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
   shell(
     "home",
     `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
+  // 总览的选择习惯与画布、页面区一致：Shift/Cmd 加选、拖框、点空白与 Esc 取消、右键菜单
+  S.homeSel = mountHomeSelection($(".hm-scroll"), {
+    onOpen: (id) => open(id).catch((e) => notice(e.message)),
+    onAction: (action, ids) => homeAction(action, ids),
+  });
   liven(app);
   syncGlass(app);
+}
+function homeAction(action, ids) {
+  const items = ids.map((id) => S.homeProjects.find((p) => p.id === id)).filter(Boolean);
+  if (!items.length) return;
+  if (action === "rename") return projectManagement.rename(items[0]);
+  if (action === "duplicate") return projectManagement.duplicate(items[0]);
+  if (action === "delete") return items.length === 1 ? projectManagement.remove(items[0]) : projectManagement.removeMany(items);
 }
 const presets = [
   ["slide-16x9", "演示文稿", 1920, 1080],
@@ -352,7 +371,18 @@ function property() {
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
     `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
-  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
+  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${paragraphFields(e)}${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${fitField(e)}${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}${e.shape === "rect" ? field("cornerRadius", "圆角", e.cornerRadius ?? 0) : ""}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
+}
+// 段落：对齐、行高、字距（格式里一直有，第 9 轮补上属性栏入口）
+function choice(prop, label, value, options) {
+  return `<label class="g-field"><span>${label}</span><select data-prop="${prop}" aria-label="${label}">${options.map(([v, text]) => `<option value="${v}" ${value === v ? "selected" : ""}>${text}</option>`).join("")}</select></label>`;
+}
+function paragraphFields(e) {
+  const number = (prop, label, value, step) => `<label class="g-field"><span>${label}</span><input data-prop="${prop}" type="number" step="${step}" value="${esc(value)}"></label>`;
+  return `<section class="ed-section"><h3 class="ed-heading">段落</h3><div class="ed-pair">${choice("align", "对齐", e.align || "left", [["left", "左对齐"], ["center", "居中"], ["right", "右对齐"]])}${number("lineHeight", "行高", e.lineHeight ?? 1.4, "0.05")}${number("letterSpacing", "字距", e.letterSpacing ?? 0, "0.5")}</div></section>`;
+}
+function fitField(e) {
+  return choice("fit", "显示方式", e.fit || "cover", [["cover", "填满裁切"], ["contain", "完整显示"], ["fill", "拉伸"]]);
 }
 // 文字的描边、投影（没有时框里显示默认值，改了才写进项目）
 function textStyleFields(e, field) {
@@ -384,7 +414,7 @@ function setAgent(state) {
 function isBusy() {
   if(nudgePending)return true;
   if (S.view !== "editor" || !S.project) return true;
-  if (S.dragging || S.saving || S.assetPromise || S.preview || S.outlineBusy) return true;
+  if (S.dragging || S.saving || S.assetPromise || S.preview || S.outlineBusy || S.textEdit) return true;
   if ($("#modal-root")?.childElementCount) return true;
   const field = document.activeElement;
   if (field?.matches?.("input[data-prop],textarea[data-prop],input[data-outline-field],textarea[data-outline-field],select[data-outline-field],textarea[data-outline-document],textarea[data-outline-notes]") && field.value !== field.defaultValue)
@@ -721,8 +751,12 @@ function bindBoardPointer(holder) {
   const controller = new AbortController(); holder._pickController = controller;
   holder.addEventListener('pointerdown', e => {
     if(e.button!==0){e.stopPropagation();return;}
+    const editing = e.target.closest?.('[data-element-id]');
+    if (editing && isEditingTextNode(editing)) return; // 正在编辑的文字：交给浏览器放光标、拖选文字
     if (S.preview) { e.preventDefault();e.stopPropagation();return; }
     const board = holder.querySelector('#artboard'); if (!board) return;
+    const rotate = [...board.querySelectorAll('[data-rotate]')].find(h => { const b = h.getBoundingClientRect(); return e.clientX >= b.left - 3 && e.clientX <= b.right + 3 && e.clientY >= b.top - 3 && e.clientY <= b.bottom + 3; });
+    if (rotate) { e.stopPropagation(); startRotate(rotate.dataset.rotate, e); return; }
     const {id,resize}=pickElement(board,e);e.stopPropagation();
     if(id)selectCanvas(id,e,resize);else startMarquee(board,e);
   }, {capture:true,signal:controller.signal});
@@ -891,6 +925,8 @@ function deltaInParents(dx, dy, ancestors) {
   return [dx, dy];
 }
 function selectCanvas(id, event, resize) {
+  const editing = event.target?.closest?.('[data-element-id]');
+  if (editing && isEditingTextNode(editing)) return;
   finishNudge();
   if (!editable(page(), id)) {
     notice("这个元素或所在分组已锁定");
@@ -968,10 +1004,102 @@ function selectCanvas(id, event, resize) {
   window.addEventListener("pointerup", up);
   markSelection();
 }
+// 旋转把手：单选时在元素下方（贴近画板底边时放到上方）；大小按画板缩放补偿，屏幕上看起来一样大
+function markRotateHandle(n, on) {
+  let handle = n.querySelector(":scope > [data-rotate]");
+  if (!on) { handle?.remove(); return; }
+  if (!handle) {
+    handle = document.createElement("span");
+    handle.className = "rotate-handle";
+    handle.dataset.rotate = n.dataset.elementId;
+    handle.title = "拖动旋转";
+    handle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    n.append(handle);
+  }
+  const size = 22 / S.scale, gap = 18 / S.scale, board = $("#artboard")?.getBoundingClientRect(), box = n.getBoundingClientRect();
+  const above = board && box.bottom + (gap + size) * S.scale > board.bottom && box.top - (gap + size) * S.scale > board.top;
+  Object.assign(handle.style, { width: `${size}px`, height: `${size}px`, top: above ? "auto" : `calc(100% + ${gap}px)`, bottom: above ? `calc(100% + ${gap}px)` : "auto" });
+}
+function startRotate(id, event) {
+  finishNudge();
+  const found = findElement(page(), id), target = found?.element;
+  if (!target || !editable(page(), id)) return;
+  event.preventDefault();
+  const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`), box = node.getBoundingClientRect();
+  const center = { x: box.left + box.width / 2, y: box.top + box.height / 2 }, from = { x: event.clientX, y: event.clientY }, start = target.rotation || 0;
+  // 祖先翻转奇数次时，屏幕上的转向和元素自己的角度相反
+  const mirrored = found.ancestors.reduce((n, a) => n + (a.flipX ? 1 : 0) + (a.flipY ? 1 : 0), 0) % 2 === 1;
+  S.dragging = true;
+  const label = () => { let tag = $("#artboard .ed-rotate-label"); if (!tag) { tag = document.createElement("span"); tag.className = "ed-gap ed-rotate-label"; $("#artboard").append(tag); } return tag; };
+  const move = (e) => {
+    const result = rotateFromPointer({ start: mirrored ? -start : start, center, from, to: { x: e.clientX, y: e.clientY }, disabled: e.altKey });
+    target.rotation = mirrored ? -result.rotation || 0 : result.rotation;
+    paintDragged(target);
+    const board = $("#artboard").getBoundingClientRect(), tag = label();
+    tag.textContent = `${Math.round(target.rotation)}°`;
+    tag.style.left = `${(e.clientX - board.left) / S.scale + 16 / S.scale}px`;
+    tag.style.top = `${(e.clientY - board.top) / S.scale + 16 / S.scale}px`;
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    S.dragging = false;
+    clearGuides();
+    if ((target.rotation || 0) !== start) { clearDocumentDraft(target); changed({ boardOnly: true }); }
+    else refreshSelection();
+    swapReadySnapshot();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+// ---------- 画布上就地编辑文字 ----------
+// 双击文字 / 选中后按 Enter / 右键「编辑文字」/ 新建文字：在原节点上编辑，位置样式与平时一致。
+// 一次编辑会话一条撤销记录：第一次改动记一条，之后合并；大纲文档框随打字实时同步；结束后照常保存。
+function editText(id, { point = null, selectAll = false } = {}) {
+  finishNudge();
+  if (S.preview || S.view !== "editor") return false;
+  const element = findElement(page(), id)?.element;
+  if (!element || element.type !== "text" || !editable(page(), id)) return false;
+  const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`);
+  if (!node || isEditingTextNode(node)) return false;
+  S.textEdit?.finish();
+  S.selected = [id];
+  markSelection();
+  node.querySelector(":scope > [data-rotate]")?.remove();
+  let recorded = false;
+  const apply = (text) => {
+    const target = findElement(page(), id)?.element;
+    if (!target || target.text === text) return;
+    target.text = text;
+    reconcileLinkedPages();
+    if (recorded) S.history.amend(S.project);
+    else { S.history.commit(S.project); recorded = true; }
+    refreshHistoryButtons();
+    if (S.tab === "layers") refreshInspector(); else S.outlineView?.refresh();
+  };
+  node.classList.add("is-text-editing");
+  const session = startTextEdit(node, {
+    text: element.text, point, selectAll,
+    onInput: apply,
+    onCommit: ({ text }) => {
+      node.classList.remove("is-text-editing");
+      if (S.textEdit === session) S.textEdit = null;
+      apply(text);
+      if (recorded) { S.dirty++; schedule(); }
+      if (S.view === "editor" && S.project) updateEditor();
+    },
+  });
+  S.textEdit = session;
+  return true;
+}
 // 按下时只在原节点上换选中框和缩放把手，不重画画板
 function markSelection() {
+  const single = S.selected.length === 1 ? S.selected[0] : null;
   document.querySelectorAll("#artboard [data-element-id]").forEach((n) => {
     const on = S.selected.includes(n.dataset.elementId);
+    if (n.parentElement?.id === "artboard") n.toggleAttribute("data-vw-locked", !!findElement(page(), n.dataset.elementId)?.element.locked); // 悬停描边跳过锁定元素
+    if (isEditingTextNode(n)) return; // 正在就地编辑：不往可编辑区里加把手
+    markRotateHandle(n, on && single === n.dataset.elementId && editable(page(), single));
     n.style.outline = on ? "2px solid #38bdf8" : "";
     const handles = n.querySelectorAll(":scope > [data-resize]");
     if (on && !handles.length) {
@@ -986,6 +1114,7 @@ function markSelection() {
   });
 }
 function changed({ boardOnly = false } = {}) {
+  S.typingField = null;
   for (const p of S.project.pages) if (p.outline?.mode === 'document') reconcileDocument(S.project, p);
   S.history.commit(S.project);
   S.dirty++;
@@ -1058,11 +1187,14 @@ function bindDrag() {
     const lib = e.target.closest("[data-library-file]");
     if (lib) e.dataTransfer.setData("application/x-vw-library", lib.dataset.libraryFile);
   };
-  $("#canvas-well").ondragover = (e) => e.preventDefault();
+  $("#canvas-well").ondragover = (e) => { e.preventDefault(); markDropTarget(imageAt(e.clientX, e.clientY)); };
+  $("#canvas-well").ondragleave = (e) => { if (!e.currentTarget.contains(e.relatedTarget)) markDropTarget(null); };
   $("#canvas-well").ondrop = (e) => {
     e.preventDefault();
+    markDropTarget(null);
+    const replaceId = imageAt(e.clientX, e.clientY);
     const id = e.dataTransfer.getData("application/x-vw-asset");
-    if (id) placeAsset(id, e.clientX, e.clientY);
+    if (id) { if (!replaceId || !replaceImage(replaceId, id)) placeAsset(id, e.clientX, e.clientY); }
     else if (e.dataTransfer.getData("application/x-vw-library")) {
       const file = e.dataTransfer.getData("application/x-vw-library");
       const a = S.libraryChoices?.find((x) => x.file === file);
@@ -1070,12 +1202,13 @@ function bindDrag() {
         addAsset(
           { libraryFile: a.file, width: a.width, height: a.height },
           { x: e.clientX, y: e.clientY },
+          replaceId,
         ).catch((err) => notice(err.message));
     } else if (e.dataTransfer.files.length)
-      upload(e.dataTransfer.files, false, { x: e.clientX, y: e.clientY });
+      upload(e.dataTransfer.files, false, { x: e.clientX, y: e.clientY }, replaceId);
   };
 }
-function addElement(type) {
+function addElement(type, shape = "rect") {
   const p = page(),
     z = Math.max(0, ...allElements(p).map((e) => e.zIndex)) + 1,
     b = {
@@ -1084,17 +1217,18 @@ function addElement(type) {
       name: type === "text" ? "新文字" : "新形状",
       x: Math.round(S.project.artboard.width * 0.2),
       y: Math.round(S.project.artboard.height * 0.2),
-      width: type === "text" ? 520 : 300,
+      width: type === "text" ? 520 : shape === "ellipse" ? 240 : 300,
       height: type === "text" ? 100 : 240,
       zIndex: z,
     };
   p.elements.push(
     type === "text"
       ? { ...b, text: "改这里开始创作", font: null, fontSize: 60, color: "#343047" }
-      : { ...b, shape: "rect", fill: "#dad5f3", cornerRadius: 24 },
+      : shape === "ellipse" ? { ...b, shape: "ellipse", fill: "#dad5f3" } : { ...b, shape: "rect", fill: "#dad5f3", cornerRadius: 24 },
   );
   S.selected = [b.id];
   changed();
+  if (type === "text") editText(b.id, { selectAll: true }); // 新建文字直接进入编辑，打字即替换占位字
 }
 function placeAsset(id, cx, cy) {
   const a = S.project.assets.find((a) => a.id === id);
@@ -1154,7 +1288,7 @@ async function imagePayload(file) {
     mime: "image/webp",
   };
 }
-async function addAsset(body, coords) {
+async function addAsset(body, coords, replaceId = null) {
   await flush();
   const generation = S.dirty;
   S.assetPromise = api(`${path()}/assets`, "POST", { ...body, revision: S.revision });
@@ -1172,10 +1306,35 @@ async function addAsset(body, coords) {
   else schedule();
   closeModal();
   S.tab = "assets";
+  if (replaceId && replaceImage(replaceId, result.asset.id)) return;
   placeAsset(result.asset.id, coords?.x, coords?.y);
 }
+// 拖到画布上的图片元素上 = 替换图片（位置、大小、外观不变，一条撤销记录）
+function imageAt(x, y) {
+  for (const hit of document.elementsFromPoint(x, y)) {
+    const node = hit.closest?.("#artboard [data-element-id]");
+    if (!node) continue;
+    const found = findElement(page(), node.dataset.elementId);
+    if (!found || found.element.locked || found.ancestors.some((a) => a.locked)) continue;
+    return found.element.type === "image" ? found.element.id : null;
+  }
+  return null;
+}
+function replaceImage(id, assetId) {
+  const target = findElement(page(), id)?.element;
+  if (!target || target.type !== "image" || !S.project.assets.some((a) => a.id === assetId)) return false;
+  if (target.asset !== assetId) { target.asset = assetId; clearDocumentDraft(target); }
+  S.selected = [id];
+  changed();
+  notice("图片已替换，位置和大小不变");
+  return true;
+}
+function markDropTarget(id) {
+  document.querySelectorAll("#artboard .is-drop-target").forEach((n) => { if (n.dataset.elementId !== id) n.classList.remove("is-drop-target"); });
+  if (id) $(`#artboard [data-element-id="${CSS.escape(id)}"]`)?.classList.add("is-drop-target");
+}
 
-async function upload(files, toLibrary = false, coords) {
+async function upload(files, toLibrary = false, coords, replaceId = null) {
   for (const file of files) {
     if (!file.type.startsWith("image/")) continue;
     try {
@@ -1184,8 +1343,9 @@ async function upload(files, toLibrary = false, coords) {
         await api("/api/library", "POST", body);
         await library();
       } else {
-        await addAsset(body, coords);
-        notice("图片已放入页面，并标记为待排版");
+        await addAsset(body, coords, replaceId);
+        if (!replaceId) notice("图片已放入页面，并标记为待排版");
+        replaceId = null; // 一次拖入多张：只有第一张替换
       }
     } catch (e) {
       notice(e.message);
@@ -1549,6 +1709,7 @@ app.addEventListener("click", async (e) => {
         break;
       case "undo":
         if (S.history.canUndo) {
+          S.typingField = null;
           S.project = S.history.undo();
           S.selected = [];
           keepSelection();
@@ -1559,6 +1720,7 @@ app.addEventListener("click", async (e) => {
         break;
       case "redo":
         if (S.history.canRedo) {
+          S.typingField = null;
           S.project = S.history.redo();
           S.selected = [];
           keepSelection();
@@ -1580,9 +1742,11 @@ app.addEventListener("click", async (e) => {
       case "add-text":
         addElement("text");
         break;
-      case "add-shape":
-        addElement("shape");
+      case "add-shape": {
+        const box = b.getBoundingClientRect();
+        showContextMenu({ x: box.left, y: box.bottom + 6, items: [{ action: "rect", label: "矩形" }, { action: "ellipse", label: "圆形" }], onAction: (kind) => { try { addElement("shape", kind); } catch (error) { notice(error.message); } } });
         break;
+      }
       case "duplicate":
         S.selected = duplicateElements(page(), rootSelection(page(), S.selected));
         changed();
@@ -1821,6 +1985,8 @@ function updateProp(input) {
     if (key === "zIndex") value = Math.round(value);
     if (key === "rotation") value = Math.min(360, Math.max(-360, value));
     if (key === "stroke.width" || key === "shadow.blur") value = Math.max(0, value);
+    if (key === "lineHeight") value = Math.max(0.1, Math.round(value * 100) / 100);
+    if (key === "cornerRadius") value = Math.max(0, value);
   }
   if (key === "font") value = value || null;
   let different = false;
@@ -1831,8 +1997,10 @@ function updateProp(input) {
     }
     if (e[key] !== value) {
       if (
-        (["text", "fontSize", "fontWeight", "color", "font"].includes(key) && e.type !== "text") ||
-        (key === "fill" && e.type !== "shape")
+        (["text", "fontSize", "fontWeight", "color", "font", "align", "lineHeight", "letterSpacing"].includes(key) && e.type !== "text") ||
+        (key === "fill" && e.type !== "shape") ||
+        (key === "cornerRadius" && (e.type !== "shape" || e.shape !== "rect")) ||
+        (key === "fit" && e.type !== "image")
       )
         return;
       if (e.type === "group" && ["width", "height"].includes(key))
@@ -1849,15 +2017,31 @@ function updateProp(input) {
   });
   if (different) changed();
 }
+// 颜色框拖动时画面实时跟着变（不记撤销）；松手（change）时才写进项目、记一条撤销
+function previewProp(input) {
+  if (S.stepView) return; // 步骤视图里动效控制着 transform，松手后统一刷新
+  const key = input.dataset.prop, [root, sub] = key.split(".");
+  for (const id of rootSelection(page(), S.selected)) {
+    const element = findElement(page(), id)?.element;
+    if (!element) continue;
+    const draft = clone(element);
+    if (STYLE_TYPE[root]) { if (draft.type !== STYLE_TYPE[root]) continue; setStyle(draft, root, sub, input.value); }
+    else if ((key === "color" && draft.type === "text") || (key === "fill" && draft.type === "shape")) draft[key] = input.value;
+    else continue;
+    paintDragged(draft);
+  }
+}
 app.addEventListener("input", (event) => {
   const input = event.target;
+  if (input.matches('input[type="color"][data-prop]')) return previewProp(input);
   if (!input.matches('textarea[data-prop="text"]') || event.isComposing) return;
   const before=clone(page()); let different=false;
   mutateElements(page(),rootSelection(page(),S.selected),element=>{
     if(element.type==='text' && element.text!==input.value){element.text=input.value;different=true;}
   });
   if(!different)return;
-  reconcileLinkedPages();S.history.commit(S.project);S.dirty++;schedule();
+  // 同一次在文本框里连续打字合并成一条撤销记录
+  reconcileLinkedPages();if(S.typingField===input)S.history.amend(S.project);else{S.history.commit(S.project);S.typingField=input;}S.dirty++;schedule();
   patchDocumentCanvas(before);refreshHistoryButtons();if(S.tab==="layers")refreshInspector();else S.outlineView?.refresh(); // 图层名跟着字变，正在输入的框不动
 });
 app.addEventListener("change", (e) => {
@@ -1875,6 +2059,7 @@ app.addEventListener("change", (e) => {
     updateProp(e.target);
 });
 app.addEventListener("focusout", (e) => {
+  if (e.target === S.typingField) S.typingField = null;
   // 描边 / 投影 / 图片颜色只在真的改了值时（change）生效：元素没有描边时，框里显示的默认值不能因为失去焦点就被写进去
   if (e.target.matches("textarea[data-prop],input[data-prop]") && !STYLE_TYPE[e.target.dataset.prop.split(".")[0]])
     updateProp(e.target);
@@ -1900,9 +2085,11 @@ window.addEventListener("keydown", e => {
     if($('#modal-root')?.childElementCount){closeModal();return;}
     if(S.view==='play'){S.playback?.destroy();document.fullscreenElement&&document.exitFullscreen();S.view='editor';renderEditor();return;}
     if(S.view!=='editor')return;
-    if(S.pageViewMode==='grid'){setPageView(readPageViewPreference());return;}
+    // 逐层退出：有选中页先取消，再退出网格
+    if(S.pageViewMode==='grid'){if(S.checked.size){clearCheckedPages();return;}setPageView(readPageViewPreference());return;}
     if(S.focus){setFocus(false);return;}
     if(S.selected.length){S.selected=escapeSelection(page(),S.selected);refreshSelection();return;}
+    if(S.checked.size){clearCheckedPages();return;}
     return;
   }
   if(typing)return;
@@ -1920,6 +2107,7 @@ window.addEventListener("keydown", e => {
       if(S.pageViewMode==='grid'||(!S.selected.length&&S.checked.size&&key!=='a'))pageAction({'a':'select-pages','c':'copy-pages','v':'paste-pages','d':'duplicate-pages'}[key]);
       else elementAction({'a':'select-all','c':'copy-elements','v':'paste-elements','d':'duplicate-elements'}[key]);return;
     }
+    if(e.key==='Enter'&&!mod&&S.selected.length===1&&findElement(page(),S.selected[0])?.element.type==='text'){e.preventDefault();editText(S.selected[0],{selectAll:true});return;}
     if(['Backspace','Delete'].includes(e.key)){e.preventDefault();if(S.selected.length)elementAction('delete-elements');else if(S.checked.size)pageAction('delete-pages');return;}
     const arrow={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
     if(arrow&&S.selected.length){e.preventDefault();nudge(arrow[0]*(e.shiftKey?10:1),arrow[1]*(e.shiftKey?10:1));return;}
@@ -1940,6 +2128,7 @@ function switchPage(id, { clearChecked = false } = {}) {
   updateEditor();
 }
 // ---------- 页面操作：三种视图共用同一份选择和历史 ----------
+function clearCheckedPages() { S.checked.clear();S.pageAnchor=null;refreshPageViews(); }
 function pageViewContext(mode = S.pageViewMode) {
   return { project:S.project,currentPageId:S.pageId,selectedPageIds:[...S.checked],anchorId:S.pageAnchor,mode,returnMode:readPageViewPreference(),canPaste:S.pageClipboard?.projectId===S.project?.id };
 }
@@ -1980,6 +2169,7 @@ function pageAction(name,{ids=[...S.checked],targetId=S.pageId,position='after'}
 // ---------- 元素操作 ----------
 function elementAction(action) {
   finishNudge();const ids=rootSelection(page(),S.selected);
+  if(action==='edit-text'){editText(S.selected[0],{selectAll:true});return;}
   if(action==='copy-elements'){S.elementClipboard=copyElements(S.project,page(),ids);notice('元素已复制，可粘贴到本项目的其他页');return;}
   if(action==='paste-elements')S.selected=pasteElements(S.project,page(),S.elementClipboard,S.elementClipboard?.pageId===S.pageId?24:0);
   else if(action==='duplicate-elements')S.selected=pasteElements(S.project,page(),copyElements(S.project,page(),ids));
@@ -1991,6 +2181,16 @@ function elementAction(action) {
   else return;
   changed();
 }
+// 双击文字进入就地编辑：组里的文字也直接编辑（Canva 习惯）
+app.addEventListener('dblclick',e=>{
+  if(S.view!=='editor'||S.preview||e.button!==0||!e.target.closest('#artboard-holder'))return;
+  const node=e.target.closest('[data-element-id]');if(node&&isEditingTextNode(node))return;
+  const board=$('#artboard');if(!board)return;
+  const deep=pickCanvasElement({board,page:page(),selected:[],screen:!!S.stepView,event:e});
+  const hit=pickElement(board,e);
+  const id=deep.id&&findElement(page(),deep.id)?.element.type==='text'?deep.id:hit.id;
+  if(id&&editText(id,{point:{clientX:e.clientX,clientY:e.clientY}}))e.preventDefault();
+});
 app.addEventListener('contextmenu',e=>{
   if(S.view!=='editor'||isTypingTarget(e.target)||!e.target.closest('#canvas-well'))return;
   e.preventDefault();finishNudge();
@@ -2001,7 +2201,9 @@ app.addEventListener('contextmenu',e=>{
   if(!id)S.selected=[];refreshSelection();
   const selected=S.selected.map(id=>findElement(page(),id)?.element).filter(Boolean),locked=selected.some(el=>el.locked);
   const canPaste=S.elementClipboard?.projectId===S.project.id;
+  const editableText=selected.length===1&&selected[0].type==='text'&&!locked&&editable(page(),selected[0].id);
   const items=id?[
+    ...(editableText?[{action:'edit-text',label:'编辑文字'},{separator:true}]:[]),
     {action:'copy-elements',label:'复制'},{action:'paste-elements',label:'粘贴',disabled:!canPaste},{action:'duplicate-elements',label:'创建副本',disabled:locked},
     {action:'delete-elements',label:'删除',disabled:locked},{separator:true},{action:locked?'unlock-elements':'lock-elements',label:locked?'解锁':'锁定'},
     {action:'group-elements',label:'编组',disabled:locked||selected.length<2||!selected.every(el=>findElement(page(),el.id).items===findElement(page(),selected[0].id).items)},

@@ -224,3 +224,13 @@ html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
 /* 保存状态（第 9 轮）：#save-status 只给读屏，看得见的是旁边去抖后的标签 */
 .vw-sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .ed-save {position:relative}
+
+/* 第 9 轮：画布悬停细描边（锁定元素不显示；选中元素的内联描边优先） */
+#artboard > [data-element-id]:not([data-vw-locked]):hover { outline: 1.5px solid rgba(56, 189, 248, 0.55); }
+#artboard [data-element-id].is-drop-target { outline: 3px dashed #38bdf8 !important; outline-offset: -3px; }
+#artboard [data-element-id].is-text-editing { outline: 2px solid #38bdf8; }
+#artboard [data-element-id].is-text-editing:focus-within { cursor: text; }
+/* 旋转把手：尺寸由脚本按画板缩放补偿 */
+.rotate-handle { position: absolute; left: 50%; transform: translateX(-50%); box-sizing: border-box; border-radius: 50%; background: #fff; color: #5b5470; display: grid; place-items: center; cursor: grab; box-shadow: 0 0 0 1.5px rgba(120, 110, 145, 0.55), 0 2px 6px rgba(20, 20, 30, 0.35); z-index: 1; }
+.rotate-handle svg { width: 62%; height: 62%; pointer-events: none; }
+.rotate-handle:active { cursor: grabbing; }
