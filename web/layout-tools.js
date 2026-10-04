@@ -78,3 +78,47 @@ export function distributeElements(elements, axis='x') {
   const positions=new Map();let cursor=first[axis]; for(const e of ordered){positions.set(e.element,cursor+e.element[axis]-e[axis]);cursor+=e[size]+gap;}
   return elements.map(e=>({...e,[axis]:positions.get(e)}));
 }
+
+// Resize in the element's parent coordinates, then compare actual page bounds.
+// Changing either dimension moves its center exactly enough to keep the opposite
+// rotated edge fixed. Projection also includes every flipped / rotated parent.
+export function anchoredSize(element,handle,width,height) {
+  const a=(element.rotation||0)*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+  const sx=(width-element.width)*(handle.includes('w')?-1:handle.includes('e')?1:0)/2;
+  const sy=(height-element.height)*(handle.includes('n')?-1:handle.includes('s')?1:0)/2;
+  return {...element,width,height,x:element.x+(element.width-width)/2+sx*c-sy*s,y:element.y+(element.height-height)/2+sx*s+sy*c};
+}
+export function snapTransformedResize(options) {
+  const original=options.bounds;let bounds={...original};const guides=[];
+  if(options.disabled)return {bounds,guides,gaps:[]};
+  const threshold=(options.threshold??6)/Math.max(options.scale||1,.001);
+  const project=options.project||((e)=>e),targets=refs(options);
+  if(options.page)targets.push({id:'page',x:0,y:0,...options.page});
+  const dimensions=['width','height'].filter(d=>d==='width'?/[we]/.test(options.handle):/[ns]/.test(options.handle));
+  const usedAxes=new Set();
+  while(dimensions.length){
+    const world=visualBounds(project(bounds));let best=null;
+    for(const dimension of dimensions){
+      const probe=anchoredSize(bounds,options.handle,bounds.width+(dimension==='width'?1:0),bounds.height+(dimension==='height'?1:0));
+      const projected=visualBounds(project(probe));
+      for(const axis of ['x','y']){
+        if(usedAxes.has(axis))continue;
+        const own=marks(world,axis),derivatives=marks(projected,axis).map((v,i)=>v-own[i]);
+        for(const target of targets)for(const value of marks(target,axis))for(let i=0;i<3;i++){
+          const coefficient=derivatives[i];if(Math.abs(coefficient)<1e-8)continue;
+          const distance=value-own[i],delta=distance/coefficient;
+          if(Math.abs(distance)>threshold||bounds[dimension]+delta<0)continue;
+          // Don't pull a shallow-angle edge a long way along the pointer axis.
+          if(Math.abs(delta)>threshold*2)continue;
+          if(!best||Math.abs(distance)<Math.abs(best.distance))best={dimension,axis,value,delta,distance,targetId:target.id};
+        }
+      }
+    }
+    if(!best)break;
+    bounds=anchoredSize(bounds,options.handle,bounds.width+(best.dimension==='width'?best.delta:0),bounds.height+(best.dimension==='height'?best.delta:0));
+    dimensions.splice(dimensions.indexOf(best.dimension),1);usedAxes.add(best.axis);guides.push({type:'guide',axis:best.axis,value:best.value,targetId:best.targetId});
+  }
+  // A second dimension can move the first guide; show only alignments that remain.
+  const world=visualBounds(project(bounds));
+  return {bounds,gaps:[],guides:guides.filter(g=>marks(world,g.axis).some(value=>Math.abs(value-g.value)<1e-5))};
+}

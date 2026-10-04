@@ -12,8 +12,11 @@ export function marqueeIds(page, box, rectangles = null) {
 // Flatten only the selected root's parent transforms, retaining its own children.
 export function elementInPage(page,id) {
   const found=findElement(page,id);if(!found)return null;
-  const e=clone(found.element);
-  for(const g of found.ancestors.slice().reverse()){
+  return elementWithParents(found.element,found.ancestors);
+}
+export function elementWithParents(element,ancestors=[]) {
+  const e=clone(element);
+  for(const g of ancestors.slice().reverse()){
     const a=(g.rotation||0)*Math.PI/180, cx=e.x+e.width/2-g.width/2,cy=e.y+e.height/2-g.height/2;
     const x=g.flipX?-cx:cx,y=g.flipY?-cy:cy;
     e.x=g.x+g.width/2+x*Math.cos(a)-y*Math.sin(a)-e.width/2;e.y=g.y+g.height/2+x*Math.sin(a)+y*Math.cos(a)-e.height/2;

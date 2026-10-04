@@ -1,8 +1,8 @@
-import { copyElements, pasteElements, elementInPage, selectableIds, marqueeIds, nudgeElements, groupElements, ungroupElements, escapeSelection, isTypingTarget } from './element-operations.js';
+import { copyElements, pasteElements, elementInPage, elementWithParents, selectableIds, marqueeIds, nudgeElements, groupElements, ungroupElements, escapeSelection, isTypingTarget } from './element-operations.js';
 import { copyPages, pastePages, duplicatePages, deletePages, movePages, insertPage } from './page-operations.js';
 import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewPreference } from './page-views.js';
 import { showContextMenu, closeContextMenu } from './context-menu.js';
-import { snapMove, snapResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
+import { snapMove, snapResize, snapTransformedResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
 import { appearanceControls } from './appearance-controls.js';
 import { createProjectManagement } from './project-management.js';
 import { createWorkbenchClose } from './workbench-close.js';
@@ -702,8 +702,10 @@ function selectCanvas(id, event, resize) {
       }
       if (resizing) {
         let bounds = resizeBounds(old, resizing, localX, localY);
-        if(!hasParent && !old.rotation && ids.length===1){
-          const snap=snapResize({bounds,references,page:S.project.artboard,scale:S.scale,handle:resizing,rotation:old.rotation||0,disabled:e.altKey,movingIds:ids});bounds=snap.bounds;paintGuides(snap);
+        if(ids.length===1){
+          const options={bounds:{...old,...bounds},references,page:S.project.artboard,scale:S.scale,handle:resizing,rotation:old.rotation||0,disabled:e.altKey,movingIds:ids};
+          const snap=hasParent||old.rotation?snapTransformedResize({...options,project:element=>elementWithParents(element,found.ancestors)}):snapResize(options);
+          bounds={x:snap.bounds.x,y:snap.bounds.y,width:snap.bounds.width,height:snap.bounds.height};paintGuides(snap);
         }
         if (target.type === "group") resizeGroup(target, old, bounds.width, bounds.height);
         Object.assign(target, bounds);

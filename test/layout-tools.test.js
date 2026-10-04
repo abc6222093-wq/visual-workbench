@@ -34,3 +34,23 @@ test('all six alignments use the combined bounds and vertical distribution uses 
  const result=distributeElements(elements,'y');assert.equal(result[1].y-result[0].y-result[0].height,result[2].y-result[1].y-result[1].height);assert.deepEqual(elements.map(e=>e.y),[20,70,130]);
  const offRow=snapMove({bounds:b(83,200),references:[{id:'a',...b(0)},{id:'b',...b(40)}],threshold:4});assert.equal(offRow.gaps.length,0);
 });
+
+test('transformed resizing snaps a rotated edge without moving the opposite anchor',async()=>{
+ const {snapTransformedResize,visualBounds}=await import('../web/layout-tools.js');
+ const old={x:60,y:70,width:80,height:40,rotation:30};
+ const left=e=>{const a=e.rotation*Math.PI/180;return [e.x+e.width/2-e.width/2*Math.cos(a),e.y+e.height/2-e.width/2*Math.sin(a)];};
+ const result=snapTransformedResize({bounds:old,handle:'e',references:[{id:'target',x:146,y:500,width:20,height:20}],threshold:3});
+ assert.ok(result.guides.some(g=>g.axis==='x'&&g.value===146));
+ assert.ok(Math.abs(visualBounds(result.bounds).x+visualBounds(result.bounds).width-146)<1e-8);
+ left(old).forEach((v,i)=>assert.ok(Math.abs(v-left(result.bounds)[i])<1e-8));assert.equal(result.bounds.height,old.height);
+ assert.deepEqual(snapTransformedResize({bounds:old,handle:'e',disabled:true}).bounds,old);
+});
+test('resizing inside flipped rotated parents projects guides onto the page and preserves anchored edges',async()=>{
+ const {snapTransformedResize,visualBounds}=await import('../web/layout-tools.js');const {elementWithParents}=await import('../web/element-operations.js');
+ const parent={x:80,y:100,width:400,height:250,rotation:30,flipX:true};const old={x:60,y:70,width:80,height:40,rotation:20};
+ const project=e=>elementWithParents(e,[parent]);const before=visualBounds(project(old));const target=before.x-2;
+ const result=snapTransformedResize({bounds:old,handle:'e',project,references:[{id:'target',x:target,y:700,width:20,height:20}],threshold:3});
+ assert.ok(result.guides.some(g=>g.axis==='x'&&Math.abs(g.value-target)<1e-8));assert.ok(Math.abs(visualBounds(project(result.bounds)).x-target)<1e-8);
+ const anchor=e=>{const a=e.rotation*Math.PI/180;return {x:e.x+e.width/2-e.width/2*Math.cos(a),y:e.y+e.height/2-e.width/2*Math.sin(a),width:0,height:0};};
+ const a=project(anchor(old)),z=project(anchor(result.bounds));assert.ok(Math.abs(a.x-z.x)<1e-8);assert.ok(Math.abs(a.y-z.y)<1e-8);assert.equal(result.bounds.height,old.height);
+});

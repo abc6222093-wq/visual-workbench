@@ -3,11 +3,17 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
 const now='2026-10-01T12:00:00.000Z';
 const text=(id,x,y)=>({id,type:'text',x,y,width:120,height:60,zIndex:1,text:id,fontSize:24,color:'#111111'});
-async function editor(t){
+async function editor(t,{transformed=false}={}){
  const dir=mkdtempSync(join(tmpdir(),'vw-round8-editor-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  mkdirSync(join(dir,'projects/demo'),{recursive:true});const file=join(dir,'projects/demo/project.json');
  const project={format:'visual-workbench/project',formatVersion:2,id:'demo',name:'编辑操作验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1000,height:700},assets:[],fonts:[],pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[text('el_first',80,80),text('el_second',300,80),text('el_third',500,240),{...text('el_locked',700,80),locked:true},{id:'el_group_first',type:'group',x:100,y:400,width:300,height:100,zIndex:2,children:[text('el_child',0,0),{...text('el_childtwo',160,0),zIndex:2}]}]},{id:'page_second',name:'第二页',background:'#ffffff',elements:[]},{id:'page_third',name:'第三页',background:'#ffffff',elements:[]}]};
+ if(transformed){
+  const {elementInPage}=await import('../web/element-operations.js'),{visualBounds}=await import('../web/layout-tools.js');
+  project.pages[0].elements=[{id:'el_group_first',type:'group',x:120,y:200,width:400,height:240,zIndex:2,rotation:30,flipX:true,children:[{...text('el_child',60,70),width:80,height:40,rotation:20}]}];
+  const child=visualBounds(elementInPage(project.pages[0],'el_child'));
+  project.pages[0].elements.push({id:'el_resize_target',type:'shape',shape:'rect',fill:'#999999',x:child.x-2,y:600,width:4,height:4,zIndex:1});
+ }
  writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1600,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));const requests=[];page.on('request',r=>{if(r.method()==='PUT'&&r.url().endsWith('/api/projects/demo'))requests.push(r);});
  const url=`http://127.0.0.1:${server.address().port}`;await page.goto(url);await page.locator('[data-action="open"][data-id="demo"]').click();await page.waitForSelector('#artboard');return {page,file,errors,requests,server,dir,url};
 }
@@ -97,4 +103,15 @@ test('round8 right click lock, unlock, blank paste and group-free selection keep
  await page.mouse.click(p.x,p.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'解锁',exact:true}).click());assert.equal(disk(file).pages[0].elements.find(e=>e.id==='el_first').locked,false);
  await select(page,'el_first');await page.keyboard.press('ControlOrMeta+c');const box=await page.locator('#artboard').boundingBox();await page.mouse.click(box.x+box.width-15,box.y+box.height-15,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'粘贴',exact:true}).click());const elements=disk(file).pages[0].elements;assert.equal(elements.length,6);assert.equal(elements.at(-1).x,104);
  await saved(page,()=>page.keyboard.press('ControlOrMeta+z'));assert.equal(disk(file).pages[0].elements.length,5);await saved(page,()=>page.keyboard.press('ControlOrMeta+Shift+z'));assert.equal(disk(file).pages[0].elements.length,6);assert.deepEqual(errors,[]);
+});
+
+test('round8 group child resize uses page snap guides and keeps its opposite rotated anchor fixed',async t=>{
+ const {page,file,errors}=await editor(t,{transformed:true});const {elementWithParents,elementInPage}=await import('../web/element-operations.js'),{visualBounds}=await import('../web/layout-tools.js');
+ await select(page,'el_child');const original=disk(file).pages[0],g=original.elements[0],old=g.children[0];
+ const anchor=e=>{const a=e.rotation*Math.PI/180;return elementWithParents({x:e.x+e.width/2-e.width/2*Math.cos(a),y:e.y+e.height/2-e.width/2*Math.sin(a),width:0,height:0},[g]);};const fixed=anchor(old);
+ const scale=await page.locator('#artboard').evaluate(n=>new DOMMatrix(getComputedStyle(n).transform).a),handle=await page.locator('[data-resize="el_child"][data-handle="e"]').boundingBox();
+ await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();const a=10*Math.PI/180;
+ await page.mouse.move(handle.x+handle.width/2-3*Math.cos(a)*scale,handle.y+handle.height/2-3*Math.sin(a)*scale);assert.ok(await page.locator('.ed-guide').count()>0);
+ await saved(page,()=>page.mouse.up());const final=disk(file).pages[0],child=final.elements[0].children[0],after=anchor(child);
+ assert.ok(Math.abs(after.x-fixed.x)<1e-6);assert.ok(Math.abs(after.y-fixed.y)<1e-6);assert.equal(child.height,old.height);assert.ok(Math.abs(visualBounds(elementInPage(final,'el_child')).x-original.elements[1].x)<1e-6);assert.deepEqual(errors,[]);
 });
