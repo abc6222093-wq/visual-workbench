@@ -23,6 +23,7 @@ import { pickImage } from "./image-picker.js";
 import { openImportDialog } from "./import-html.js";
 import { mountHomeSelection } from "./home-selection.js";
 import { renderPage, patchPage, updateElementNode } from "./render.js";
+import { createThumbnails } from "./thumbnails.js";
 import { patchPageItems } from "./page-items.js";
 import { showMotionPage } from "./motion-stage.js";
 import { mountMotionStatus } from "./motion-status.js";
@@ -188,24 +189,9 @@ function closeModal() {
   closeModalGlass();
   $("#modal-root")?.replaceChildren();
 }
+// 总览卡片的缩略图（第 11 轮起与编辑器缩略图共用 thumbnails.js）
 function thumb(project, p) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "miniature";
-  const board = renderPage(project, p, {
-    assetBase: `/data/projects/${encodeURIComponent(project.id)}`,
-  });
-  wrapper.append(board);
-  requestAnimationFrame(() => fitThumb(wrapper, board, project));
-  return wrapper;
-}
-function fitThumb(wrapper, board, project) {
-  if (!wrapper.clientWidth) return;
-  const s = Math.min(
-    wrapper.clientWidth / project.artboard.width,
-    wrapper.clientHeight / project.artboard.height,
-  );
-  if (board.style.transform !== `scale(${s})`) board.style.transform = `scale(${s})`;
-  board.style.transformOrigin = "top left";
+  return createThumbnails({ getProject: () => project, host: app, thumbOptions: () => ({ assetBase: `/data/projects/${encodeURIComponent(project.id)}` }) }).make(project, p);
 }
 // 编辑器里的素材地址：被 agent 换过内容的文件带上时间戳（只有这些图片重新加载，其余 <img> 不动）
 function assetSrc(file) {
@@ -214,46 +200,9 @@ function assetSrc(file) {
 }
 // 编辑器左侧的缩略图：节点不带 data-page-id、不带 .is-selected（它们只是静态预览，不是页面卡片）
 const thumbOptions = () => ({ assetBase: base(), resolveAsset: assetSrc, pageId: false });
-function editorThumb(p) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "miniature";
-  const board = renderPage(S.project, p, thumbOptions());
-  board.removeAttribute("data-page-id");
-  wrapper.append(board);
-  requestAnimationFrame(() => fitThumb(wrapper, board, S.project));
-  return wrapper;
-}
-// 缩略图：空的宿主立刻填上；内容变了的页（按页 JSON 签名比较）空闲时在原来的迷你画板上原地更新，图片复用、不闪
-function refreshThumbnails() {
-  if (!S.project) return;
-  const signatures = new Map();
-  const signature = (p) => {
-    if (!signatures.has(p.id)) signatures.set(p.id, JSON.stringify([p, S.project.artboard, S.project.fonts, S.project.assets, [...S.stale]]));
-    return signatures.get(p.id);
-  };
-  let pending = false;
-  for (const host of app.querySelectorAll("[data-preview]")) {
-    const p = S.project.pages.find((x) => x.id === host.dataset.preview);
-    if (!p) continue;
-    if (!host.querySelector(":scope > .miniature")) { host.replaceChildren(editorThumb(p)); host._thumbSig = signature(p); }
-    else if (host._thumbSig !== signature(p)) pending = true;
-  }
-  if (!pending) return;
-  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 60));
-  (window.cancelIdleCallback || clearTimeout)(refreshThumbnails.handle);
-  refreshThumbnails.handle = idle(() => {
-    if (S.view !== "editor" || !S.project) return;
-    signatures.clear();
-    for (const host of app.querySelectorAll("[data-preview]")) {
-      const p = S.project.pages.find((x) => x.id === host.dataset.preview);
-      const wrapper = host.querySelector(":scope > .miniature"), board = wrapper?.querySelector(":scope > .vw-artboard");
-      if (!p || !board || host._thumbSig === signature(p)) continue;
-      host._thumbSig = signature(p);
-      patchPage(board, S.project, p, thumbOptions());
-      fitThumb(wrapper, board, S.project);
-    }
-  }, { timeout: 400 });
-}
+const thumbnails = createThumbnails({ getProject: () => S.project, host: app, thumbOptions, active: () => S.view === "editor" });
+function refreshThumbnails() { if (S.project) thumbnails.refresh(JSON.stringify([...S.stale])); }
+function refitThumbnails() { thumbnails.refit(); }
 async function home() {
   await flush();
   S.view = "home";
