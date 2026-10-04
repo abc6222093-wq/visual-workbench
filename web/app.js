@@ -461,11 +461,23 @@ function disposeTextMeasurer() { S.textMeasurer?.dispose(); S.textMeasurer = nul
 // 打开项目：文字框高度和内容不一致（旧项目）时先自动存版，再按新规则校正一次
 async function correctTextHeights(projectId) {
   const measurer = await mountTextMeasurer();
-  if (S.project?.id !== projectId || S.textMeasurer !== measurer) return;
-  if (!fitTextHeights(clone(S.project), measurer.measure).length) return;
+  const current = () => S.project?.id === projectId && S.textMeasurer === measurer && S.view === "editor";
+  if (!current()) return;
+  // 字体可能还在加载（慢机器上尤其）：等字体就绪，再连量两次结果一致才算数；用户正在拖动 / 打字 / 裁切时稍后再来
+  await document.fonts.ready;
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  for (let attempt = 0; attempt < 40 && current() && (S.dragging || S.textEdit || S.crop || nudgePending || S.preview); attempt++) await pause(500);
+  if (!current()) return;
+  const first = fitTextHeights(clone(S.project), measurer.measure);
+  if (!first.length) return;
+  await pause(250);
+  await document.fonts.ready;
+  if (!current()) return;
+  const second = fitTextHeights(clone(S.project), measurer.measure);
+  if (JSON.stringify(first) !== JSON.stringify(second)) return; // 两次结果不同：字体还没稳定，这次不校正
   await flush();
   await api(`${path()}/versions`, "POST", { note: "文字框自动长高校正前自动存版" });
-  if (S.project?.id !== projectId || S.textMeasurer !== measurer) return;
+  if (!current()) return;
   const applied = fitTextHeights(S.project, measurer.measure);
   if (!applied.length) return;
   S.history.commit(S.project);
