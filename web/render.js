@@ -1,3 +1,5 @@
+import { pageSize } from './project-kinds.js';
+
 const px = value => `${Number(value) || 0}px`;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -349,8 +351,10 @@ export function patchPage(root, project, page, options = {}) {
   ensureFonts(project, options);
   if (options.pageId === false) root.removeAttribute('data-page-id');
   else root.dataset.pageId = page.id;
-  root.style.width = px(project.artboard.width);
-  root.style.height = px(project.artboard.height);
+  // 第 11 轮：根节点按页面自己的尺寸（网页页面用 size，课件页面就是画板）
+  const size = pageSize(project, page);
+  root.style.width = px(size.width);
+  root.style.height = px(size.height);
   root.style.background = paint(page.background);
   const fonts = new Map((project.fonts || []).map(font => [font.id, font]));
   const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
@@ -363,7 +367,8 @@ export function renderPage(project, page, options = {}) {
   const root = document.createElement('div');
   root.className = 'vw-artboard';
   root.dataset.pageId = page.id;
-  root.style.cssText = `position:relative;width:${px(project.artboard.width)};height:${px(project.artboard.height)};overflow:hidden;isolation:isolate;background:${paint(page.background)};flex:none`;
+  const size = pageSize(project, page);
+  root.style.cssText = `position:relative;width:${px(size.width)};height:${px(size.height)};overflow:hidden;isolation:isolate;background:${paint(page.background)};flex:none`;
   const fonts = new Map((project.fonts || []).map(font => [font.id, font]));
   const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
   for (const element of [...page.elements].sort((a, b) => a.zIndex - b.zIndex)) root.append(renderElement(project, element, options, fonts, assets));

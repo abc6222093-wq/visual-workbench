@@ -1,4 +1,4 @@
-// 导出：每页一张图片（画板原尺寸），或整个项目一份 PDF（每页一张画面）。
+// 导出：每页一张图片（页面原尺寸：课件页 = 画板；网页页 = 自己的 size，长页整页导出），或整个项目一份 PDF（每页一张画面）。
 // 画面 = 这一页「动效全部播完之后」的最后一帧；没有动效的页面就是静态画面。
 // 做法和动效检查一样：本地起一个只给后台浏览器用的 http 服务（web/ 目录 + 项目目录挂在 /project），
 // 打开 web/export-render.html 逐页渲染、播完动效，再按画板尺寸截图。PDF 由 src/export/pdf.js 自己拼，不依赖 Chrome 的打印功能。
@@ -9,6 +9,7 @@ import http from 'node:http';
 import { launchBrowserServer } from '../browser.js';
 import { validateProjectData } from '../validate.js';
 import { buildPdf } from './pdf.js';
+import { pageSize } from '../../web/project-kinds.js';
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../web');
 const MIME = {
@@ -69,13 +70,14 @@ const withTimeout = (promise, ms) => Promise.race([promise, new Promise(ok => se
 async function captureProject({ projectDir, type, quality, timeout = 5000, onShot }) {
   projectDir = resolve(projectDir);
   const project = readProject(projectDir);
-  const { width, height } = project.artboard;
   const { server, origin } = await startServer(projectDir);
   let browser, browserServer, killed = false;
   try {
     ({ server: browserServer, browser } = await launchBrowserServer());
     for (const [index, item] of project.pages.entries()) {
       const label = `第 ${index + 1} 页（${item.id}${item.name ? ` · ${item.name}` : ''}）`;
+      // 第 11 轮：每页按自己的尺寸设视口和截图范围（网页长页把视口设成整页高度，一次截完整页）
+      const { width, height } = pageSize(project, item);
       const total = Math.max(20000, ((item.motion?.steps || 0) + 4) * timeout * 2);
       const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
       let timer;
@@ -114,7 +116,7 @@ async function captureProject({ projectDir, type, quality, timeout = 5000, onSho
 }
 
 /**
- * 每页导出一张图片，尺寸 = 画板尺寸，文件名 `<两位序号>-<页面名>.png`。
+ * 每页导出一张图片，尺寸 = 页面尺寸（课件页 = 画板；网页页 = 页面 size），文件名 `<两位序号>-<页面名>.png`。
  * format：'png'（默认）或 'jpeg'。返回 { files: [{ path, bytes }] }。
  */
 export async function exportImages({ projectDir, outDir, format = 'png', timeout } = {}) {
@@ -138,14 +140,16 @@ export async function exportImages({ projectDir, outDir, format = 'png', timeout
   return { files };
 }
 
-/** 整个项目导出成一份 PDF：每页一个 PDF 页面，尺寸按画板换算（1 px = 0.75 pt），画面是动效播完后的最后一帧。返回 { file, bytes }。 */
+/** 整个项目导出成一份 PDF：每页一个 PDF 页面，尺寸按该页尺寸换算（1 px = 0.75 pt；网页长页就是一张长 PDF 页），画面是动效播完后的最后一帧。返回 { file, bytes }。 */
 export async function exportPdf({ projectDir, outFile, timeout } = {}) {
   if (!projectDir || !outFile) throw new Error('exportPdf 需要 projectDir 和 outFile');
   outFile = resolve(outFile);
   const shots = [];
   const project = await captureProject({ projectDir, type: 'jpeg', quality: 90, timeout, onShot(index, page, buffer) { shots[index] = buffer; } });
-  const { width, height } = project.artboard;
-  const pdf = buildPdf(shots.map(jpeg => ({ jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX })));
+  const pdf = buildPdf(shots.map((jpeg, index) => {
+    const { width, height } = pageSize(project, project.pages[index]);
+    return { jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX };
+  }));
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(outFile, pdf);
   return { file: outFile, bytes: pdf.length };

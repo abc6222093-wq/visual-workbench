@@ -158,7 +158,7 @@ test('命令行：无参数校验 examples/，退出码 0 且输出含 ✓', () 
   const r = spawnSync(process.execPath, ['src/cli/validate.js'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /✓/);
-  assert.match(r.stdout, /共 1 个项目，通过 1，未通过 0/);
+  assert.match(r.stdout, /共 2 个项目，通过 2，未通过 0/);
 });
 
 test('命令行：传入文件夹或 project.json 路径都能校验', () => {

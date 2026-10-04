@@ -1,0 +1,631 @@
+{
+  "format": "visual-workbench/project",
+  "formatVersion": 2,
+  "id": "sample-web",
+  "name": "示例网页 · 格式演示",
+  "kind": "web",
+  "description": "网页项目示例（第 11 轮）：同一首页的电脑端与手机端两页，各带一个按原网页定位的导航栏分组；无动效。",
+  "createdAt": "2026-10-04T00:00:00.000Z",
+  "updatedAt": "2026-10-04T00:00:00.000Z",
+  "artboard": {
+    "preset": "web-desktop",
+    "width": 1440,
+    "height": 900
+  },
+  "assets": [
+    {
+      "id": "asset_city01",
+      "kind": "image",
+      "file": "assets/photo-city.png",
+      "name": "城市照片",
+      "width": 640,
+      "height": 360,
+      "pendingLayout": false,
+      "addedAt": "2026-10-04T00:00:00.000Z",
+      "source": {
+        "type": "upload"
+      }
+    },
+    {
+      "id": "asset_logo01",
+      "kind": "image",
+      "file": "assets/logo.png",
+      "name": "标志",
+      "width": 256,
+      "height": 256,
+      "pendingLayout": false,
+      "addedAt": "2026-10-04T00:00:00.000Z",
+      "source": {
+        "type": "upload"
+      }
+    }
+  ],
+  "fonts": [],
+  "pages": [
+    {
+      "id": "page_home_desk",
+      "name": "首页 · 电脑端",
+      "background": "#ffffff",
+      "device": "desktop",
+      "size": {
+        "width": 1440,
+        "height": 2400
+      },
+      "origin": {
+        "url": "https://example.com/",
+        "capturedAt": "2026-10-04T00:00:00.000Z"
+      },
+      "elements": [
+        {
+          "id": "el_nav_desk",
+          "type": "group",
+          "name": "导航栏",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 80,
+          "zIndex": 20,
+          "origin": {
+            "selector": "header > nav",
+            "tag": "nav",
+            "text": "产品 案例 联系我们"
+          },
+          "children": [
+            {
+              "id": "el_navbg_desk",
+              "type": "shape",
+              "name": "导航栏背景",
+              "x": 0,
+              "y": 0,
+              "width": 1440,
+              "height": 80,
+              "zIndex": 0,
+              "shape": "rect",
+              "fill": "#0f172a",
+              "stroke": null,
+              "origin": {
+                "selector": "header > nav",
+                "tag": "nav"
+              }
+            },
+            {
+              "id": "el_nav1_desk",
+              "type": "text",
+              "name": "导航：产品",
+              "x": 980,
+              "y": 26,
+              "width": 124,
+              "height": 28,
+              "zIndex": 1,
+              "text": "产品",
+              "font": null,
+              "fontSize": 20,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(1)",
+                "tag": "a",
+                "text": "产品"
+              }
+            },
+            {
+              "id": "el_nav2_desk",
+              "type": "text",
+              "name": "导航：案例",
+              "x": 1120,
+              "y": 26,
+              "width": 124,
+              "height": 28,
+              "zIndex": 2,
+              "text": "案例",
+              "font": null,
+              "fontSize": 20,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(2)",
+                "tag": "a",
+                "text": "案例"
+              }
+            },
+            {
+              "id": "el_nav3_desk",
+              "type": "text",
+              "name": "导航：联系我们",
+              "x": 1260,
+              "y": 26,
+              "width": 124,
+              "height": 28,
+              "zIndex": 3,
+              "text": "联系我们",
+              "font": null,
+              "fontSize": 20,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(3)",
+                "tag": "a",
+                "text": "联系我们"
+              }
+            }
+          ]
+        },
+        {
+          "id": "el_hero_desk",
+          "type": "image",
+          "name": "首屏大图",
+          "x": 0,
+          "y": 80,
+          "width": 1440,
+          "height": 720,
+          "zIndex": 1,
+          "asset": "asset_city01",
+          "fit": "cover",
+          "origin": {
+            "selector": "main > section.hero img",
+            "tag": "img"
+          }
+        },
+        {
+          "id": "el_title_desk",
+          "type": "text",
+          "name": "首屏标题",
+          "x": 120,
+          "y": 320,
+          "width": 900,
+          "height": 96,
+          "zIndex": 10,
+          "text": "把想法排成网页",
+          "font": null,
+          "fontSize": 72,
+          "fontWeight": 700,
+          "lineHeight": 1.3,
+          "align": "left",
+          "color": "#ffffff",
+          "origin": {
+            "selector": "main > section.hero h1",
+            "tag": "h1",
+            "text": "把想法排成网页"
+          }
+        },
+        {
+          "id": "el_sub_desk",
+          "type": "text",
+          "name": "首屏副标题",
+          "x": 120,
+          "y": 440,
+          "width": 800,
+          "height": 40,
+          "zIndex": 10,
+          "text": "电脑端 1440 宽，整页 2400 高，在 1440×900 的窗口里滚动浏览。",
+          "font": null,
+          "fontSize": 24,
+          "fontWeight": 400,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#e2e8f0",
+          "origin": {
+            "selector": "main > section.hero p",
+            "tag": "p"
+          }
+        },
+        {
+          "id": "el_card1_desk",
+          "type": "shape",
+          "name": "卡片 1",
+          "x": 120,
+          "y": 920,
+          "width": 560,
+          "height": 360,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#f1f5f9",
+          "stroke": null,
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_card1t_desk",
+          "type": "text",
+          "name": "卡片 1 标题",
+          "x": 160,
+          "y": 960,
+          "width": 480,
+          "height": 48,
+          "zIndex": 3,
+          "text": "第一部分",
+          "font": null,
+          "fontSize": 36,
+          "fontWeight": 700,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#0f172a"
+        },
+        {
+          "id": "el_card2_desk",
+          "type": "shape",
+          "name": "卡片 2",
+          "x": 760,
+          "y": 920,
+          "width": 560,
+          "height": 360,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#f1f5f9",
+          "stroke": null,
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_card2t_desk",
+          "type": "text",
+          "name": "卡片 2 标题",
+          "x": 800,
+          "y": 960,
+          "width": 480,
+          "height": 48,
+          "zIndex": 3,
+          "text": "第二部分",
+          "font": null,
+          "fontSize": 36,
+          "fontWeight": 700,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#0f172a"
+        },
+        {
+          "id": "el_logo_desk",
+          "type": "image",
+          "name": "标志",
+          "x": 120,
+          "y": 1400,
+          "width": 160,
+          "height": 160,
+          "zIndex": 2,
+          "asset": "asset_logo01",
+          "fit": "cover"
+        },
+        {
+          "id": "el_body_desk",
+          "type": "text",
+          "name": "正文",
+          "x": 320,
+          "y": 1400,
+          "width": 1000,
+          "height": 120,
+          "zIndex": 3,
+          "text": "这一段文字说明网页项目的页面可以比窗口长得多，导出图片时按整页高度一次截完。",
+          "font": null,
+          "fontSize": 24,
+          "fontWeight": 400,
+          "lineHeight": 1.6,
+          "align": "left",
+          "color": "#334155"
+        },
+        {
+          "id": "el_footer_desk",
+          "type": "shape",
+          "name": "页脚背景",
+          "x": 0,
+          "y": 2200,
+          "width": 1440,
+          "height": 200,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#0f172a",
+          "stroke": null,
+          "origin": {
+            "selector": "footer",
+            "tag": "footer"
+          }
+        },
+        {
+          "id": "el_foott_desk",
+          "type": "text",
+          "name": "页脚文字",
+          "x": 120,
+          "y": 2280,
+          "width": 800,
+          "height": 40,
+          "zIndex": 3,
+          "text": "© 示例网页 · 视觉工作台",
+          "font": null,
+          "fontSize": 20,
+          "fontWeight": 400,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#94a3b8"
+        }
+      ]
+    },
+    {
+      "id": "page_home_mob",
+      "name": "首页 · 手机端",
+      "background": "#ffffff",
+      "device": "mobile",
+      "size": {
+        "width": 390,
+        "height": 3000
+      },
+      "origin": {
+        "url": "https://example.com/",
+        "capturedAt": "2026-10-04T00:00:00.000Z"
+      },
+      "elements": [
+        {
+          "id": "el_nav_mob",
+          "type": "group",
+          "name": "导航栏",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 64,
+          "zIndex": 20,
+          "origin": {
+            "selector": "header > nav",
+            "tag": "nav",
+            "text": "产品 案例 联系我们"
+          },
+          "children": [
+            {
+              "id": "el_navbg_mob",
+              "type": "shape",
+              "name": "导航栏背景",
+              "x": 0,
+              "y": 0,
+              "width": 390,
+              "height": 64,
+              "zIndex": 0,
+              "shape": "rect",
+              "fill": "#0f172a",
+              "stroke": null,
+              "origin": {
+                "selector": "header > nav",
+                "tag": "nav"
+              }
+            },
+            {
+              "id": "el_nav1_mob",
+              "type": "text",
+              "name": "导航：产品",
+              "x": 50,
+              "y": 20.8,
+              "width": 84,
+              "height": 22,
+              "zIndex": 1,
+              "text": "产品",
+              "font": null,
+              "fontSize": 16,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(1)",
+                "tag": "a",
+                "text": "产品"
+              }
+            },
+            {
+              "id": "el_nav2_mob",
+              "type": "text",
+              "name": "导航：案例",
+              "x": 150,
+              "y": 20.8,
+              "width": 84,
+              "height": 22,
+              "zIndex": 2,
+              "text": "案例",
+              "font": null,
+              "fontSize": 16,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(2)",
+                "tag": "a",
+                "text": "案例"
+              }
+            },
+            {
+              "id": "el_nav3_mob",
+              "type": "text",
+              "name": "导航：联系我们",
+              "x": 250,
+              "y": 20.8,
+              "width": 84,
+              "height": 22,
+              "zIndex": 3,
+              "text": "联系我们",
+              "font": null,
+              "fontSize": 16,
+              "fontWeight": 400,
+              "lineHeight": 1.4,
+              "align": "left",
+              "color": "#ffffff",
+              "origin": {
+                "selector": "header > nav > a:nth-child(3)",
+                "tag": "a",
+                "text": "联系我们"
+              }
+            }
+          ]
+        },
+        {
+          "id": "el_hero_mob",
+          "type": "image",
+          "name": "首屏大图",
+          "x": 0,
+          "y": 64,
+          "width": 390,
+          "height": 520,
+          "zIndex": 1,
+          "asset": "asset_city01",
+          "fit": "cover",
+          "variantOf": "el_hero_desk"
+        },
+        {
+          "id": "el_title_mob",
+          "type": "text",
+          "name": "首屏标题",
+          "x": 24,
+          "y": 240,
+          "width": 342,
+          "height": 100,
+          "zIndex": 10,
+          "text": "把想法排成网页",
+          "font": null,
+          "fontSize": 40,
+          "fontWeight": 700,
+          "lineHeight": 1.25,
+          "align": "left",
+          "color": "#ffffff",
+          "variantOf": "el_title_desk"
+        },
+        {
+          "id": "el_sub_mob",
+          "type": "text",
+          "name": "首屏副标题",
+          "x": 24,
+          "y": 360,
+          "width": 342,
+          "height": 64,
+          "zIndex": 10,
+          "text": "手机端 390 宽，整页 3000 高。",
+          "font": null,
+          "fontSize": 18,
+          "fontWeight": 400,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#e2e8f0"
+        },
+        {
+          "id": "el_card1_mob",
+          "type": "shape",
+          "name": "卡片 1",
+          "x": 24,
+          "y": 640,
+          "width": 342,
+          "height": 300,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#f1f5f9",
+          "stroke": null,
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_card1t_mob",
+          "type": "text",
+          "name": "卡片 1 标题",
+          "x": 48,
+          "y": 672,
+          "width": 294,
+          "height": 40,
+          "zIndex": 3,
+          "text": "第一部分",
+          "font": null,
+          "fontSize": 28,
+          "fontWeight": 700,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#0f172a"
+        },
+        {
+          "id": "el_card2_mob",
+          "type": "shape",
+          "name": "卡片 2",
+          "x": 24,
+          "y": 980,
+          "width": 342,
+          "height": 300,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#f1f5f9",
+          "stroke": null,
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_card2t_mob",
+          "type": "text",
+          "name": "卡片 2 标题",
+          "x": 48,
+          "y": 1012,
+          "width": 294,
+          "height": 40,
+          "zIndex": 3,
+          "text": "第二部分",
+          "font": null,
+          "fontSize": 28,
+          "fontWeight": 700,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#0f172a"
+        },
+        {
+          "id": "el_logo_mob",
+          "type": "image",
+          "name": "标志",
+          "x": 24,
+          "y": 1340,
+          "width": 120,
+          "height": 120,
+          "zIndex": 2,
+          "asset": "asset_logo01",
+          "fit": "cover"
+        },
+        {
+          "id": "el_body_mob",
+          "type": "text",
+          "name": "正文",
+          "x": 24,
+          "y": 1500,
+          "width": 342,
+          "height": 180,
+          "zIndex": 3,
+          "text": "这一段文字说明网页项目的页面可以比窗口长得多，导出图片时按整页高度一次截完。",
+          "font": null,
+          "fontSize": 18,
+          "fontWeight": 400,
+          "lineHeight": 1.6,
+          "align": "left",
+          "color": "#334155"
+        },
+        {
+          "id": "el_footer_mob",
+          "type": "shape",
+          "name": "页脚背景",
+          "x": 0,
+          "y": 2800,
+          "width": 390,
+          "height": 200,
+          "zIndex": 2,
+          "shape": "rect",
+          "fill": "#0f172a",
+          "stroke": null
+        },
+        {
+          "id": "el_foott_mob",
+          "type": "text",
+          "name": "页脚文字",
+          "x": 24,
+          "y": 2880,
+          "width": 342,
+          "height": 32,
+          "zIndex": 3,
+          "text": "© 示例网页 · 视觉工作台",
+          "font": null,
+          "fontSize": 14,
+          "fontWeight": 400,
+          "lineHeight": 1.4,
+          "align": "left",
+          "color": "#94a3b8"
+        }
+      ]
+    }
+  ]
+}
