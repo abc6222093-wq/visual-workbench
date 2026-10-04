@@ -360,9 +360,12 @@ async function open(id, data) {
 
   S.focus = false;
   S.view = "editor";
+  // 文字框高度校正尽量赶在第一次画出编辑器之前（最多等 2.5 秒，字体慢时在后台继续），打开后画面不再跳一次
+  const correction = correctTextHeights(S.project.id).catch((e) => notice(e.message));
+  await Promise.race([correction, pause(2500)]);
+  if (S.project?.id !== id || S.view !== "editor") return;
   renderEditor();
   connectEvents(S.project.id);
-  correctTextHeights(S.project.id).catch((e) => notice(e.message));
   if(data.syncConflicts?.length) modal(`<h2>发现疑似同步冲突副本</h2><p class="g-sheet__note">这些文件可能是网盘留下的另一份修改，请先核对；工作台不会自动删除或合并。</p><ul>${data.syncConflicts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul><div class="g-sheet__actions">${gbtn("close","知道了")}</div>`);
 }
 function layers(items, depth = 0) {
@@ -459,18 +462,19 @@ async function mountTextMeasurer() {
 }
 function disposeTextMeasurer() { S.textMeasurer?.dispose(); S.textMeasurer = null; }
 // 打开项目：文字框高度和内容不一致（旧项目）时先自动存版，再按新规则校正一次
+// 尽量在编辑器画出来之前做完（open 里限时等待），字体慢时剩下的部分在后台继续
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function correctTextHeights(projectId) {
   const measurer = await mountTextMeasurer();
   const current = () => S.project?.id === projectId && S.textMeasurer === measurer && S.view === "editor";
   if (!current()) return;
   // 字体可能还在加载（慢机器上尤其）：等字体就绪，再连量两次结果一致才算数；用户正在拖动 / 打字 / 裁切时稍后再来
   await document.fonts.ready;
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   for (let attempt = 0; attempt < 40 && current() && (S.dragging || S.textEdit || S.crop || nudgePending || S.preview); attempt++) await pause(500);
   if (!current()) return;
   const first = fitTextHeights(clone(S.project), measurer.measure);
   if (!first.length) return;
-  await pause(250);
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
   await document.fonts.ready;
   if (!current()) return;
   const second = fitTextHeights(clone(S.project), measurer.measure);
@@ -485,6 +489,7 @@ async function correctTextHeights(projectId) {
   schedule();
   updateEditor();
   notice(`已按内容校正 ${applied.length} 个文字框的高度（退回前的内容已自动存了一版）`);
+  await flush(); // 赶在第一次画出编辑器之前存好，之后的第一下操作不会撞上这次保存
 }
 // 字体表变了（agent 加了字体）要重建测量器，然后再校正一遍
 function refitAfterFontChange() {

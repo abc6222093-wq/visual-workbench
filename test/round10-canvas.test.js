@@ -88,7 +88,7 @@ test('round10 crop: double-click crops on the canvas, one undo step, menu and in
 });
 
 test('round10 rotate handle stays reachable when the element touches both artboard edges',async t=>{
- const {page,errors}=await editor(t);await page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='已保存');
+ const {page,errors}=await editor(t);await page.waitForFunction(()=>parseFloat(document.querySelector('#artboard [data-element-id="el_stale"]').style.height)<300&&document.querySelector('#save-status')?.textContent==='已保存'); // 先等旧框校正完，否则它盖住右侧把手
  await page.locator('[data-action="select"][data-id="el_edge"]').click();const handle=page.locator('[data-rotate="el_edge"]');
  assert.equal(await handle.getAttribute('data-side'),'right');
  const board=await page.locator('#artboard').boundingBox(),h=await handle.boundingBox();
