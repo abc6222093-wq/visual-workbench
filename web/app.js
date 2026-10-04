@@ -2,7 +2,7 @@ import { copyElements, pasteElements, elementInPage, elementWithParents, selecta
 import { copyPages, pastePages, duplicatePages, deletePages, movePages, insertPage } from './page-operations.js';
 import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewPreference } from './page-views.js';
 import { showContextMenu, closeContextMenu } from './context-menu.js';
-import { snapMove, snapResize, snapTransformedResize, resizeFromPointer, snapPointerResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
+import { snapMove, snapResize, snapTransformedResize, resizeFromPointer, snapPointerResize, selectionBounds, alignElements, distributeElements, anchoredSize } from './layout-tools.js';
 import { appearanceControls } from './appearance-controls.js';
 import { createProjectManagement } from './project-management.js';
 import { createWorkbenchClose } from './workbench-close.js';
@@ -45,7 +45,11 @@ import {
   resizeGroup,
   resizeBounds,
   referenceText,
+  scaleStyle,
+  scaleElements,
 } from "./editor.js";
+// 选中元素时画布上方的快捷工具条（第 11 轮）
+import { quickToolbarHTML, quickToolbarKey } from "./quick-toolbar.js";
 // 实时连接（第 3 轮）：合并用户和 agent 的修改
 import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
@@ -334,7 +338,7 @@ function property() {
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
     `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
-  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${e.type === "text" ? `<label class="g-field" title="文字框高度由内容决定"><span>高度</span><input data-prop="height" type="number" value="${esc(e.height)}" readonly></label>` : field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${paragraphFields(e)}${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${fitField(e)}${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div><div class="ed-actions">${tbtn("crop-image", "裁切", "maximize")}${tbtn("replace-image", "替换图片", "imagePlus")}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}${e.shape === "rect" ? field("cornerRadius", "圆角", e.cornerRadius ?? 0) : ""}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
+  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${e.type === "text" ? `<label class="g-field" title="文字框高度由内容决定"><span>高度</span><input data-prop="height" type="number" value="${esc(e.height)}" readonly></label>` : field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${paragraphFields(e)}${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${fitField(e)}${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div><div class="ed-actions">${tbtn("crop-image", "裁切", "maximize")}${tbtn("replace-image", "替换图片", "imagePlus")}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}${e.shape === "rect" ? field("cornerRadius", "圆角", e.cornerRadius ?? 0) : ""}</div></section>` : ""}${S.selected.length > 1 || e.type === "group" ? `<section class="ed-section"><h3 class="ed-heading">整体缩放</h3><div class="ed-pair"><label class="g-field" title="输入 120 = 以选区中心放大到 120%"><span>整体缩放 %</span><input data-scale-selection type="number" step="5" min="1" value="100" aria-label="整体缩放百分比"></label></div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
 }
 // 段落：对齐、行高、字距（格式里一直有，第 9 轮补上属性栏入口）
 function choice(prop, label, value, options) {
@@ -614,13 +618,14 @@ function renderEditor() {
   // 保存状态：#save-status 只给读屏（文字照旧实时变化），看得见的标签去抖后才变，普通保存画面上没有任何变化
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${toolGridButton()}${toolTimelineButton()}${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${toolGridButton()}${toolTimelineButton()}${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="快捷设置" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
   );
   if (saveState === "busy") saveStatus(SAVE_TEXT.busy);
   $("#canvas-well").onpointerdown = (e) => { if (e.button === 0 && !e.target.closest("#artboard-holder")) { if (S.preview) return; startMarquee($("#artboard"), e); } };
   renderBoard();
   $(".ed-inspector__body")._key = null;
   refreshInspector();
+  refreshQuickToolbar();
   S.motionSig = null;
   refreshMotionStatus();
   refreshThumbnails();
@@ -639,7 +644,32 @@ function updateEditor() {
   refreshPageViews();
   refreshBoard();
   refreshInspector();
+  refreshQuickToolbar();
   scheduleMotionStatus();
+}
+// 快捷工具条：选择 / 类型 / 字体列表变了才重写内容，否则只同步各输入框的值（正在输入的框不动）；没选中元素时隐藏
+function refreshQuickToolbar() {
+  const bar = $(".ed-quickbar");
+  if (!bar || !S.project) return;
+  const elements = S.preview ? [] : rootSelection(page(), S.selected).map((id) => findElement(page(), id)?.element).filter(Boolean);
+  const context = { elements, fonts: S.project.fonts || [], selected: S.selected };
+  const html = quickToolbarHTML(context), key = quickToolbarKey(context);
+  const hide = !html;
+  if (bar.hidden !== hide) { bar.hidden = hide; queueMicrotask(() => syncGlass(app)); }
+  if (hide) { if (bar._key) { bar.replaceChildren(); bar._key = null; } return; }
+  if (bar._key !== key) { bar.innerHTML = html; bar._key = key; queueMicrotask(() => syncGlass(app)); return; }
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  const fresh = [...box.querySelectorAll("[data-qprop],[data-axis]")], live = [...bar.querySelectorAll("[data-qprop],[data-axis]")];
+  if (fresh.length !== live.length) { bar.innerHTML = html; return; }
+  fresh.forEach((node, i) => {
+    const field = live[i];
+    if (node.dataset.axis) { field.setAttribute("aria-pressed", node.getAttribute("aria-pressed")); return; }
+    if (field === document.activeElement) return;
+    if (field.tagName === "SELECT") { if (field.value !== node.value) field.value = node.value; return; }
+    if (field.defaultValue !== node.defaultValue) field.defaultValue = node.defaultValue;
+    if (field.value !== node.value) field.value = node.value;
+  });
 }
 function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
 function setHTML(node, html) { if (node && node._html !== html) { node.innerHTML = html; node._html = html; } }
@@ -780,8 +810,8 @@ function bindBoardPointer(holder) {
     const board = holder.querySelector('#artboard'); if (!board) return;
     const rotate = [...board.querySelectorAll('[data-rotate]')].find(h => { const b = h.getBoundingClientRect(); return e.clientX >= b.left - 3 && e.clientX <= b.right + 3 && e.clientY >= b.top - 3 && e.clientY <= b.bottom + 3; });
     if (rotate) { e.stopPropagation(); startRotate(rotate.dataset.rotate, e); return; }
-    const {id,resize}=pickElement(board,e);e.stopPropagation();
-    if(id)selectCanvas(id,e,resize);else startMarquee(board,e);
+    const {id,resize,enter}=pickElement(board,e);e.stopPropagation();
+    if(id)selectCanvas(id,e,resize,{enter});else startMarquee(board,e);
   }, {capture:true,signal:controller.signal});
 }
 // 保存状态：#save-status 的文字照旧实时变化（读屏、测试都读它）；
@@ -924,7 +954,8 @@ function pickElement(board, e) {
     const f = deep.id && findElement(page(),deep.id);
     const chain = f && [...f.ancestors.map(a=>a.id),deep.id];
     const at = chain?.indexOf(selectedGroup) ?? -1;
-    if(at>=0 && chain[at+1])return {...hit,id:chain[at+1]};
+    // 已选中分组时按在组内元素上：先照旧拿整组（拖动 = 整组移动），松手没拖动才进入分组选中这个元素（Canva 的做法）
+    if(at>=0 && chain[at+1])return {...hit,id:selectedGroup,enter:chain[at+1]};
   }
   // A selected child keeps being draggable inside its group until Escape.
   if(S.selected.includes(hit.id)) return hit;
@@ -947,7 +978,38 @@ function deltaInParents(dx, dy, ancestors) {
   }
   return [dx, dy];
 }
-function selectCanvas(id, event, resize) {
+const pickBox = ({ x, y, width, height }) => ({ x: Math.round(x), y: Math.round(y), width, height });
+// 按下到松开的位移不超过这个值（屏幕像素）算「单击」，不移动元素
+const CLICK_SLOP = 3;
+const CORNERS = ["nw", "ne", "se", "sw"];
+// 把元素（在页面坐标里）以 anchor 为基准整体缩放 factor 倍，写回 target；分组里的元素按父级的旋转 / 翻转换算位置
+function scaleInPlace(target, old, factor, anchor, ancestors = []) {
+  const global = elementWithParents(old, ancestors);
+  const [scaled] = scaleElements([global], factor, anchor);
+  const [lx, ly] = deltaInParents(scaled.x + scaled.width / 2 - (global.x + global.width / 2), scaled.y + scaled.height / 2 - (global.y + global.height / 2), ancestors);
+  const width = Math.max(0, Math.round(old.width * factor)), height = Math.max(0, Math.round(old.height * factor));
+  if (target.type === "group") resizeGroup(target, old, width, height, factor);
+  else { scaleStyle(target, old, factor); target.width = width; target.height = height; }
+  target.x = Math.round(old.x + old.width / 2 + lx - width / 2);
+  target.y = Math.round(old.y + old.height / 2 + ly - height / 2);
+}
+// 「整体缩放 %」：以选区中心为基准，把选中的元素（分组、多选、Ctrl+A 全选）一起放大缩小
+function scaleSelection(percent) {
+  finishNudge();
+  const factor = Number(percent) / 100;
+  const ids = rootSelection(page(), S.selected).filter((id) => editable(page(), id));
+  if (!ids.length || !Number.isFinite(factor) || factor <= 0 || factor === 1) return false;
+  const bounds = selectionBounds(ids.map((id) => elementInPage(page(), id)));
+  const anchor = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  for (const id of ids) {
+    const found = findElement(page(), id);
+    scaleInPlace(found.element, clone(found.element), factor, anchor, found.ancestors);
+    clearDocumentDraft(found.element);
+  }
+  changed({ boardOnly: true });
+  return true;
+}
+function selectCanvas(id, event, resize, { enter = null } = {}) {
   const editing = event.target?.closest?.('[data-element-id]');
   if (editing && isEditingTextNode(editing)) return;
   finishNudge();
@@ -955,6 +1017,8 @@ function selectCanvas(id, event, resize) {
     notice("这个元素或所在分组已锁定");
     return;
   }
+  // 已经是唯一选中的文字框时再单击一次（不拖动）= 在点到的位置进入编辑
+  const clickEdits = !event.shiftKey && !enter && S.selected.length === 1 && S.selected[0] === id && findElement(page(), id)?.element.type === "text";
   S.selected = event.shiftKey
     ? S.selected.includes(id)
       ? S.selected.filter((x) => x !== id)
@@ -970,11 +1034,34 @@ function selectCanvas(id, event, resize) {
   };
   event.preventDefault();
   S.dragging = true;
+  let started = !!resizing, moved = false; // 拉把手立即生效（细微调整也要吸附）；移动要超过 CLICK_SLOP 才开始，单击不会挪动元素
+  const corner = CORNERS.includes(resizing);
   const move = (e) => {
+    if (!started) {
+      if (Math.max(Math.abs(e.clientX - start.x), Math.abs(e.clientY - start.y)) <= CLICK_SLOP) return;
+      started = true;
+    }
+    if (e.clientX === start.x && e.clientY === start.y && !moved) return;
+    moved = true;
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
     let snappedDx=dx,snappedDy=dy;
     const bounds=selectionBounds(start.globalElements);
+    // 多选拖角：默认按比例整体缩放（以对角为基准，比例按宽度变化算）；按住 Shift 保持旧的各自拉伸
+    if (resizing && corner && ids.length > 1 && !e.shiftKey && bounds.width > 0) {
+      clearGuides();
+      const sx = resizing.includes("e") ? 1 : -1, sy = resizing.includes("s") ? 1 : -1;
+      const anchor = { x: sx > 0 ? bounds.x : bounds.x + bounds.width, y: sy > 0 ? bounds.y : bounds.y + bounds.height };
+      const factor = Math.max(0.02, (bounds.width + sx * dx) / bounds.width);
+      for (const { id, element: old, translate } of start.values) {
+        const found = findElement(page(), id), target = found?.element;
+        if (!target) continue;
+        scaleInPlace(target, old, factor, anchor, found.ancestors);
+        if (S.stepView) paintStepDragged(target, old, resizing, translate);
+        else paintDragged(target);
+      }
+      return;
+    }
     const references=allElements(page()).filter(e=>!ids.includes(e.id)&&!findElement(page(),e.id).ancestors.some(a=>ids.includes(a.id))&&!ids.some(id=>findElement(page(),id).ancestors.some(a=>a.id===e.id))).map(e=>elementInPage(page(),e.id));
     const hasParent=start.values.some(v=>findElement(page(),v.id)?.parent);
     if(!resizing) {
@@ -1002,13 +1089,31 @@ function selectCanvas(id, event, resize) {
           const snap=hasParent||old.rotation?snapTransformedResize({...options,project:element=>elementWithParents(element,found.ancestors)}):snapResize(options);
           bounds={x:snap.bounds.x,y:snap.bounds.y,width:snap.bounds.width,height:snap.bounds.height};paintGuides(snap);
         }
+        if (ids.length === 1 && corner && old.width > 0 && (target.type === "text" || (target.type === "group" && !e.shiftKey))) {
+          // 文字框拖角 / 分组拖角：连同字号、描边、投影、圆角等按宽度变化的比例一起缩放，对角固定
+          const factor = Math.max(0.02, bounds.width / old.width);
+          if (target.type === "group") {
+            const height = Math.max(0, Math.round(old.height * factor));
+            resizeGroup(target, old, bounds.width, height, factor);
+            Object.assign(target, pickBox(anchoredSize(old, resizing, bounds.width, height)));
+            fitPageTexts();
+          } else {
+            scaleStyle(target, old, factor);
+            target.width = bounds.width;
+            paintDragged(target);
+            const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`);
+            const height = node ? measureTextNode(node) : Math.round(old.height * factor);
+            Object.assign(target, pickBox(anchoredSize(old, resizing, bounds.width, height)));
+          }
+        } else {
         if (target.type === "group") resizeGroup(target, old, bounds.width, bounds.height);
         Object.assign(target, bounds);
-        if (target.type === "text") { // 文字框只改宽度，高度按内容量
+        if (target.type === "text") { // 文字框拖左右边只改宽度，文字重新换行，高度按内容量
           paintDragged(target);
           const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`);
           if (node) target.height = measureTextNode(node);
         } else if (target.type === "group") fitPageTexts();
+        }
       } else {
         target.x = Math.round(old.x + localX);
         target.y = Math.round(old.y + localY);
@@ -1022,9 +1127,15 @@ function selectCanvas(id, event, resize) {
     window.removeEventListener("pointerup", up);
     S.dragging = false;
     clearGuides();
-    if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) {
+    if (moved) {
       for (const { id } of start.values) clearDocumentDraft(findElement(page(), id).element);
       changed({ boardOnly: true });
+    } else if (enter && editable(page(), enter)) {
+      // 已选中分组时单击组内元素：进入分组，选中这个元素（Esc 回到分组）
+      S.selected = [enter];
+      refreshSelection();
+    } else if (clickEdits && !resizing && editText(id, { point: { clientX: e.clientX, clientY: e.clientY } })) {
+      // 已选中的文字框再单击：光标放在点到的位置
     } else refreshSelection();
     swapReadySnapshot();
   };
@@ -1085,7 +1196,7 @@ function startRotate(id, event) {
 // ---------- 画布上就地编辑文字 ----------
 // 双击文字 / 选中后按 Enter / 右键「编辑文字」/ 新建文字：在原节点上编辑，位置样式与平时一致。
 // 一次编辑会话一条撤销记录：第一次改动记一条，之后合并；大纲文档框随打字实时同步；结束后照常保存。
-function editText(id, { point = null, selectAll = false } = {}) {
+function editText(id, { point = null, selectAll = false, selectWord = false } = {}) {
   finishNudge();
   if (S.preview || S.view !== "editor") return false;
   const element = findElement(page(), id)?.element;
@@ -1095,6 +1206,7 @@ function editText(id, { point = null, selectAll = false } = {}) {
   S.textEdit?.finish();
   S.selected = [id];
   markSelection();
+  refreshQuickToolbar();
   node.querySelector(":scope > [data-rotate]")?.remove();
   let recorded = false;
   const apply = (text) => {
@@ -1111,7 +1223,7 @@ function editText(id, { point = null, selectAll = false } = {}) {
   };
   node.classList.add("is-text-editing");
   const session = startTextEdit(node, {
-    text: element.text, point, selectAll,
+    text: element.text, point, selectAll, selectWord,
     onInput: apply,
     onCommit: ({ text }) => {
       node.classList.remove("is-text-editing");
@@ -1740,9 +1852,9 @@ function nextPage(delta = 1) {
   else notice("已经是最后一页");
 }
 app.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-action]");
+  const b = e.target.closest("[data-action],[data-qaction]");
   if (!b) return;
-  const a = b.dataset.action,
+  const a = b.dataset.action || b.dataset.qaction,
     id = b.dataset.id;
   try {
     finishNudge();
@@ -1956,6 +2068,24 @@ app.addEventListener("click", async (e) => {
       case "clear-style":
         clearStyle(b.dataset.clear);
         break;
+      case "quick-flip": {
+        // 快捷工具条的翻转：选中的元素一起切换（全部已翻转时取消）
+        const elements = rootSelection(page(), S.selected).filter((x) => editable(page(), x)).map((x) => findElement(page(), x).element);
+        if (!elements.length) break;
+        const key = b.dataset.axis, value = !elements.every((el) => el[key] === true);
+        for (const el of elements) { el[key] = value; clearDocumentDraft(el); }
+        changed({ boardOnly: true });
+        break;
+      }
+      case "quick-style": {
+        // 描边 / 投影：展开属性栏并滚到对应的设置
+        if (S.inspectorCollapsed) { S.inspectorCollapsed = false; localStorage.setItem("vw-inspector-collapsed", "false"); refreshLayout(); }
+        if (S.tab !== "layers") { S.tab = "layers"; refreshInspector(); }
+        const field = $(`.ed-props [data-prop="${b.dataset.section}.color"]`);
+        const section = field?.closest(".ed-section");
+        if (section) { section.scrollIntoView({ block: "nearest", behavior: "smooth" }); section.classList.add("is-flash"); setTimeout(() => section.classList.remove("is-flash"), 900); field.focus({ preventScroll: true }); }
+        break;
+      }
       case "export":
         exportDialog();
         break;
@@ -2072,13 +2202,15 @@ function clearDocumentDraft(element) {
   for (const child of element.children || []) clearDocumentDraft(child);
 }
 function updateProp(input) {
-  const key = input.dataset.prop;
+  const key = input.dataset.prop || input.dataset.qprop; // data-qprop：快捷工具条里的同一类输入
   if (!S.selected.length) return;
   const [root, sub] = key.split(".");
   let value = input.value;
   if (input.type === "number") {
     value = Number(value);
     if (!Number.isFinite(value)) return;
+    if (input.dataset.percent) value = value / 100;
+    if (key === "opacity") value = Math.min(1, Math.max(0, Math.round(value * 100) / 100));
     if (["width", "height"].includes(key)) value = Math.max(0, value);
     if (key === "fontSize") value = Math.max(1, value);
     if (key === "fontWeight") value = Math.round(Math.min(900, Math.max(100, value)) / 100) * 100;
@@ -2121,7 +2253,7 @@ function updateProp(input) {
 // 颜色框拖动时画面实时跟着变（不记撤销）；松手（change）时才写进项目、记一条撤销
 function previewProp(input) {
   if (S.stepView) return; // 步骤视图里动效控制着 transform，松手后统一刷新
-  const key = input.dataset.prop, [root, sub] = key.split(".");
+  const key = input.dataset.prop || input.dataset.qprop, [root, sub] = key.split(".");
   for (const id of rootSelection(page(), S.selected)) {
     const element = findElement(page(), id)?.element;
     if (!element) continue;
@@ -2134,7 +2266,7 @@ function previewProp(input) {
 }
 app.addEventListener("input", (event) => {
   const input = event.target;
-  if (input.matches('input[type="color"][data-prop]')) return previewProp(input);
+  if (input.matches('input[type="color"][data-prop],input[type="color"][data-qprop]')) return previewProp(input);
   if (!input.matches('textarea[data-prop="text"]') || event.isComposing) return;
   const before=clone(page()); let different=false;
   mutateElements(page(),rootSelection(page(),S.selected),element=>{
@@ -2157,13 +2289,18 @@ app.addEventListener("change", (e) => {
     const id = e.target.dataset.check;
     e.target.checked ? S.checked.add(id) : S.checked.delete(id);
   }
-  if (e.target.matches("select[data-prop],input[data-prop],textarea[data-prop]"))
+  if (e.target.matches("select[data-prop],input[data-prop],textarea[data-prop],select[data-qprop],input[data-qprop]"))
     updateProp(e.target);
+  if (e.target.matches("input[data-scale-selection]")) {
+    const value = e.target.value;
+    e.target.value = "100";
+    scaleSelection(value);
+  }
 });
 app.addEventListener("focusout", (e) => {
   if (e.target === S.typingField) S.typingField = null;
   // 描边 / 投影 / 图片颜色只在真的改了值时（change）生效：元素没有描边时，框里显示的默认值不能因为失去焦点就被写进去
-  if (e.target.matches("textarea[data-prop],input[data-prop]") && !STYLE_TYPE[e.target.dataset.prop.split(".")[0]])
+  if (e.target.matches("textarea[data-prop],input[data-prop],input[data-qprop]") && !STYLE_TYPE[(e.target.dataset.prop || e.target.dataset.qprop).split(".")[0]])
     updateProp(e.target);
 });
 $("#file-picker").onchange = (e) => {
@@ -2286,10 +2423,11 @@ function elementAction(action) {
   else return;
   changed();
 }
-// 双击文字进入就地编辑：组里的文字也直接编辑（Canva 习惯）
+// 双击文字进入就地编辑并选中点到的词：组里的文字也直接编辑（Canva 习惯）；已在编辑中的双击同样选词
 app.addEventListener('dblclick',e=>{
   if(S.view!=='editor'||S.preview||e.button!==0||!e.target.closest('#artboard-holder'))return;
-  const node=e.target.closest('[data-element-id]');if(node&&isEditingTextNode(node))return;
+  const node=e.target.closest('[data-element-id]');
+  if(node&&isEditingTextNode(node)){if(S.textEdit?.active&&S.textEdit.host&&node.contains(S.textEdit.host)){e.preventDefault();S.textEdit.selectWordAt(e.clientX,e.clientY);}return;}
   const board=$('#artboard');if(!board)return;
   const deep=pickCanvasElement({board,page:page(),selected:[],screen:!!S.stepView,event:e});
   const hit=pickElement(board,e);
@@ -2297,7 +2435,7 @@ app.addEventListener('dblclick',e=>{
   const id=deepType==='text'||deepType==='image'?deep.id:hit.id;
   const type=id&&findElement(page(),id)?.element.type;
   if(type==='image'){if(cropImage(id))e.preventDefault();return;}
-  if(id&&editText(id,{point:{clientX:e.clientX,clientY:e.clientY}}))e.preventDefault();
+  if(id&&editText(id,{point:{clientX:e.clientX,clientY:e.clientY},selectWord:true}))e.preventDefault();
 });
 app.addEventListener('contextmenu',e=>{
   if(S.view!=='editor'||isTypingTarget(e.target)||!e.target.closest('#canvas-well'))return;
@@ -2443,6 +2581,7 @@ function patchInspector(body) {
 }
 function refreshSelection() {
   markSelection();
+  refreshQuickToolbar();
   if (S.tab === 'outline') S.outlineView?.refresh();
   else if (S.tab === 'layers') refreshInspector();
   refreshHistoryButtons();
