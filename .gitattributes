@@ -1,3 +1,7 @@
 launchers/*.command text eol=lf
 launchers/*.cmd text eol=crlf
 launchers/*.ps1 text eol=crlf
+desktop/*.ps1 text eol=crlf
+desktop/build/*.ico binary
+desktop/build/*.icns binary
+desktop/build/*.png binary
