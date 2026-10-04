@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { WINDOWS_TEST_FILES, windowsTestArgs, runWindowsTests } from '../scripts/test-windows.js';
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const expected = ['browser','config','data-dir','export-images','launcher','machine-config','platform','portable-export-name','project-management','shutdown','session','sync-conflicts','two-devices-server','version-gc','version-store','version','watch','windows-test-selection'].map(name => `test/${name}.test.js`);
+const expected = ['browser','config','data-dir','export-images','launcher','machine-config','platform','portable-export-name','project-management','round11-changes-handoff','round11-desktop-core','round11-desktop-icons','round11-handoff-route','shutdown','session','sync-conflicts','two-devices-server','version-gc','version-store','version','watch','windows-test-selection'].map(name => `test/${name}.test.js`);
 
 test('Windows selection is explicit, unique, real and includes browser/PNG/PDF integration', () => {
   assert.deepEqual(WINDOWS_TEST_FILES, expected);
