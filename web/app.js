@@ -19,6 +19,8 @@ import { measureTextNode, createTextMeasurer, fitTextHeights } from "./text-metr
 // 第 10 轮：画布上裁切图片、替换图片
 import { startCrop, isCropping } from "./crop-tool.js";
 import { pickImage } from "./image-picker.js";
+// 第 10 轮：旧 HTML 导入
+import { openImportDialog } from "./import-html.js";
 import { mountHomeSelection } from "./home-selection.js";
 import { renderPage, patchPage, updateElementNode } from "./render.js";
 import { patchPageItems } from "./page-items.js";
@@ -273,7 +275,7 @@ async function home() {
     `<div class="hm-cell" data-project-id="${esc(item.id)}"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[ ["project-rename","重命名"],["project-duplicate","复制项目"],["project-delete","删除项目"] ].map(([action,label])=>`<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
   shell(
     "home",
-    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
+    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="g-btn" data-action="import-html">导入旧 HTML</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
   // 总览的选择习惯与画布、页面区一致：Shift/Cmd 加选、拖框、点空白与 Esc 取消、右键菜单
@@ -1800,6 +1802,9 @@ app.addEventListener("click", async (e) => {
         break;
       case "new":
         newDialog();
+        break;
+      case "import-html":
+        openImportDialog({ api, modal, closeModal, notice, onCreated: () => { if (S.view === "home") home().catch(() => {}); }, onDone: (projectId) => open(projectId).catch((err) => notice(err.message)) });
         break;
       case "open":
         await open(id);
