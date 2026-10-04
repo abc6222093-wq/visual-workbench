@@ -1,5 +1,5 @@
 // 给 agent 的开场白：用户开新的 agent 对话时粘贴，说明代码在哪、规则在哪、要改哪个项目、动手前后要做什么。
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROJECT_LAYOUT } from './data-dir.js';
 import { SERIES_FILE } from './master.js';
@@ -53,6 +53,17 @@ export function agentBrief({ repoDir, dataDir, projectDir, project }) {
     if (series && Array.isArray(series.motions) && series.motions.length) {
       lines.push(`- 系列的动效代码在 ${seriesFile} 的 motions 里（按母版页面列出），排新页面时照着复用`);
     }
+  }
+
+  const importDir = join(projectDir, 'import');
+  if (existsSync(importDir) && statSync(importDir).isDirectory()) {
+    lines.push(
+      '',
+      '这是从旧 HTML 导入的项目：',
+      `- 原文件（导入时复制的，文件名不变）在 ${importDir}，导入说明见其中的 README.md`,
+      '- 每页的 notes 是「迁移说明」：原来的动画线索、哪些块被截成了图片（名字带「[截图]」）、缺失字体、分页方式',
+      '- 原来的动画没有搬过来：请按原 HTML 的动画意图，用新格式重写每页 motion（不要搬旧代码）；能改成可编辑元素的截图块可以重做',
+    );
   }
 
   lines.push(

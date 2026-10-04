@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>reveal</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.css">
+<script src="https://cdn.jsdelivr.net/npm/reveal.js/dist/reveal.js"></script>
+<style>
+html,body{margin:0;background:#ffffff}
+.reveal .slides section{width:960px;height:540px;position:relative;box-sizing:border-box;padding:40px;font-family:Georgia,serif;color:#222222}
+.reveal .slides section section{padding:40px}
+canvas{display:block;width:400px;height:200px}
+.fragment{opacity:0}.fragment.visible{opacity:1}
+</style></head><body>
+<div class="reveal"><div class="slides">
+<section><h2>Reveal 封面</h2><p class="fragment" data-fragment-index="1">逐步出现的一句</p></section>
+<section><section><h2>纵向一</h2><p>嵌套第一页</p></section><section><h2>纵向二</h2><canvas id="c" width="400" height="200"></canvas></section></section>
+<section><h2>结束页</h2></section>
+</div></div>
+<script>const c=document.getElementById('c').getContext('2d');c.fillStyle='#e11d48';c.fillRect(0,0,400,200);c.fillStyle='#fff';c.fillRect(50,50,100,100);</script>
+</body></html>

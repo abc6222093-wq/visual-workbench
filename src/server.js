@@ -18,6 +18,7 @@ import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief } from './brief.js';
 import { cleanupTrash, listTrash, deleteProject, restoreProject, purgeProject, duplicateProject } from './project-management.js';
+import { createImportJobs, IMPORT_MAX_BYTES } from './import-html/jobs.js';
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '../web');
 const REPO = resolve(WEB, '..');
@@ -55,7 +56,7 @@ function safe(root, ...parts) { const p = resolve(root, ...parts); if (p !== roo
 function readProject(dir) { const bytes = readFileSync(join(dir, 'project.json')); return { project:JSON.parse(bytes), revision:hash(bytes) }; }
 function atomic(file, bytes) { const tmp = join(dirname(file), `.project-${randomUUID()}.tmp`); try { writeFileSync(tmp, bytes, { flag:'wx' }); renameSync(tmp, file); } finally { rmSync(tmp, { force:true }); } }
 function saveProject(dir, project, selfWrite) { const check = validateProjectData(project, { projectDir:dir }); if (!check.ok) throw fail(400, 'Invalid project', check.errors); const bytes = Buffer.from(JSON.stringify(project, null, 2) + '\n'); selfWrite?.('project.json', bytes); atomic(join(dir, 'project.json'), bytes); return hash(bytes); }
-async function body(req) { let size=0, chunks=[]; for await (const c of req) { size+=c.length; if(size>25_000_000) throw fail(413,'Request too large'); chunks.push(c); } try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw fail(400,'Invalid JSON'); } }
+async function body(req, limit=25_000_000, tooLarge='Request too large') { let size=0, chunks=[]; for await (const c of req) { size+=c.length; if(size>limit) throw fail(413,tooLarge); chunks.push(c); } try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw fail(400,'Invalid JSON'); } }
 function checkRevision(value, current) { if (value !== current) throw fail(409, 'Project changed on disk', { revision:current }); }
 function projectPath(dataDir,id) {
   if (!ID.test(id)) throw fail(400,'Invalid project id');
@@ -133,7 +134,7 @@ const defaultReveal = revealFile;
 
 function originAllowed(req,port) { const host=req.headers.host||''; if(!new RegExp(`^(localhost|127\\.0\\.0\\.1|\\[::1\\])(?::${port})?$`).test(host)) return false; const origin=req.headers.origin; if(!origin) return true; try { const u=new URL(origin); return u.protocol==='http:' && u.host===host; } catch { return false; } }
 
-export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal, configSource="explicit", configHome, usageOptions={}, onShutdown } = {}) {
+export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal, configSource="explicit", configHome, usageOptions={}, onShutdown, importOptions={} } = {}) {
   if(!dataDir) throw new Error('dataDir is required');
   dataDir=resolve(dataDir); checkDataRoots(dataDir); initDataDir(dataDir);
   const usage = createUsageSession({dataDir,...usageOptions});
@@ -146,6 +147,8 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
   const assertUsage = () => {if(shuttingDown)throw fail(503,'工作台正在关闭');const status=usage.status();if(status.blocked)throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',status);};
   const checkedBody = async req => {const value=await body(req);assertUsage();checkDataRoots(dataDir);return value;};
   const selfWrite = id => (rel, bytes) => watcher.noteSelfWrite(id, rel, bytes);
+  // 旧 HTML 导入：后台任务，前端轮询进度
+  const imports = createImportJobs({ dataDir, ...importOptions });
   const masterList = () => readMasters(dataDir).filter(id => ID.test(id) && existsSync(join(dataDir,'projects',id,'project.json')));
   const server = http.createServer(async(req,res)=>{ try {
     if(!originAllowed(req,server.address()?.port || port)) throw fail(403,'Local origin required');
@@ -159,6 +162,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     if((url.pathname.startsWith('/api/')||url.pathname.startsWith('/data/'))&&usage.status().blocked) throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',usage.status());
     if(req.method==='POST'&&url.pathname==='/api/shutdown') { await checkedBody(req); shuttingDown=true; res.once('finish',()=>{const timer=setTimeout(()=>server.closeAllConnections?.(),3000);timer.unref();server.close(()=>{clearTimeout(timer);onShutdown?.();});}); json(res,200,{closed:true}); return; }
     if(req.method==='GET'&&url.pathname==='/api/trash') return json(res,200,listTrash(dataDir));
+    if(parts[0]==='api'&&parts[1]==='import-html'&&parts[2]==='jobs') { // 旧 HTML 导入：建任务 / 查进度 / 取消
+      if(parts.length===3&&req.method==='POST') {const b=await body(req,Math.ceil(IMPORT_MAX_BYTES*4/3)+1_000_000,'文件太大（合计超过 380 MB），请去掉不需要的素材后再导入');assertUsage();checkDataRoots(dataDir);return json(res,201,imports.create(b));}
+      if(parts.length===4&&req.method==='GET') return json(res,200,imports.get(parts[3]));
+      if(parts.length===5&&parts[4]==='cancel'&&req.method==='POST') {assertUsage();return json(res,200,imports.cancel(parts[3]));}
+    }
     if(parts[0]==='api'&&parts[1]==='trash'&&parts[2]) {
       if(parts.length===4&&parts[3]==='restore'&&req.method==='POST') {await checkedBody(req);const out=restoreProject(dataDir,parts[2]);return json(res,200,{...out,revision:readProject(projectPath(dataDir,out.project.id)).revision});}
       if(parts.length===3&&req.method==='DELETE') {await checkedBody(req);return json(res,200,purgeProject(dataDir,parts[2]));}
@@ -244,7 +252,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     throw fail(404,'Not found');
   } catch(e) { if(res.headersSent) return res.end(); json(res,e.status||500,{error:e.message, ...(e.details?{details:e.details}:{})}); } });
   const close=server.close.bind(server);
-  server.close=callback=>{ usage.close(); watcher.close(); for(const stream of streams) stream.end(); streams.clear(); server.closeIdleConnections?.(); return close(callback); };
+  server.close=callback=>{ usage.close(); watcher.close(); imports.close(); for(const stream of streams) stream.end(); streams.clear(); server.closeIdleConnections?.(); return close(callback); };
   return server;
 }
 
