@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 import { validateProject } from '../src/validate.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');

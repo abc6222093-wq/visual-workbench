@@ -264,17 +264,24 @@ test('listVersions 不包含 .objects', () => {
   });
 });
 
-test('存版跳过以 . 开头的文件和符号链接', () => {
+test('存版跳过以 . 开头的文件和符号链接', (t) => {
   withProject((dir) => {
     writeFileSync(join(dir, '.project-abc.tmp'), 'tmp');
     writeFileSync(join(dir, 'assets', '.DS_Store'), 'x');
-    symlinkSync(join(dir, 'assets', 'logo.png'), join(dir, 'assets', 'link.png'));
+    let linked = false;
+    try { symlinkSync(join(dir, 'assets', 'logo.png'), join(dir, 'assets', 'link.png')); linked = true; }
+    catch (error) {
+      if (process.platform !== 'win32' || error.code !== 'EPERM') throw error;
+      t.diagnostic('Windows 未授权创建符号链接；仅省略链接创建及链接专属断言，隐藏文件和存版断言继续执行');
+    }
     const { versionDir, meta } = saveVersion({ projectDir: dir });
     assert.ok(!meta.files.some((f) => f.split('/').some((p) => p.startsWith('.'))), `不应包含隐藏文件：${meta.files}`);
     assert.equal(existsSync(join(versionDir, '.project-abc.tmp')), false);
     assert.equal(existsSync(join(versionDir, 'assets', '.DS_Store')), false);
-    assert.ok(!meta.files.includes('assets/link.png'), '符号链接不应存进版本');
-    assert.equal(existsSync(join(versionDir, 'assets', 'link.png')), false);
+    if (linked) {
+      assert.ok(!meta.files.includes('assets/link.png'), '符号链接不应存进版本');
+      assert.equal(existsSync(join(versionDir, 'assets', 'link.png')), false);
+    }
     assert.deepEqual(meta.files, ['project.json', ...projectFiles(dir).filter((f) => f !== 'project.json')]);
     assert.deepEqual(Object.keys(meta.objects).sort(), [...meta.files].sort());
   });

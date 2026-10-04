@@ -42,7 +42,8 @@ function ensureFonts(project, options) {
     const key = `vw-font-${project.id}-${font.id}`;
     let style = document.getElementById(key);
     if (!style) { style = document.createElement('style'); style.id = key; document.head.append(style); }
-    style.textContent = `@font-face{font-family:${JSON.stringify(fontFaceName(project, font))};src:url(${JSON.stringify(fileUrl(options, font.file))});font-weight:${font.weight === 'variable' ? '100 900' : font.weight || 400};font-style:${font.style || 'normal'}}`;
+    const css = `@font-face{font-family:${JSON.stringify(fontFaceName(project, font))};src:url(${JSON.stringify(fileUrl(options, font.file))});font-weight:${font.weight === 'variable' ? '100 900' : font.weight || 400};font-style:${font.style || 'normal'}}`;
+    if (style.textContent !== css) style.textContent = css; // 内容没变不重写：免得字体重新解析、文字闪一下
   }
 }
 
@@ -152,7 +153,30 @@ function imageContent(node, element, src) {
   child.style.cssText = `width:100%;height:100%;display:block;object-fit:${fit}`;
 }
 
+// Keep persistent appearance below the outer node whose transform motion modules control.
+// Unflipped legacy nodes retain their DOM structure for existing integrations.
+const flipContents = new WeakMap();
+function appearanceContent(node, element) {
+  let content = flipContents.get(node);
+  if (!content && (element.flipX || element.flipY)) {
+    content = document.createElement('div');
+    content.dataset.vwFlip = '1';
+    content.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;transform-origin:center center';
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 1 && (child.hasAttribute('data-resize') || child.hasAttribute('data-rotate'))) continue;
+      content.append(child);
+    }
+    for (const key of ['background', 'border', 'boxSizing', 'borderRadius']) {
+      content.style[key] = node.style[key]; node.style[key] = '';
+    }
+    node.append(content); flipContents.set(node, content);
+  }
+  if (content) content.style.transform = `scale(${element.flipX ? -1 : 1}, ${element.flipY ? -1 : 1})`;
+  return content || node;
+}
+
 export function updateElementNode(node, element) {
+  const content = appearanceContent(node, element);
   node.style.position = 'absolute';
   node.style.left = px(element.x); node.style.top = px(element.y);
   node.style.width = px(element.width); node.style.height = px(element.height);
@@ -166,7 +190,7 @@ export function updateElementNode(node, element) {
   node.style.webkitMaskImage = node.style.maskImage;
   node.style.clipPath = clipPath(element.effects?.clip);
   if (element.type === 'text') { node.style.color = element.color || '#000000'; applyTextStyle(node, element); }
-  if (element.type === 'image' && imageSources.has(node)) imageContent(node, element, imageSources.get(node));
+  if (element.type === 'image' && imageSources.has(node)) imageContent(content, element, imageSources.get(node));
   if (element.type === 'shape') {
     if (element.shape === 'line' || element.shape === 'polygon') {
       const figure = node.querySelector('polygon,line');
@@ -175,29 +199,39 @@ export function updateElementNode(node, element) {
         figure.setAttribute('stroke', element.stroke?.color || 'none');
         figure.setAttribute('stroke-width', String(element.stroke?.width || 0));
       }
-    } else node.style.background = paint(element.fill);
+    } else content.style.background = paint(element.fill);
   }
   node.style.visibility = element.visible === false ? 'hidden' : 'visible';
   return node;
 }
 
+// 文字的排版属性（字体、字号、字重、行高、字距、对齐）：新建和原地更新共用
+function applyTextBase(node, project, element, fontMap) {
+  node.style.whiteSpace = 'pre-wrap';
+  node.style.overflowWrap = 'break-word';
+  node.style.fontFamily = fontMap.has(element.font) ? JSON.stringify(fontFaceName(project, fontMap.get(element.font))) : 'sans-serif';
+  node.style.fontSize = px(element.fontSize || 16);
+  node.style.fontWeight = String(element.fontWeight || 400);
+  node.style.lineHeight = String(element.lineHeight || 1.4);
+  node.style.letterSpacing = px(element.letterSpacing || 0);
+  node.style.textAlign = element.align || 'left';
+}
+
+// 元素节点 → 当前的元素数据（原地更新后换成新对象；交互回调从这里读，不捕获旧对象）
+const elementData = new WeakMap();
+export function elementOfNode(node) { return elementData.get(node); }
+
 function renderElement(project, element, options, fontMap, assetMap) {
   const node = document.createElement('div');
   node.dataset.elementId = element.id;
   node.dataset.elementType = element.type;
+  elementData.set(node, element);
   if (element.type === 'text') {
     node.textContent = element.text;
-    node.style.whiteSpace = 'pre-wrap';
-    node.style.overflowWrap = 'break-word';
-    node.style.fontFamily = fontMap.has(element.font) ? JSON.stringify(fontFaceName(project, fontMap.get(element.font))) : 'sans-serif';
-    node.style.fontSize = px(element.fontSize || 16);
-    node.style.fontWeight = String(element.fontWeight || 400);
-    node.style.lineHeight = String(element.lineHeight || 1.4);
-    node.style.letterSpacing = px(element.letterSpacing || 0);
-    node.style.textAlign = element.align || 'left';
+    applyTextBase(node, project, element, fontMap);
   } else if (element.type === 'image') {
     imageSources.set(node, fileUrl(options, assetMap.get(element.asset)?.file || ''));
-  } else if (element.type === 'shape') shapeContent(node, element);
+  } else if (element.type === 'shape') { shapeContent(node, element); shapeKeys.set(node, shapeKey(element)); }
   else if (element.type === 'group') {
     for (const child of [...element.children].sort((a, b) => a.zIndex - b.zIndex)) node.append(renderElement(project, child, options, fontMap, assetMap));
   }
@@ -206,12 +240,100 @@ function renderElement(project, element, options, fontMap, assetMap) {
     node.style.cursor = element.locked ? 'default' : 'pointer';
     if (options.selectedIds?.includes(element.id)) node.style.outline = '2px solid #38bdf8';
     node.addEventListener('pointerdown', event => {
-      if (element.locked) return;
+      const current = elementData.get(node) || element;
+      if (current.locked) return;
       event.stopPropagation();
-      options.onSelect?.(element.id, event);
+      options.onSelect?.(current.id, event);
     });
   }
   return node;
+}
+
+// ---------- 原地更新（编辑器、缩略图用）：按 data-element-id 复用已有节点，图片地址不变就不碰 <img> ----------
+const shapeKeys = new WeakMap();
+const svgShape = element => element.shape === 'line' || element.shape === 'polygon';
+function shapeKey(element) { return svgShape(element) ? JSON.stringify([element.shape, element.points, element.fill, element.stroke]) : element.shape; }
+const isElementNode = node => node.nodeType === 1 && node.dataset.elementId !== undefined;
+
+function patchElement(node, project, element, options, fontMap, assetMap) {
+  elementData.set(node, element);
+  const content = flipContents.get(node) || node;
+  if (element.type === 'text') {
+    // 只换文字节点：缩放把手（span[data-resize]）等其他子节点留着
+    const texts = [...content.childNodes].filter(child => child.nodeType === 3);
+    if (texts.length !== 1 || texts[0].data !== element.text) {
+      texts.forEach(child => child.remove());
+      if (element.text) content.prepend(document.createTextNode(element.text));
+    }
+    applyTextBase(node, project, element, fontMap);
+  } else if (element.type === 'image') {
+    const src = fileUrl(options, assetMap.get(element.asset)?.file || '');
+    if (imageSources.get(node) !== src) {
+      imageSources.set(node, src);
+      const img = content.querySelector(':scope > img');
+      if (img) img.src = src;
+    }
+  } else if (element.type === 'shape') {
+    const key = shapeKey(element);
+    if (shapeKeys.get(node) !== key) {
+      shapeKeys.set(node, key);
+      if (svgShape(element)) {
+        const holder = document.createElement('div');
+        shapeContent(holder, element);
+        content.querySelector(':scope > svg')?.remove();
+        content.prepend(holder.firstChild);
+      }
+    }
+    if (!svgShape(element)) {
+      content.style.border = element.stroke ? `${element.stroke.width}px solid ${element.stroke.color}` : 'none';
+      content.style.boxSizing = 'border-box';
+      content.style.borderRadius = element.shape === 'ellipse' ? '50%' : px(element.cornerRadius || 0);
+    }
+  } else if (element.type === 'group') patchChildren(content, project, element.children, options, fontMap, assetMap);
+  updateElementNode(node, element);
+  if (options.interactive) node.style.cursor = element.locked ? 'default' : 'pointer';
+  return node;
+}
+
+// 键控协调一层子元素：复用、更新、增删，只在顺序变了时挪动；容器里不是元素的节点（缩放把手、参考线等）不动
+function patchChildren(container, project, elements, options, fontMap, assetMap) {
+  const existing = new Map();
+  for (const child of container.children) if (isElementNode(child)) existing.set(child.dataset.elementId, child);
+  const desired = [];
+  for (const element of [...elements].sort((a, b) => a.zIndex - b.zIndex)) {
+    let node = existing.get(element.id);
+    existing.delete(element.id);
+    const same = node && node.dataset.elementType === element.type
+      && (element.type !== 'shape' || svgShape(element) === !!(flipContents.get(node) || node).querySelector(':scope > svg'));
+    if (same) patchElement(node, project, element, options, fontMap, assetMap);
+    else { node?.remove(); node = renderElement(project, element, options, fontMap, assetMap); }
+    desired.push(node);
+  }
+  for (const node of existing.values()) node.remove();
+  const kept = [...container.children].filter(isElementNode);
+  let ref = kept.length ? kept.at(-1).nextSibling : [...container.children].find(child => (child.hasAttribute('data-resize') || child.hasAttribute('data-rotate'))) || null;
+  for (let i = desired.length - 1; i >= 0; i--) {
+    const node = desired[i];
+    if (node.parentNode !== container || node.nextSibling !== ref) container.insertBefore(node, ref);
+    ref = node;
+  }
+}
+
+/**
+ * 在已有的画板根节点上原地更新成 page 的样子（编辑器、缩略图用；导出、放映、动效检查照旧用 renderPage）。
+ * options 与 renderPage 相同；options.pageId === false 时根节点不带 data-page-id（缩略图）。
+ */
+export function patchPage(root, project, page, options = {}) {
+  ensureFonts(project, options);
+  if (options.pageId === false) root.removeAttribute('data-page-id');
+  else root.dataset.pageId = page.id;
+  root.style.width = px(project.artboard.width);
+  root.style.height = px(project.artboard.height);
+  root.style.background = paint(page.background);
+  const fonts = new Map((project.fonts || []).map(font => [font.id, font]));
+  const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
+  patchChildren(root, project, page.elements, options, fonts, assets);
+  return root;
 }
 
 export function renderPage(project, page, options = {}) {

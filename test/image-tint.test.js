@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { validateProjectData, ERROR_CODES } from '../src/validate.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 import { launchBrowser } from '../src/browser.js';
 import { exportHtml } from '../src/export/html.js';
 import { exportImages } from '../src/export/images.js';

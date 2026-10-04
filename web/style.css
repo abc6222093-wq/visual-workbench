@@ -199,3 +199,38 @@ button:disabled {
 .hm-cell > .hm-master.is-on {
   opacity: 1;
 }
+/* Round 8 uses existing glass controls and keeps the canvas's neutral surface. */
+.ed-page-grid {flex:1;min-height:0;overflow:auto}
+.ed-grid.is-page-grid #canvas-well,.ed-grid.is-page-grid .ed-foot {display:none}
+.ed-page-timeline {flex:none;max-height:190px;border-top:1px solid rgba(80,70,100,.12)}
+.ed-grid.is-page-timeline .ed-pages > :not([data-action="toggle-pages"]) {display:none}
+.ed-grid.is-page-timeline #canvas-well {min-height:140px}
+.ed-col-head {flex-wrap:wrap}
+.ed-marquee {position:absolute;border:1px solid #38bdf8;background:rgba(56,189,248,.12);pointer-events:none;z-index:10000}
+.ed-guide {position:absolute;pointer-events:none;z-index:9998;border-color:#d673ba;border-style:solid;border-width:0}
+.ed-guide[data-axis=x] {border-left-width:1px}
+.ed-guide[data-axis=y] {border-top-width:1px}
+.ed-gap {position:absolute;pointer-events:none;z-index:9999;background:var(--g-paper,#fff);color:var(--g-ink-2,#555);border-radius:8px;padding:2px 6px;font-size:13px}
+.appearance-controls {display:flex;flex-wrap:wrap;gap:8px;padding:12px 0}
+.appearance-controls label {width:100%}
+.appearance-controls input {width:100%}
+.ed-align {display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.hm-project-actions {display:flex;flex-wrap:wrap;gap:4px;padding:4px 0}
+.hm-project-actions .g-btn {font-size:11px;padding:6px 8px}
+.ed-motion-status {flex:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.ed-motion-detail {flex-basis:100%;min-width:0;overflow-wrap:anywhere}
+html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
+.ed-tools {flex-wrap:wrap;justify-content:flex-end;min-width:0}
+/* 保存状态（第 9 轮）：#save-status 只给读屏，看得见的是旁边去抖后的标签 */
+.vw-sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.ed-save {position:relative}
+
+/* 第 9 轮：画布悬停细描边（锁定元素不显示；选中元素的内联描边优先） */
+#artboard > [data-element-id]:not([data-vw-locked]):hover { outline: 1.5px solid rgba(56, 189, 248, 0.55); }
+#artboard [data-element-id].is-drop-target { outline: 3px dashed #38bdf8 !important; outline-offset: -3px; }
+#artboard [data-element-id].is-text-editing { outline: 2px solid #38bdf8; }
+#artboard [data-element-id].is-text-editing:focus-within { cursor: text; }
+/* 旋转把手：尺寸由脚本按画板缩放补偿 */
+.rotate-handle { position: absolute; left: 50%; transform: translateX(-50%); box-sizing: border-box; border-radius: 50%; background: #fff; color: #5b5470; display: grid; place-items: center; cursor: grab; box-shadow: 0 0 0 1.5px rgba(120, 110, 145, 0.55), 0 2px 6px rgba(20, 20, 30, 0.35); z-index: 1; }
+.rotate-handle svg { width: 62%; height: 62%; pointer-events: none; }
+.rotate-handle:active { cursor: grabbing; }

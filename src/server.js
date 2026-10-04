@@ -17,6 +17,7 @@ import { copyPages } from './copy-pages.js';
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief } from './brief.js';
+import { cleanupTrash, listTrash, deleteProject, restoreProject, purgeProject, duplicateProject } from './project-management.js';
 
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '../web');
 const REPO = resolve(WEB, '..');
@@ -132,26 +133,36 @@ const defaultReveal = revealFile;
 
 function originAllowed(req,port) { const host=req.headers.host||''; if(!new RegExp(`^(localhost|127\\.0\\.0\\.1|\\[::1\\])(?::${port})?$`).test(host)) return false; const origin=req.headers.origin; if(!origin) return true; try { const u=new URL(origin); return u.protocol==='http:' && u.host===host; } catch { return false; } }
 
-export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal, configSource="explicit", configHome, usageOptions={} } = {}) {
+export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal, configSource="explicit", configHome, usageOptions={}, onShutdown } = {}) {
   if(!dataDir) throw new Error('dataDir is required');
   dataDir=resolve(dataDir); checkDataRoots(dataDir); initDataDir(dataDir);
   const usage = createUsageSession({dataDir,...usageOptions});
+  let trashCleaned=false;
+  try {if(!usage.status().blocked){cleanupTrash(dataDir);trashCleaned=true;}}catch(e){usage.close();throw e;}
   // 实时连接：监听项目文件夹，文件被工作台以外的程序（agent）改动时推送给开着的界面
   const watcher = createProjectWatcher({ projectsDir:join(dataDir,'projects'), agentIdleMs, pollMs:watchPollMs });
   const streams = new Set();
-  const assertUsage = () => {const status=usage.status();if(status.blocked)throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',status);};
-  const checkedBody = async req => {const value=await body(req);assertUsage();return value;};
+  let shuttingDown=false;
+  const assertUsage = () => {if(shuttingDown)throw fail(503,'工作台正在关闭');const status=usage.status();if(status.blocked)throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',status);};
+  const checkedBody = async req => {const value=await body(req);assertUsage();checkDataRoots(dataDir);return value;};
   const selfWrite = id => (rel, bytes) => watcher.noteSelfWrite(id, rel, bytes);
   const masterList = () => readMasters(dataDir).filter(id => ID.test(id) && existsSync(join(dataDir,'projects',id,'project.json')));
   const server = http.createServer(async(req,res)=>{ try {
     if(!originAllowed(req,server.address()?.port || port)) throw fail(403,'Local origin required');
     checkDataRoots(dataDir);
+    if(shuttingDown)throw fail(503,'工作台正在关闭');
     const url=new URL(req.url,'http://localhost'); const parts=url.pathname.split('/').filter(Boolean);
     if(req.method==='GET'&&url.pathname==='/api/health') return json(res,200,{app:'visual-workbench',protocol:1,repoDir:REPO,pid:process.pid,fingerprint:CODE_FINGERPRINT});
     if(req.method==='GET'&&url.pathname==='/api/session') return json(res,200,usage.status());
-    if(req.method==='POST'&&url.pathname==='/api/session/confirm') {const b=await body(req);if(!Array.isArray(b.tokens)||!b.tokens.every(t=>typeof t==='string'))throw fail(400,'请先查看正在使用的电脑，再确认继续');return json(res,200,usage.confirm(b.tokens));}
+    if(req.method==='POST'&&url.pathname==='/api/session/confirm') {const b=await body(req);if(!Array.isArray(b.tokens)||!b.tokens.every(t=>typeof t==='string'))throw fail(400,'请先查看正在使用的电脑，再确认继续');const status=usage.confirm(b.tokens);if(!status.blocked&&!trashCleaned){cleanupTrash(dataDir);trashCleaned=true;}return json(res,200,status);}
     if(req.method==='GET'&&url.pathname==='/api/settings') return json(res,200,{dataDir,source:configSource,localConfigPath:getLocalConfigPath({home:configHome}),platform:process.platform,revealLabel:process.platform==='win32'?'在资源管理器中显示':process.platform==='darwin'?'在访达中显示':'在文件管理器中显示'});
     if((url.pathname.startsWith('/api/')||url.pathname.startsWith('/data/'))&&usage.status().blocked) throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',usage.status());
+    if(req.method==='POST'&&url.pathname==='/api/shutdown') { await checkedBody(req); shuttingDown=true; res.once('finish',()=>{const timer=setTimeout(()=>server.closeAllConnections?.(),3000);timer.unref();server.close(()=>{clearTimeout(timer);onShutdown?.();});}); json(res,200,{closed:true}); return; }
+    if(req.method==='GET'&&url.pathname==='/api/trash') return json(res,200,listTrash(dataDir));
+    if(parts[0]==='api'&&parts[1]==='trash'&&parts[2]) {
+      if(parts.length===4&&parts[3]==='restore'&&req.method==='POST') {await checkedBody(req);const out=restoreProject(dataDir,parts[2]);return json(res,200,{...out,revision:readProject(projectPath(dataDir,out.project.id)).revision});}
+      if(parts.length===3&&req.method==='DELETE') {await checkedBody(req);return json(res,200,purgeProject(dataDir,parts[2]));}
+    }
     if(req.method==='PUT'&&url.pathname==='/api/settings') {const b=await checkedBody(req);try {saveLocalConfig(b.dataDir,{home:configHome});}catch(e){throw fail(400,e.message);}return json(res,200,{saved:true,dataDir,source:configSource,pendingDataDir:b.dataDir,message:'本机设置已保存。关闭工作台后重新双击启动生效；命令行和环境变量仍优先于本机设置。'});}
     if(req.method==='GET'&&url.pathname==='/api/projects') { const masters=new Set(masterList()); return json(res,200,listProjects(dataDir).map(id=>{ const project=readProject(projectPath(dataDir,id)).project; return {id,name:project.name,updatedAt:project.updatedAt,master:masters.has(id),project}; })); }
     if(req.method==='POST'&&url.pathname==='/api/projects') { const b=await checkedBody(req); if(typeof b.name!=='string'||!b.name.trim()) throw fail(400,'Name required'); const id=String(b.id||`project-${randomUUID().slice(0,8)}`); if(!ID.test(id)) throw fail(400,'Invalid project id'); const dir=safe(join(dataDir,'projects'),id); if(existsSync(dir)) throw fail(409,'Project already exists');
@@ -162,6 +173,14 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       }
       const preset=b.preset||'slide-16x9'; if(!PRESETS[preset]) throw fail(400,'Invalid preset'); const [dw,dh]=PRESETS[preset], width=b.width??dw,height=b.height??dh; dims({width,height}); mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString(); const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),createdAt:now,updatedAt:now,artboard:{preset,width,height},assets:[],fonts:[],pages:[blankPage('#ffffff')]}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
     if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]) { const id=parts[2],dir=projectPath(dataDir,id);
+      if(parts.length===3&&req.method==='DELETE') {
+        // A normalized /versions/.. request has no body and must keep the old 404.
+        // UI project deletion always sends an explicit JSON confirmation request.
+        if(!req.headers['transfer-encoding'] && !(Number(req.headers['content-length'])>0))throw fail(404,'未找到删除请求，请从项目菜单确认删除');
+        await checkedBody(req);return json(res,200,deleteProject(dataDir,id));
+      }
+      if(parts.length===3&&req.method==='PATCH') {const b=await checkedBody(req);if(typeof b.name!=='string'||!b.name.trim())throw fail(400,'请输入项目名称');const old=readProject(projectPath(dataDir,id));if(b.revision!==undefined)checkRevision(b.revision,old.revision);const project={...old.project,name:b.name.trim(),updatedAt:new Date().toISOString()};const revision=saveProject(dir,project,selfWrite(id));return json(res,200,{project,revision});}
+      if(parts.length===4&&parts[3]==='duplicate'&&req.method==='POST') {const b=await checkedBody(req);const out=duplicateProject(dataDir,id,b);return json(res,201,{...out,revision:readProject(projectPath(dataDir,out.project.id)).revision});}
       if(parts.length===3&&req.method==='GET') return json(res,200,{...readProject(dir),syncConflicts:detectSyncConflicts(dir)});
       if(parts.length===3&&req.method==='PUT') { const b=await checkedBody(req),old=readProject(dir); checkRevision(b.revision,old.revision); if(!b.project||b.project.id!==id||b.project.createdAt!==old.project.createdAt) throw fail(400,'Invalid project identity'); const project={...b.project,updatedAt:new Date().toISOString()}; const revision=saveProject(dir,project,selfWrite(id)); return json(res,200,{project,revision}); }
       if(parts[3]==='events'&&parts.length===4&&req.method==='GET') { // 推送：文件变化 + agent 状态（Server-Sent Events）
@@ -242,7 +261,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     }
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('端口必须是 1–65535 的整数');
     const { dataDir, source } = loadConfig();
-    const server = createServer({ dataDir, port, configSource:source });
+    const server = createServer({ dataDir, port, configSource:source, onShutdown:()=>process.exit(0) });
     server.on('error', error => {
       console.error(error.code === 'EADDRINUSE' ? `端口 ${port} 已被占用。请用 --port 指定其他端口。` : `工作台启动失败：${error.message}`);
       server.close();

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 async function fixture(t) {
   const dir=mkdtempSync(join(tmpdir(),'vw-server-')); const server=createServer({dataDir:dir,port:4173});

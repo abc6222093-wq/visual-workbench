@@ -48,6 +48,8 @@ export function createHistory(initial, limit = 60) {
     undo() { if (!past.length) return current; future.push(clone(current)); current = past.pop(); return clone(current); },
     redo() { if (!future.length) return current; past.push(clone(current)); current = future.pop(); return clone(current); },
     replace(next) { current = clone(next); past = []; future = []; },
+    // 连续输入（同一次文字编辑）合并进上一条记录：只更新当前值，不新增撤销步骤
+    amend(next) { current = clone(next); future = []; },
     get canUndo() { return past.length > 0; }, get canRedo() { return future.length > 0; }
   };
 }

@@ -149,6 +149,8 @@
         "height": { "type": "number", "minimum": 0 },
         "rotation": { "type": "number", "minimum": -360, "maximum": 360, "default": 0, "description": "顺时针角度，绕元素中心" },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "flipX": { "type": "boolean", "default": false },
+        "flipY": { "type": "boolean", "default": false },
         "zIndex": { "type": "integer", "description": "层级，大的在上" },
         "locked": { "type": "boolean", "default": false },
         "effects": { "$ref": "#/$defs/effects" }

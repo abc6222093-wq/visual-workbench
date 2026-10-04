@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createServer} from '../src/server.js';
+import {createServer} from './helpers/isolated-server.js';
 import {createOutline,addRow} from '../web/outline-model.js';
 test('extract and apply back up; stale and invalid requests leave disk unchanged; restore includes outline',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'vw-outline-')),server=createServer({dataDir:dir,port:4173});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});const base=`http://127.0.0.1:${server.address().port}`;

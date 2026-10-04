@@ -1,0 +1,17 @@
+.page-view--timeline{display:flex;gap:12px;overflow-x:auto;padding:12px;align-items:flex-start;min-height:160px}.page-view--timeline .ed-page{flex:0 0 190px}.page-view--grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:24px;padding:28px;overflow:auto;align-content:start;height:100%}.page-view--grid .ed-page{position:relative;padding:10px;border-radius:16px}.page-view--grid .ed-page__open,.page-view--timeline .ed-page__open{display:flex;flex-direction:column;gap:10px;width:100%}.page-view--grid .ed-page__thumb{width:100%;height:160px}.page-view--timeline .ed-page__thumb{width:100%;height:108px}.page-view .ed-page.is-selected{outline:2px solid var(--accent,#6294ef);outline-offset:2px;background:rgba(110,150,230,.12)}.page-view--grid .ed-page__check,.page-view--timeline .ed-page__check{position:absolute;z-index:2;margin:6px}.page-view--timeline .ed-page{position:relative}.g-context-menu{display:flex;flex-direction:column;gap:3px;min-width:180px;padding:8px;border:1px solid rgba(255,255,255,.4);border-radius:14px;background:var(--panel-bg,rgba(244,245,249,.95));backdrop-filter:blur(24px);box-shadow:0 12px 44px #0003}.g-context-menu__item{text-align:left;justify-content:flex-start;width:100%;border-radius:8px}.g-context-menu hr{width:100%;border:0;border-top:1px solid #8883;margin:4px 0}.g-context-menu__item:focus-visible{outline:2px solid var(--accent,#6294ef)}
+
+/* Static previews cannot capture clicks, focus, selection or native drags. */
+.page-view .ed-page__thumb{pointer-events:none;user-select:none}
+
+/* Round 9: pointer sorting and marquee. The view root fills its scroller so blank space is clickable. */
+.page-view{position:relative;user-select:none;-webkit-user-select:none}
+.page-list:has(> .page-view){display:flex;flex-direction:column}.page-list > .page-view{flex:1 0 auto;min-width:0;padding-bottom:32px}
+.page-view--grid{min-height:100%;box-sizing:border-box}
+.page-view--timeline{min-width:100%;box-sizing:border-box}
+.page-view .ed-page{transition:transform .2s cubic-bezier(.2,.7,.3,1),opacity .15s ease}
+.page-view.is-dropping .ed-page{transition:none}
+.page-view .ed-page.is-drag-source{opacity:.4}
+.page-view.is-page-dragging,.page-view.is-page-dragging .ed-page__open{cursor:grabbing}
+.page-drop-line{position:absolute;z-index:6;pointer-events:none;border-radius:3px;background:var(--g-blue,#4f8ff7);box-shadow:0 0 0 3px rgba(var(--g-blue-rgb,143,193,255),.35)}
+.page-marquee{position:absolute;z-index:6;pointer-events:none;border:1px solid var(--g-blue,#4f8ff7);border-radius:4px;background:rgba(var(--g-blue-rgb,143,193,255),.16)}
+.page-drag-badge{position:fixed;z-index:10001;pointer-events:none;padding:4px 10px;border:1px solid rgba(255,255,255,.7);border-radius:999px;background:var(--g-raised,rgba(255,255,255,.58));backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 6px 18px rgba(60,52,92,.22);color:var(--g-ink,#1f1d26);font:600 12px/1.4 var(--g-font,system-ui);white-space:nowrap}

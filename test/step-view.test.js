@@ -6,7 +6,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 // 第 1 页两步：开头藏起副标题和第三条要点；第 1 步副标题出现、标题往右移 100；第 2 步标题往下移 50、第三条要点出现
 const SOURCE = `export default ctx => {
@@ -113,11 +113,14 @@ test('步骤视图：拖动改元素自己的 x，松手后仍停在这一步、
   const box = await page.locator('#artboard [data-element-id="el_title1"]').boundingBox();
   const from = { x: box.x + 30, y: box.y + box.height / 2 };
   const saved = page.waitForResponse(r => r.request().method() === 'PUT' && r.ok());
+  // Keep the original movement assertions independent of the new snapping feature.
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= 10; i++) await page.mouse.move(from.x + 20 * i, from.y);
   const during = await look(page, 'el_title1');
   await page.mouse.up();
+  await page.keyboard.up("Alt");
   await saved;
   assert.notEqual(during.translate, '', '拖动中节点跟着指针动');
   assert.equal(during.tx, 100, '拖动中动效的位移还在');

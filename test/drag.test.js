@@ -7,7 +7,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 // 示例项目第 1 页：最上面加一张锁定的整页图（像纸纹），标题下面再垫一块不锁定的整页半透明形状（像暗角）
 function setup() {
@@ -51,10 +51,13 @@ async function dragAndSave(page, from, dx, dy) {
   await Promise.all([page.waitForResponse(r => r.request().method() === 'PUT' && r.ok()), drag(page, from, dx, dy)]);
 }
 async function drag(page, from, dx, dy, steps = 10) {
+  // Verify raw drag distance with the documented temporary snapping override.
+  await page.keyboard.down("Alt");
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   for (let i = 1; i <= steps; i++) await page.mouse.move(from.x + (dx * i) / steps, from.y + (dy * i) / steps);
   await page.mouse.up();
+  await page.keyboard.up("Alt");
 }
 
 test('拖不动：最上面有锁定的整页图时，照样能直接按住下面的元素拖动', async t => {

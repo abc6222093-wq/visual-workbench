@@ -6,7 +6,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 import { saveVersion, restoreVersion } from '../src/version.js';
 import { createFromMaster } from '../src/master.js';
 import { agentBrief } from '../src/brief.js';
