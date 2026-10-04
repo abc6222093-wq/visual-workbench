@@ -55,7 +55,7 @@ test('round10 text height: stale box is corrected once after an automatic versio
  await page.locator('[data-action="select"][data-id="el_text"]').click();const scale=await page.locator('#artboard').evaluate(n=>new DOMMatrix(getComputedStyle(n).transform).a);
  const h=await page.locator('[data-resize="el_text"][data-handle="e"]').boundingBox();await page.mouse.move(h.x+h.width/2,h.y+h.height/2);await page.mouse.down();await page.mouse.move(h.x+h.width/2-220*scale,h.y+h.height/2,{steps:4});
  assert.ok(await heightOf(page,'el_text')>90,'拖窄时高度即时增加');
- await saved(page,()=>page.mouse.up());const after=el(file,'el_text');assert.equal(after.width,140);assert.ok(after.height>90);
+ await saved(page,()=>page.mouse.up());const after=el(file,'el_text');assert.ok(Math.abs(after.width-140)<=1,`拖窄后宽度约 140（实际 ${after.width}，WebKit 指针取整差 1px）`);assert.ok(after.height>90);
  assert.deepEqual(errors,[]);
 });
 
