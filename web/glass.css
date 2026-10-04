@@ -1150,9 +1150,18 @@ html.glass-mode .startup-error {
     1px 4px 8px -4px rgba(60, 52, 92, 0.4);
   transition: box-shadow 0.18s ease;
 }
-.ed-page__thumb .miniature {
-  width: 100%;
-  height: 100%;
+/* 迷你画板绝对定位、不参与布局：没缩放好时也不会把卡片撑开，最多被宿主裁掉（第 11 轮兜底） */
+.ed-page__thumb .miniature,
+.hm-card__art .miniature {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+}
+.miniature > .vw-artboard {
+  position: absolute !important;
+  top: 0;
+  left: 0;
 }
 .ed-page.active .ed-page__thumb {
   box-shadow:
@@ -1510,13 +1519,10 @@ button.hm-card:active {
     1px 4px 8px -4px rgba(60, 52, 92, 0.35);
 }
 .hm-card__art {
+  position: relative;
   overflow: hidden;
   background: #fff;
   box-shadow: 0 0 0 1px rgba(60, 52, 92, 0.06);
-}
-.hm-card__art .miniature {
-  width: 100%;
-  height: 100%;
 }
 .hm-card__thumb--asset {
   position: relative;
