@@ -172,7 +172,12 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       }
       const preset=b.preset||'slide-16x9'; if(!PRESETS[preset]) throw fail(400,'Invalid preset'); const [dw,dh]=PRESETS[preset], width=b.width??dw,height=b.height??dh; dims({width,height}); mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString(); const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),createdAt:now,updatedAt:now,artboard:{preset,width,height},assets:[],fonts:[],pages:[blankPage('#ffffff')]}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
     if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]) { const id=parts[2],dir=projectPath(dataDir,id);
-      if(parts.length===3&&req.method==='DELETE') {await checkedBody(req);return json(res,200,deleteProject(dataDir,id));}
+      if(parts.length===3&&req.method==='DELETE') {
+        // A normalized /versions/.. request has no body and must keep the old 404.
+        // UI project deletion always sends an explicit JSON confirmation request.
+        if(!req.headers['transfer-encoding'] && !(Number(req.headers['content-length'])>0))throw fail(404,'未找到删除请求，请从项目菜单确认删除');
+        await checkedBody(req);return json(res,200,deleteProject(dataDir,id));
+      }
       if(parts.length===3&&req.method==='PATCH') {const b=await checkedBody(req);if(typeof b.name!=='string'||!b.name.trim())throw fail(400,'请输入项目名称');const old=readProject(projectPath(dataDir,id));if(b.revision!==undefined)checkRevision(b.revision,old.revision);const project={...old.project,name:b.name.trim(),updatedAt:new Date().toISOString()};const revision=saveProject(dir,project,selfWrite(id));return json(res,200,{project,revision});}
       if(parts.length===4&&parts[3]==='duplicate'&&req.method==='POST') {const b=await checkedBody(req);const out=duplicateProject(dataDir,id,b);return json(res,201,{...out,revision:readProject(projectPath(dataDir,out.project.id)).revision});}
       if(parts.length===3&&req.method==='GET') return json(res,200,{...readProject(dir),syncConflicts:detectSyncConflicts(dir)});
