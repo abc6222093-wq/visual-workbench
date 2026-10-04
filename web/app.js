@@ -13,7 +13,7 @@ import { reconcileDocument } from "./outline-document.js";
 import { pickCanvasElement } from "./editor-hit-test.js";
 // 第 9 轮：画布上就地编辑文字、旋转把手、总览选择
 import { startTextEdit, isEditingTextNode } from "./text-edit.js";
-import { rotateFromPointer } from "./rotate-tool.js";
+import { rotateFromPointer, rotateHandlePlacement } from "./rotate-tool.js";
 import { mountHomeSelection } from "./home-selection.js";
 import { renderPage, patchPage, updateElementNode } from "./render.js";
 import { patchPageItems } from "./page-items.js";
@@ -1017,8 +1017,10 @@ function markRotateHandle(n, on) {
     n.append(handle);
   }
   const size = 22 / S.scale, gap = 18 / S.scale, board = $("#artboard")?.getBoundingClientRect(), box = n.getBoundingClientRect();
-  const above = board && box.bottom + (gap + size) * S.scale > board.bottom && box.top - (gap + size) * S.scale > board.top;
-  Object.assign(handle.style, { width: `${size}px`, height: `${size}px`, top: above ? "auto" : `calc(100% + ${gap}px)`, bottom: above ? `calc(100% + ${gap}px)` : "auto" });
+  // 贴着画板边时换到看得见的一侧（上下都贴边放左右，四面贴边放元素内部），始终能点到
+  const placed = rotateHandlePlacement({ box, board, need: (gap + size) * S.scale, size, gap });
+  handle.dataset.side = placed.side;
+  Object.assign(handle.style, { width: `${size}px`, height: `${size}px` }, placed.style);
 }
 function startRotate(id, event) {
   finishNudge();
