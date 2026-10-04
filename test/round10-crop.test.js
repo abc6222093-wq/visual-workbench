@@ -76,16 +76,18 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true });
 });
 async function blank(t, viewport = { width: 1000, height: 800 }) {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, deviceScaleFactor: 1 }); // 与 CI 的 Linux headless 一致：dpr 1
   t.after(() => page.close());
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(`${url}/vw-round10-blank`);
   await page.setContent('<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#fff}.resize-handle{position:absolute;background:#38bdf8}</style><div id="holder" style="position:absolute;left:40px;top:40px;transform:scale(0.5);transform-origin:0 0"></div>');
   return { page, errors };
 }
+// 取屏幕点 (x,y) 的颜色：截 3×3 的小块取中心，与设备像素比无关
 const pixel = async (page, x, y) => {
-  const { data } = await sharp(await page.screenshot({ clip: { x, y, width: 1, height: 1 } })).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  return [...data];
+  const { data, info } = await sharp(await page.screenshot({ clip: { x: x - 1, y: y - 1, width: 3, height: 3 } })).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const at = (Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) * 3;
+  return [...data.subarray(at, at + 3)];
 };
 const near = (a, b, tol = 8) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
 
@@ -129,9 +131,11 @@ test('round10 crop: renderPage 按裁切定位内层图片，patchPage 复用同
 });
 
 // ---------- 3. 裁切工具 ----------
-async function cropFixture(t, { crop = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }, rotation = 0, width = 400, height = 200 } = {}) {
+async function cropFixture(t, { crop = { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }, rotation = 0, width = 400, height = 200, noCapture = false } = {}) {
   const { page, errors } = await blank(t);
-  await page.evaluate(async ({ project }) => {
+  await page.evaluate(async ({ project, noCapture }) => {
+    // 模拟指针捕获不起作用的环境：拖出覆盖层后仍要跟随
+    if (noCapture) Element.prototype.setPointerCapture = () => {};
     const { renderPage, updateElementNode } = await import('/render.js');
     window.mod = await import('/crop-tool.js');
     const root = renderPage(project, project.pages[0], { assetBase: '/data/projects/crop-demo' });
@@ -147,9 +151,10 @@ async function cropFixture(t, { crop = { x: 0.25, y: 0.25, width: 0.5, height: 0
       onPreview: p => { log.previews.push(p); el = { ...el, ...p }; updateElementNode(node, el); },
       onCommit: p => log.commits.push(p) }); };
     begin();
-  }, { project: cropProject(crop, { x: 100, y: 100, width, height, rotation }) });
+  }, { project: cropProject(crop, { x: 100, y: 100, width, height, rotation }), noCapture });
   const center = async selector => { const b = await page.locator(selector).boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
-  const drag = async (from, dx, dy) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(from.x + dx / 2, from.y + dy / 2, { steps: 3 }); await page.mouse.move(from.x + dx, from.y + dy, { steps: 3 }); await page.mouse.up(); };
+  // 拖动：分 12 步走完，终点都在视口内（视口外的鼠标事件在部分平台上不送达）
+  const drag = async (from, dx, dy) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(from.x + dx, from.y + dy, { steps: 12 }); await page.mouse.up(); };
   return { page, errors, center, drag, log: () => page.evaluate(() => log), state: () => page.evaluate(() => state()), imgRect: () => page.evaluate(() => imgRect()) };
 }
 const closeRect = (a, b, tol = 1) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
@@ -183,23 +188,27 @@ test('round10 crop tool: 覆盖层结构、把手按缩放补偿；拖右下角�
 });
 
 test('round10 crop tool: 框内拖动移动源图（框不动、不越界），滚轮以框中心放大', async t => {
-  const { page, errors, center, drag, state } = await cropFixture(t);
+  const { page, errors, center, drag, state } = await cropFixture(t, { noCapture: true });
   await drag(await center('[data-crop-frame]'), 40, 0); // 屏幕 40px = 画板 80px：源图右移
   assert.deepEqual(await state(), { x: 100, y: 100, width: 400, height: 200, crop: { x: 0.15, y: 0.25, width: 0.5, height: 0.5 } });
-  await drag(await center('[data-crop-frame]'), 1000, -1000);
-  assert.deepEqual(await state(), { x: 100, y: 100, width: 400, height: 200, crop: { x: 0, y: 0.5, width: 0.5, height: 0.5 } });
+  // 远远拖过头（右上，终点仍在视口内）：源图左边、下边被夹在框边上，框不动
+  await drag(await center('[data-crop-frame]'), 700, -125);
+  const clamped = await state();
+  assert.deepEqual([clamped.x, clamped.y, clamped.width, clamped.height], [100, 100, 400, 200]);
+  assert.equal(clamped.crop.x, 0, '源图左边夹在框左边'); assert.equal(clamped.crop.y + clamped.crop.height, 1, '源图下边夹在框下边');
+  assert.deepEqual(clamped.crop, { x: 0, y: 0.5, width: 0.5, height: 0.5 });
   await drag(await center('[data-crop-frame]'), -100, 50); // 回到中间
   assert.deepEqual((await state()).crop, { x: 0.25, y: 0.25, width: 0.5, height: 0.5 });
   const c = await center('[data-crop-frame]');
-  await page.mouse.move(c.x, c.y); await page.mouse.wheel(0, -100);
+  await page.mouse.move(c.x, c.y); await page.mouse.wheel(0, -3); // 滚轮只看方向：一格放大 1.1 倍
   await page.waitForFunction(() => log.previews.at(-1)?.crop.width < 0.5);
   const zoomed = await state();
   assert.deepEqual([zoomed.x, zoomed.y, zoomed.width, zoomed.height], [100, 100, 400, 200]);
-  assert.ok(Math.abs(zoomed.crop.width - 0.5 / Math.exp(0.2)) < 2e-4, JSON.stringify(zoomed.crop));
+  assert.ok(Math.abs(zoomed.crop.width - 0.5 / 1.1) < 2e-4, JSON.stringify(zoomed.crop));
   assert.ok(Math.abs(zoomed.crop.x + zoomed.crop.width / 2 - 0.5) < 2e-4 && Math.abs(zoomed.crop.y + zoomed.crop.height / 2 - 0.5) < 2e-4, '以框中心缩放');
   assert.ok(Number(await page.locator('[data-crop-zoom]').inputValue()) > 1);
   // 缩小到底：源图刚好盖住框
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 400);
+  for (let i = 0; i < 12; i++) await page.mouse.wheel(0, 120); // 一格缩小 1/1.1，8 格后到底
   await page.waitForFunction(() => log.previews.at(-1)?.crop.width === 1);
   assert.deepEqual((await state()).crop, { x: 0, y: 0, width: 1, height: 1 });
   // 滑条放大
@@ -244,7 +253,7 @@ test('round10 crop tool: Esc 提交一次，键盘不冒泡到 window；cancel �
 });
 
 test('round10 crop tool: 旋转的元素覆盖层跟着旋转，拖把手后图片仍不动', async t => {
-  const { page, errors, center, drag, state, imgRect } = await cropFixture(t, { rotation: 90 });
+  const { page, errors, center, drag, state, imgRect } = await cropFixture(t, { rotation: 90, noCapture: true });
   assert.equal(await page.evaluate(() => document.querySelector('.crop-overlay').style.transform), 'rotate(90deg)');
   const before = await imgRect();
   await drag(await center('[data-crop-handle="e"]'), 0, -40); // 旋转 90° 后「右边」朝下

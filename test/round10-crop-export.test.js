@@ -97,7 +97,7 @@ test('round10 crop: 导出 HTML / 图片 / PDF 与编辑器画面像素一致，
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   browser = await launchBrowser();
   // 放映版 HTML：离线打开，截图与导出图片逐像素一致
-  const offline = await browser.newPage({ viewport: { width: W, height: H } });
+  const offline = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   const blocked = [];
   await offline.route('**/*', route => /^(file|data|blob):/.test(route.request().url()) ? route.continue() : (blocked.push(route.request().url()), route.abort()));
   await offline.goto(pathToFileURL(html.file).href);
@@ -109,7 +109,7 @@ test('round10 crop: 导出 HTML / 图片 / PDF 与编辑器画面像素一致，
   assert.deepEqual(blocked, []);
 
   // 编辑器画面：renderPage 直接画同一页
-  const editor = await browser.newPage({ viewport: { width: W, height: H } });
+  const editor = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   await editor.goto(`http://127.0.0.1:${server.address().port}/vw-round10-blank`);
   await editor.setContent('<!doctype html><meta charset="utf-8"><style>body{margin:0}</style>');
   await editor.evaluate(async project => {
@@ -135,7 +135,8 @@ test('round10 crop: 导出 HTML / 图片 / PDF 与编辑器画面像素一致，
 
   // 动效检查（真浏览器逐页跑）
   const cli = fileURLToPath(new URL('../src/cli/check-motion.js', import.meta.url));
-  const check = spawnSync(process.execPath, [cli, projectDir], { encoding: 'utf8', timeout: 120000, env: { ...process.env, HOME: home, USERPROFILE: home } });
+  // 不改 HOME：Playwright 的浏览器缓存在真实 HOME 下；check-motion 不读工作台配置，无需隔离
+  const check = spawnSync(process.execPath, [cli, projectDir], { encoding: 'utf8', timeout: 120000 });
   assert.equal(check.status, 0, check.stdout + check.stderr);
   const validate = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli/validate.js', import.meta.url)), projectDir], { encoding: 'utf8', timeout: 60000 });
   assert.equal(validate.status, 0, validate.stdout + validate.stderr);

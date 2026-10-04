@@ -10,6 +10,7 @@ const HANDLES = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], 
 const CURSOR = { nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'ns', e: 'ew', w: 'ew' };
 const MIN_BOX = 8;  // 裁切框最小边长（画板像素）
 const MAX_ZOOM = 5; // 源图最多放大到「刚好盖住框」的 5 倍
+const WHEEL_STEP = 1.1; // 滚轮每格缩放比例
 const r4 = v => Math.round(v * 1e4) / 1e4;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -127,7 +128,8 @@ export function startCrop(node, element, { image = null, scale = 1, onPreview, o
     drag = { edge, id: e.pointerId, sx: e.clientX, sy: e.clientY, B: { ...B }, I: { ...I } };
     try { overlay.setPointerCapture(e.pointerId); } catch { /* 没有真实指针时忽略 */ }
   }, { capture: true, signal });
-  overlay.addEventListener('pointermove', e => {
+  // 移动、松开在窗口捕获阶段听：指针拖出覆盖层（或指针捕获不可用）时照样跟随
+  window.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return;
     e.stopPropagation();
     const d = toLocal(e.clientX - drag.sx, e.clientY - drag.sy), b = drag.B, im = drag.I;
@@ -143,11 +145,12 @@ export function startCrop(node, element, { image = null, scale = 1, onPreview, o
       Object.assign(B, { x: l, y: t, w: r - l, h: btm - t });
     }
     preview();
-  }, { signal });
+  }, { capture: true, signal });
   const endDrag = e => { if (drag && e.pointerId === drag.id) { e.stopPropagation(); drag = null; } };
-  overlay.addEventListener('pointerup', endDrag, { signal });
-  overlay.addEventListener('pointercancel', endDrag, { signal });
-  overlay.addEventListener('wheel', e => { e.preventDefault(); e.stopPropagation(); zoomTo(Math.exp(-e.deltaY * 0.002)); }, { signal, passive: false });
+  window.addEventListener('pointerup', endDrag, { capture: true, signal });
+  window.addEventListener('pointercancel', endDrag, { capture: true, signal });
+  // 滚轮：只看方向，每格固定缩放 10%（不同系统、鼠标、触控板的 deltaY 大小和单位都不一样）
+  overlay.addEventListener('wheel', e => { e.preventDefault(); e.stopPropagation(); if (e.deltaY) zoomTo(e.deltaY < 0 ? WHEEL_STEP : 1 / WHEEL_STEP); }, { signal, passive: false });
   overlay.addEventListener('dblclick', e => { e.stopPropagation(); if (e.target !== zoom) finish(true); }, { signal });
   zoom.addEventListener('input', e => { e.stopPropagation(); zoomTo(Number(zoom.value) * minW() / I.w); }, { signal });
   done.addEventListener('click', e => { e.stopPropagation(); finish(true); }, { signal });
