@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createServer} from '../src/server.js';
+import {createServer} from './helpers/isolated-server.js';
 import {launchBrowser} from '../src/browser.js';
 import {initDataDir} from '../src/data-dir.js';
 test('数据文件夹设置显示来源，拒绝无效路径，保存后提示重启',async t=>{

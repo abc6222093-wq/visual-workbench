@@ -7,7 +7,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 // 示例项目第 1 页：最上面加一张锁定的整页图（像纸纹），标题下面再垫一块不锁定的整页半透明形状（像暗角）
 function setup() {

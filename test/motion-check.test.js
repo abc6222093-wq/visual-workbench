@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 const source = 'export default () => ({ step() {}, transition() {}, dispose() {} })';
 function project(code = source, steps = 1) {

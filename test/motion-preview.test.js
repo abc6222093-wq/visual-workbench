@@ -5,7 +5,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 test('预览动效：临时层里真的播了，播完 / Esc / 再点按钮都会收起，项目和画板不变', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'vw-motion-preview-'));

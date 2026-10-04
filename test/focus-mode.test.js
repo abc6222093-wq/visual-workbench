@@ -5,7 +5,7 @@ import { mkdtempSync, cpSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 test('专注模式：面板藏起、画板变大；Esc 恢复；专注模式里能拖动', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'vw-focus-'));

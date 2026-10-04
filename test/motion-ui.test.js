@@ -4,7 +4,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 test('editor stays static, reports errors, and clicks finish steps before custom page transition', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'vw-motion-ui-'));

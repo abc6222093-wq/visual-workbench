@@ -6,7 +6,7 @@ import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 // 第 1 页两步：开头藏起副标题和第三条要点；第 1 步副标题出现、标题往右移 100；第 2 步标题往下移 50、第三条要点出现
 const SOURCE = `export default ctx => {

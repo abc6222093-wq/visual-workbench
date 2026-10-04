@@ -6,7 +6,7 @@ import { mkdtempSync, cpSync, writeFileSync, rmSync, readdirSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { launchBrowser } from '../src/browser.js';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 
 test('导出弹窗：选 PDF → 正在导出… → 显示保存位置、文件和大小 → 在访达中显示', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'vw-export-ui-'));

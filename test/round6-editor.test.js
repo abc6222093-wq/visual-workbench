@@ -41,7 +41,7 @@ test('zero crossing clamps size and preserves the anchor',()=>{
 import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 import { launchBrowser } from '../src/browser.js';
 async function browserEditor(t) {
   const dir=mkdtempSync(join(tmpdir(),'vw-round6-editor-'));

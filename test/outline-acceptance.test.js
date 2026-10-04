@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from '../src/server.js';
+import { createServer } from './helpers/isolated-server.js';
 import { launchBrowser } from '../src/browser.js';
 
 async function open(t, legacy=false, motion=false) {
