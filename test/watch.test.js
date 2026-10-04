@@ -165,8 +165,13 @@ test('versions/、点开头的文件和临时文件的变化：不发事件', as
 });
 
 test('短时间连写 3 个文件：合并为 1 个 changed 事件', async t => {
-  const { w, file } = setup(t);
-  const all = collectFor(w, 'demo', isChanged, 1200);
+  // 不用固定收集窗口：等到第 1 个事件后，再等「2×去抖 + 1 个轮询间隔」确认没有第 2 个事件，
+  // 最后 scanNow 把还没处理的变化（如果有）立刻冲出来；窗口由监听器的实际参数推算
+  const debounceMs = 120, pollMs = 1000;
+  const { w, file } = setup(t, { debounceMs, pollMs });
+  const all = [];
+  const off = w.subscribe('demo', ev => { if (isChanged(ev)) all.push(ev); });
+  t.after(off);
   const changed = nextEvent(w, 'demo', isChanged);
   writeFileSync(file('project.json'), '{"v":"batch"}\n');
   writeFileSync(file('assets', 'a.png'), 'a');
@@ -174,7 +179,9 @@ test('短时间连写 3 个文件：合并为 1 个 changed 事件', async t => 
   const ev = await changed;
   assert.deepEqual(ev.files, ['assets/a.png', 'assets/b.png', 'project.json']);
   assert.equal(ev.external, true);
-  assert.equal((await all).length, 1);
+  await new Promise(r => setTimeout(r, 2 * debounceMs + pollMs));
+  await w.scanNow('demo');
+  assert.equal(all.length, 1, `应只有 1 个 changed 事件，实际 ${all.length} 个`);
 });
 
 test('agent 状态：外部改动后 working，空闲 agentIdleMs 后 idle；期间再改会推迟 idle', async t => {
