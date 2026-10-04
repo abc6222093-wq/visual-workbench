@@ -1,3 +1,11 @@
+import { copyElements, pasteElements, selectableIds, marqueeIds, nudgeElements, groupElements, ungroupElements, escapeSelection, isTypingTarget } from './element-operations.js';
+import { copyPages, pastePages, duplicatePages, deletePages, movePages, insertPage } from './page-operations.js';
+import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewPreference } from './page-views.js';
+import { showContextMenu, closeContextMenu } from './context-menu.js';
+import { snapMove, snapResize, selectionBounds, alignElements, distributeElements } from './layout-tools.js';
+import { appearanceControls } from './appearance-controls.js';
+import { createProjectManagement } from './project-management.js';
+import { createWorkbenchClose } from './workbench-close.js';
 import { mountRuntimeSettings } from './runtime-settings.js';
 import { mountOutlinePanel } from "./outline-panel.js";
 import { captureOutlinePage } from "./outline-capture.js";
@@ -19,7 +27,6 @@ import {
   mutateElements,
   duplicateElements,
   deleteElements,
-  reorderPages,
   createHistory,
   rootSelection,
   resizeGroup,
@@ -51,6 +58,11 @@ const S = {
   pageId: null,
   selected: [],
   checked: new Set(),
+  pageViewMode: readPageViewPreference(),
+  pageAnchor: null,
+  pageClipboard: null,
+  elementClipboard: null,
+  pageViewsDispose: null,
   history: null,
   dirty: 0,
   saved: 0,
@@ -153,6 +165,7 @@ function modal(html) {
   if (document.documentElement.classList.contains("glass-mode")) openModalGlass($(".g-sheet"));
 }
 function closeModal() {
+  const pending=S.confirmResolve;S.confirmResolve=null;pending?.(false);
   closeModalGlass();
   $("#modal-root")?.replaceChildren();
 }
@@ -182,6 +195,7 @@ async function home() {
   S.focus = false;
   disconnectEvents();
   const list = await api("/api/projects");
+  S.homeProjects = list;
   S.masters = list.filter((x) => x.master).map((x) => ({ id: x.id, name: x.name }));
   // 缩略图框是 16:10，作品按自己的比例居中放进去（竖版海报不会被裁）
   const fit = ({ width, height }) => {
@@ -189,10 +203,10 @@ async function home() {
     return r >= 1 ? `width:100%;height:${100 / r}%` : `width:${100 * r}%;height:100%`;
   };
   const card = (item, i) =>
-    `<div class="hm-cell"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button></div>`;
+    `<div class="hm-cell"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[ ["project-rename","重命名"],["project-duplicate","复制项目"],["project-delete","删除项目"] ].map(([action,label])=>`<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
   shell(
     "home",
-    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
+    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
   liven(app);
@@ -267,9 +281,6 @@ async function open(id, data) {
   connectEvents(S.project.id);
   if(data.syncConflicts?.length) modal(`<h2>发现疑似同步冲突副本</h2><p class="g-sheet__note">这些文件可能是网盘留下的另一份修改，请先核对；工作台不会自动删除或合并。</p><ul>${data.syncConflicts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul><div class="g-sheet__actions">${gbtn("close","知道了")}</div>`);
 }
-function pageItem(p, i) {
-  return `<div class="ed-page ${p.id === S.pageId ? "active" : ""}" data-page-index="${i}" draggable="true"><input class="g-check ed-page__check" type="checkbox" data-check="${p.id}" ${S.checked.has(p.id) ? "checked" : ""} aria-label="选择第 ${i + 1} 页"><button class="ed-page__open" data-action="switch" data-id="${p.id}" title="${esc(p.name)}"><span class="ed-page__thumb" data-preview="${p.id}"></span><span class="ed-page__label"><b>${String(i + 1).padStart(2, "0")}</b><i>${esc(p.name)}</i></span></button></div>`;
-}
 function layers(items, depth = 0) {
   return [...items]
     .sort((a, b) => b.zIndex - a.zIndex)
@@ -316,6 +327,7 @@ function setAgent(state) {
 // ---------- 实时连接 ----------
 // エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
 function isBusy() {
+  if(nudgePending)return true;
   if (S.view !== "editor" || !S.project) return true;
   if (S.dragging || S.saving || S.assetPromise || S.preview || S.outlineBusy) return true;
   if ($("#modal-root")?.childElementCount) return true;
@@ -446,6 +458,7 @@ function inspectorBody(p) {
 function renderEditor() {
   if (!S.project) return;
   stopPreview();
+  S.pageViewsDispose?.();
   S.outlineView?.dispose();
   S.outlineView = null;
   clampStepView();
@@ -453,12 +466,14 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid${S.inspectorCollapsed ? " is-inspector-collapsed" : ""}${S.pagesCollapsed ? " is-pages-collapsed" : ""}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${ibtn("toggle-pages", S.pagesCollapsed ? "chevronRight" : "chevronLeft", S.pagesCollapsed ? "展开页面栏" : "收起页面栏", `aria-expanded="${!S.pagesCollapsed}"`)}<div class="ed-col-head"><h2>页面</h2><span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${S.project.pages.map(pageItem).join("")}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div><div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${ibtn("toggle-inspector", S.inspectorCollapsed ? "chevronLeft" : "chevronRight", S.inspectorCollapsed ? "展开属性栏" : "收起属性栏", `aria-expanded="${!S.inspectorCollapsed}"`)}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>${S.focus ? `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>` : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid${S.inspectorCollapsed ? " is-inspector-collapsed" : ""}${S.pagesCollapsed || S.pageViewMode === "timeline" ? " is-pages-collapsed" : ""}${S.pageViewMode === "grid" ? " is-page-grid" : ""}${S.pageViewMode === "timeline" ? " is-page-timeline" : ""}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${ibtn("toggle-pages", S.pagesCollapsed ? "chevronRight" : "chevronLeft", S.pagesCollapsed ? "展开页面栏" : "收起页面栏", `aria-expanded="${!S.pagesCollapsed}"`)}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers")}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize")}${tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers")}${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div>${S.pageViewMode === "grid" ? `<div class="ed-page-grid ed-scroll">${renderPageItems(pageViewContext("grid"))}</div>` : ""}${S.pageViewMode === "timeline" ? `<div class="ed-page-timeline ed-scroll">${renderPageItems(pageViewContext("timeline"))}</div>` : ""}<div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${ibtn("toggle-inspector", S.inspectorCollapsed ? "chevronLeft" : "chevronRight", S.inspectorCollapsed ? "展开属性栏" : "收起属性栏", `aria-expanded="${!S.inspectorCollapsed}"`)}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>${S.focus ? `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>` : ""}`,
   );
   renderBoard();
   if (S.tab === "outline") mountEditorOutline();
   mountMotionStatus(S.project, base(), $(".ed-toolbar"));
-  S.project.pages.forEach((p) => $(`[data-preview="${p.id}"]`)?.append(thumb(S.project, p)));
+  S.project.pages.forEach(p=>app.querySelectorAll(`[data-preview="${p.id}"]`).forEach(host=>host.append(thumb(S.project,p))));
+  mountEditorPageViews();
+  mountAppearance();
   bindDrag();
   decorateEditor();
   bustStale(app);
@@ -529,9 +544,10 @@ function bindBoardPointer(holder, board) {
   holder._pickController?.abort();
   const controller = new AbortController(); holder._pickController = controller;
   holder.addEventListener('pointerdown', e => {
+    if(e.button!==0)return;
     if (S.preview) { e.preventDefault();e.stopPropagation();return; }
     const {id,resize}=pickElement(board,e);e.stopPropagation();
-    if(id)selectCanvas(id,e,resize);else if(S.selected.length){S.selected=[];refreshSelection();}
+    if(id)selectCanvas(id,e,resize);else startMarquee(board,e);
   }, {capture:true,signal:controller.signal});
 }
 // ---------- 步骤视图 ----------
@@ -617,7 +633,20 @@ function setFocus(on) {
 }
 // 点下去的位置上从上到下有哪些元素；跳过锁定的（含锁定分组里的），选中的元素排在最前面
 function pickElement(board, e) {
-  return pickCanvasElement({ board, page: page(), selected: S.selected, screen: !!S.stepView, event: e });
+  const hit = pickCanvasElement({ board, page: page(), selected: S.selected, screen: !!S.stepView, event: e });
+  if (!hit.id || hit.resize) return hit;
+  const found = findElement(page(), hit.id);
+  const selectedGroup = S.selected.length === 1 && findElement(page(),S.selected[0])?.element.type === 'group' ? S.selected[0] : null;
+  if (selectedGroup) {
+    const deep = pickCanvasElement({board,page:page(),selected:[],screen:!!S.stepView,event:e});
+    const f = deep.id && findElement(page(),deep.id);
+    const chain = f && [...f.ancestors.map(a=>a.id),deep.id];
+    const at = chain?.indexOf(selectedGroup) ?? -1;
+    if(at>=0 && chain[at+1])return {...hit,id:chain[at+1]};
+  }
+  // A selected child keeps being draggable inside its group until Escape.
+  if(S.selected.includes(hit.id)) return hit;
+  return {...hit,id:found?.ancestors[0]?.id || hit.id};
 }
 // 拖动中只改画面上对应节点的样式，不重画整块画板（重画会让图片重新加载，画面一闪一闪）
 function paintDragged(target) {
@@ -628,6 +657,7 @@ function paintDragged(target) {
   for (const child of target.children || []) paintDragged(child);
 }
 function selectCanvas(id, event, resize) {
+  finishNudge();
   if (!editable(page(), id)) {
     notice("这个元素或所在分组已锁定");
     return;
@@ -636,7 +666,7 @@ function selectCanvas(id, event, resize) {
     ? S.selected.includes(id)
       ? S.selected.filter((x) => x !== id)
       : [...S.selected, id]
-    : [id];
+    : S.selected.includes(id) ? S.selected : [id];
   const ids = rootSelection(page(), S.selected);
   const resizing = resize ?? event.target.closest("[data-resize]")?.dataset.handle;
   const start = {
@@ -649,18 +679,29 @@ function selectCanvas(id, event, resize) {
   const move = (e) => {
     const dx = (e.clientX - start.x) / S.scale,
       dy = (e.clientY - start.y) / S.scale;
+    let snappedDx=dx,snappedDy=dy;
+    const roots=start.values.map(v=>v.element), bounds=selectionBounds(roots);
+    const references=page().elements.filter(e=>!ids.includes(e.id));
+    const hasParent=start.values.some(v=>findElement(page(),v.id)?.parent);
+    if(!resizing && !hasParent) {
+      const snap=snapMove({bounds:{...bounds,x:bounds.x+dx,y:bounds.y+dy},references,page:S.project.artboard,scale:S.scale,disabled:e.altKey,movingIds:ids});
+      snappedDx=snap.bounds.x-bounds.x;snappedDy=snap.bounds.y-bounds.y;paintGuides(snap);
+    } else clearGuides();
     for (const { id, element: old, translate } of start.values) {
       const found = findElement(page(), id),
         target = found?.element;
       if (!target) continue;
-      const angle =
-          (found.ancestors.reduce((sum, a) => sum + (a.rotation || 0), 0) *
-            Math.PI) /
-          180,
-        localX = dx * Math.cos(angle) + dy * Math.sin(angle),
-        localY = -dx * Math.sin(angle) + dy * Math.cos(angle);
+      let localX=snappedDx,localY=snappedDy;
+      for(const ancestor of found.ancestors){
+        const angle=-(ancestor.rotation||0)*Math.PI/180;
+        [localX,localY]=[localX*Math.cos(angle)-localY*Math.sin(angle),localX*Math.sin(angle)+localY*Math.cos(angle)];
+        if(ancestor.flipX)localX=-localX;if(ancestor.flipY)localY=-localY;
+      }
       if (resizing) {
-        const bounds = resizeBounds(old, resizing, localX, localY);
+        let bounds = resizeBounds(old, resizing, localX, localY);
+        if(!hasParent && !old.rotation && ids.length===1){
+          const snap=snapResize({bounds,references,page:S.project.artboard,scale:S.scale,handle:resizing,rotation:old.rotation||0,disabled:e.altKey,movingIds:ids});bounds=snap.bounds;paintGuides(snap);
+        }
         if (target.type === "group") resizeGroup(target, old, bounds.width, bounds.height);
         Object.assign(target, bounds);
       } else {
@@ -675,6 +716,7 @@ function selectCanvas(id, event, resize) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", up);
     S.dragging = false;
+    clearGuides();
     if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 2) {
       for (const { id } of start.values) clearDocumentDraft(findElement(page(), id).element);
       changed({ boardOnly: true });
@@ -716,6 +758,7 @@ function schedule() {
   S.timer = setTimeout(() => flush().catch(() => {}), 600);
 }
 async function flush() {
+  finishNudge();
   clearTimeout(S.timer);
   if (!S.project) return;
   if (S.assetPromise) await S.assetPromise;
@@ -765,27 +808,7 @@ function conflictDialog() {
   );
 }
 function bindDrag() {
-  const list = $(".page-list");
-  list.ondragstart = (e) => {
-    const item = e.target.closest("[data-page-index]");
-    if (item) e.dataTransfer.setData("application/x-vw-page", item.dataset.pageIndex);
-  };
-  list.ondragover = (e) => {
-    if (e.target.closest("[data-page-index]")) e.preventDefault();
-  };
-  list.ondrop = (e) => {
-    const item = e.target.closest("[data-page-index]");
-    if (!item) return;
-    e.preventDefault();
-    const payload = e.dataTransfer.getData("application/x-vw-page");
-    if (!payload) return;
-    const from = Number(payload),
-      to = Number(item.dataset.pageIndex);
-    if (Number.isInteger(from) && from !== to) {
-      S.pageId = reorderPages(S.project, S.pageId, from, to);
-      changed();
-    }
-  };
+  // Page drag gestures are handled by mountPageViews.
   $(".inspector").ondragstart = (e) => {
     const row = e.target.closest("[data-asset]");
     if (row) e.dataTransfer.setData("application/x-vw-asset", row.dataset.asset);
@@ -1229,7 +1252,21 @@ app.addEventListener("click", async (e) => {
   const a = b.dataset.action,
     id = b.dataset.id;
   try {
+    finishNudge();
     switch (a) {
+      case "page-grid":
+        setPageView(S.pageViewMode === "grid" ? readPageViewPreference() : "grid");
+        break;
+      case "page-timeline":
+        setPageView(S.pageViewMode === "timeline" ? "list" : "timeline");
+        break;
+      case "close-workbench":
+        await workbenchClose.close();
+        break;
+      case "project-trash": await projectManagement.openTrash(); break;
+      case "project-delete": await projectManagement.remove(S.homeProjects.find(p=>p.id===id)); break;
+      case "project-duplicate": await projectManagement.duplicate(S.homeProjects.find(p=>p.id===id)); break;
+      case "project-rename": await projectManagement.rename(S.homeProjects.find(p=>p.id===id)); break;
       case "home":
         await home();
         break;
@@ -1606,62 +1643,151 @@ document.addEventListener("fullscreenchange", () => {
   S.view = "editor";
   renderEditor();
 });
-window.addEventListener("keydown", (e) => {
-  if (S.outlineBusy) return;
-  if (e.key === "Escape" && S.preview) {
-    e.preventDefault();
-    stopPreview();
+window.addEventListener("keydown", e => {
+  if(S.outlineBusy)return;
+  const typing=isTypingTarget(e.target);
+  if(e.key==='Escape'){
+    e.preventDefault();finishNudge();
+    if(S.preview){stopPreview();return;}
+    if(document.querySelector('.g-context-menu')){closeContextMenu();return;}
+    if($('#modal-root')?.childElementCount){closeModal();return;}
+    if(S.view==='play'){S.playback?.destroy();document.fullscreenElement&&document.exitFullscreen();S.view='editor';renderEditor();return;}
+    if(S.view!=='editor')return;
+    if(S.pageViewMode==='grid'){setPageView(readPageViewPreference());return;}
+    if(S.selected.length){S.selected=escapeSelection(page(),S.selected);refreshSelection();return;}
+    if(S.focus){setFocus(false);return;}
     return;
   }
-  if (e.key === "Escape" && S.view === "editor" && S.focus && !$("#modal-root")?.childElementCount) {
-    // 专注模式里按 Esc：先退出专注模式（有弹窗时先关弹窗）
-    e.preventDefault();
-    setFocus(false);
-    return;
+  if(typing)return;
+  if(S.view==='play'){
+    if([' ','ArrowRight'].includes(e.key)){e.preventDefault();advancePlay();}
+    else if(e.key==='ArrowLeft'){e.preventDefault();nextPage(-1);}return;
   }
-  if (e.key === "Escape") {
-    if (S.view === "play") {
-      S.playback?.destroy();
-      document.fullscreenElement && document.exitFullscreen();
-      S.view = "editor";
-      renderEditor();
-    } else closeModal();
-    return;
-  }
-  if (S.view === "play" && [" ", "ArrowRight"].includes(e.key)) {
-    e.preventDefault();
-    advancePlay();
-    return;
-  }
-  if (S.view === "play" && e.key === "ArrowLeft") {
-    e.preventDefault();
-    nextPage(-1);
-    return;
-  }
-  if (S.view === 'editor' && e.target.matches('[data-outline-document]') && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-    e.preventDefault(); const start=e.target.selectionStart;
-    $(`[data-action="${e.shiftKey ? 'redo' : 'undo'}"]`)?.click();
-    const input=$('[data-outline-document]');input?.focus();input?.setSelectionRange(start,start);return;
-  }
-  if (S.view !== "editor" || S.preview || S.outlineBusy || e.target.matches("input,textarea,select")) return;
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-    e.preventDefault();
-    $(`[data-action="${e.shiftKey ? "redo" : "undo"}"]`)?.click();
-  } else if (["Backspace", "Delete"].includes(e.key) && S.selected.length) {
-    e.preventDefault();
-    deleteElements(page(), rootSelection(page(), S.selected));
-    S.selected = [];
-    changed();
-  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-    e.preventDefault();
-    S.selected = duplicateElements(page(), rootSelection(page(), S.selected));
-    changed();
-  }
+  if(S.view!=='editor'||S.preview||$('#modal-root')?.childElementCount)return;
+  // Page-view key handlers own their focused surface and stop propagation.
+  const mod=e.metaKey||e.ctrlKey,key=e.key.toLowerCase();
+  try {
+    if(mod&&key==='z'){e.preventDefault();finishNudge();$(`[data-action="${e.shiftKey?'redo':'undo'}"]`)?.click();return;}
+    if(mod&&['a','c','v','d'].includes(key)){
+      e.preventDefault();
+      if(S.pageViewMode==='grid'||(!S.selected.length&&S.checked.size&&key!=='a'))pageAction({'a':'select-pages','c':'copy-pages','v':'paste-pages','d':'duplicate-pages'}[key]);
+      else elementAction({'a':'select-all','c':'copy-elements','v':'paste-elements','d':'duplicate-elements'}[key]);return;
+    }
+    if(['Backspace','Delete'].includes(e.key)){e.preventDefault();if(S.selected.length)elementAction('delete-elements');else if(S.checked.size)pageAction('delete-pages');return;}
+    const arrow={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+    if(arrow&&S.selected.length){e.preventDefault();nudge(arrow[0]*(e.shiftKey?10:1),arrow[1]*(e.shiftKey?10:1));return;}
+    const direction=['PageUp','ArrowUp'].includes(e.key)?-1:['PageDown','ArrowDown'].includes(e.key)?1:0;
+    if(direction){e.preventDefault();finishNudge();const i=S.project.pages.findIndex(p=>p.id===S.pageId),p=S.project.pages[i+direction];if(p){S.pageId=p.id;S.selected=[];S.checked.clear();renderEditor();}}
+  }catch(error){notice(error.message);}
 });
 window.addEventListener("resize", () => {
   if (S.view === "editor") renderBoard();
   else if (S.view === "play") showPage(S.pageId);
 });
+// ---------- 页面操作：三种视图共用同一份选择和历史 ----------
+function pageViewContext(mode = S.pageViewMode) {
+  return { project:S.project,currentPageId:S.pageId,selectedPageIds:[...S.checked],anchorId:S.pageAnchor,mode,returnMode:readPageViewPreference(),canPaste:S.pageClipboard?.projectId===S.project?.id };
+}
+function setPageView(mode) { finishNudge(); S.pageViewMode=mode;writePageViewPreference(mode);renderEditor(); }
+function mountEditorPageViews() {
+  const disposers=[...app.querySelectorAll('[data-page-view]')].map(root=>mountPageViews(root,{getContext:()=>pageViewContext(root.dataset.pageView),callbacks:{
+    selection(ids,anchor){S.checked=new Set(ids);S.pageAnchor=anchor;S.selected=[];app.querySelectorAll('[data-page-id]').forEach(row=>{const on=S.checked.has(row.dataset.pageId);row.classList.toggle('is-selected',on);row.querySelector('[data-check]').checked=on;});refreshSelection();},
+    openPage(id){if(S.pageId===id)return;finishNudge();S.pageId=id;S.selected=[];renderEditor();},
+    view:setPageView,
+    action:(name,payload)=>{try{pageAction(name,payload);}catch(e){notice(e.message);}}
+  }}));
+  S.pageViewsDispose=()=>disposers.forEach(dispose=>dispose());
+}
+function pageAction(name,{ids=[...S.checked],targetId=S.pageId,position='after'}={}) {
+  finishNudge(); if(!ids.length)ids=[targetId];let result;
+  if(name==='select-pages'){S.checked=new Set(S.project.pages.map(p=>p.id));renderEditor();return;}
+  if(name==='copy-pages'){S.pageClipboard=copyPages(S.project,ids);notice('页面已复制，可在同一个项目中粘贴');return;}
+  if(name==='paste-pages')result=pastePages(S.project,S.pageClipboard,targetId);
+  if(name==='duplicate-pages')result=duplicatePages(S.project,ids,targetId);
+  if(name==='delete-pages')result=deletePages(S.project,ids,S.pageId);
+  if(name==='move-pages')result=movePages(S.project,ids,targetId,position);
+  if(name==='insert-page-before'||name==='insert-page-after')result=insertPage(S.project,targetId,name.endsWith('before')?'before':'after');
+  if(!result)return;S.project=result.project;S.checked=new Set(result.selectedPageIds);S.pageId=result.currentPageId||S.pageId;S.selected=[];changed();
+}
+// ---------- 元素操作 ----------
+function elementAction(action) {
+  finishNudge();const ids=rootSelection(page(),S.selected);
+  if(action==='copy-elements'){S.elementClipboard=copyElements(S.project,page(),ids);notice('元素已复制，可粘贴到本项目的其他页');return;}
+  if(action==='paste-elements')S.selected=pasteElements(S.project,page(),S.elementClipboard,S.elementClipboard?.pageId===S.pageId?24:0);
+  else if(action==='duplicate-elements')S.selected=pasteElements(S.project,page(),copyElements(S.project,page(),ids));
+  else if(action==='delete-elements'){deleteElements(page(),ids);S.selected=[];}
+  else if(action==='select-all'){S.selected=selectableIds(page());refreshSelection();return;}
+  else if(action==='group-elements')S.selected=groupElements(page(),ids);
+  else if(action==='ungroup-elements')S.selected=ungroupElements(page(),ids);
+  else if(action==='lock-elements'||action==='unlock-elements')ids.forEach(id=>{const f=findElement(page(),id);if(f)f.element.locked=action==='lock-elements';});
+  else return;
+  changed();
+}
+app.addEventListener('contextmenu',e=>{
+  if(S.view!=='editor'||isTypingTarget(e.target)||!e.target.closest('#canvas-well'))return;
+  e.preventDefault();finishNudge();
+  const board=$('#artboard');const hit=pickElement(board,e);
+  // Locked elements still offer Unlock from their visible node.
+  const native=e.target.closest('[data-element-id]');const id=hit.id||native?.dataset.elementId;
+  if(id && !S.selected.includes(id))S.selected=[id];
+  if(!id)S.selected=[];refreshSelection();
+  const selected=S.selected.map(id=>findElement(page(),id)?.element).filter(Boolean),locked=selected.some(el=>el.locked);
+  const canPaste=S.elementClipboard?.projectId===S.project.id;
+  const items=id?[
+    {action:'copy-elements',label:'复制'},{action:'paste-elements',label:'粘贴',disabled:!canPaste},{action:'duplicate-elements',label:'创建副本',disabled:locked},
+    {action:'delete-elements',label:'删除',disabled:locked},{separator:true},{action:locked?'unlock-elements':'lock-elements',label:locked?'解锁':'锁定'},
+    {action:'group-elements',label:'编组',disabled:locked||selected.length<2||!selected.every(el=>findElement(page(),el.id).items===findElement(page(),selected[0].id).items)},
+    {action:'ungroup-elements',label:'取消编组',disabled:locked||!selected.some(el=>el.type==='group')}
+  ]:[{action:'paste-elements',label:'粘贴',disabled:!canPaste},{action:'select-all',label:'全选'}];
+  showContextMenu({x:e.clientX,y:e.clientY,items,onAction:action=>{try{elementAction(action);}catch(error){notice(error.message);}}});
+});
+function startMarquee(board,event) {
+  finishNudge();event.preventDefault();
+  const start={x:event.clientX,y:event.clientY}, original=event.shiftKey?S.selected.slice():[];
+  const overlay=document.createElement('div');overlay.className='ed-marquee';$('#canvas-well').append(overlay);
+  const wellRect=$('#canvas-well').getBoundingClientRect();S.dragging=true;
+  function move(e){
+    const box={x:Math.min(start.x,e.clientX),y:Math.min(start.y,e.clientY),width:Math.abs(e.clientX-start.x),height:Math.abs(e.clientY-start.y)};
+    Object.assign(overlay.style,{left:`${box.x-wellRect.left}px`,top:`${box.y-wellRect.top}px`,width:`${box.width}px`,height:`${box.height}px`});
+    const rects=new Map();page().elements.forEach(el=>{const node=board.querySelector(`[data-element-id="${CSS.escape(el.id)}"]`);if(!node)return;const style=getComputedStyle(node);if(style.display==='none'||style.visibility==='hidden'||(S.stepView&&Number(style.opacity)===0))return;const r=node.getBoundingClientRect();rects.set(el.id,{x:r.left,y:r.top,width:r.width,height:r.height});});
+    const available={...page(),elements:page().elements.filter(e=>rects.has(e.id))};S.selected=[...new Set([...original,...marqueeIds(available,box,rects)])];markSelection();
+  }
+  function up(e){window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);overlay.remove();S.dragging=false;if(Math.abs(e.clientX-start.x)+Math.abs(e.clientY-start.y)<=2)S.selected=original;refreshSelection();swapReadySnapshot();}
+  window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
+}
+// One uninterrupted run of arrow keys makes one undo record and one save request.
+let nudgeTimer=null,nudgePending=false;
+function finishNudge() { clearTimeout(nudgeTimer);if(!nudgePending)return;nudgePending=false;changed({boardOnly:true}); }
+function nudge(dx,dy) {
+  const before=new Map(S.selected.map(id=>[id,clone(findElement(page(),id)?.element)]));
+  nudgeElements(page(),S.selected,dx,dy);S.selected.forEach(id=>{const el=findElement(page(),id)?.element;if(el){clearDocumentDraft(el);const node=$(`#artboard [data-element-id="${CSS.escape(id)}"]`);if(S.stepView)paintStepDragged(el,before.get(id),false,node?getComputedStyle(node).translate:'none');else paintDragged(el);}});
+  nudgePending=true;clearTimeout(nudgeTimer);nudgeTimer=setTimeout(finishNudge,350);
+}
+function clearGuides(){document.querySelectorAll('.ed-guide,.ed-gap').forEach(node=>node.remove());}
+function paintGuides(snap){
+  clearGuides();const board=$('#artboard');if(!board)return;
+  for(const guide of snap.guides||[]){const n=document.createElement('div');n.className='ed-guide';n.dataset.axis=guide.axis;const value=guide.value??guide.position;n.style.cssText=guide.axis==='x'?`left:${value}px;top:0;height:100%`:`top:${value}px;left:0;width:100%`;board.append(n);}
+  for(const gap of snap.gaps||[]){const n=document.createElement('span');n.className='ed-gap';n.textContent=`间距 ${Math.round(gap.value??gap.distance??gap.gap)} px`;n.style.left=`${snap.bounds.x}px`;n.style.top=`${Math.max(0,snap.bounds.y-30)}px`;board.append(n);}
+}
+function mountAppearance(){
+  const host=$('.ed-props');if(!host||!S.selected.length)return;
+  const elements=rootSelection(page(),S.selected).map(id=>findElement(page(),id)?.element).filter(Boolean);
+  if(!elements.length)return;
+  host.append(appearanceControls(elements,{
+    change(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);paintDragged(e);}},
+    commit(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);}changed({boardOnly:true});}
+  }));
+  if(elements.length<2)return;
+  const controls=document.createElement('section');controls.className='ed-section';controls.innerHTML='<h3 class="ed-heading">对齐与分布</h3><div class="ed-align"></div>';
+  const choices=[['left','左对齐'],['center','水平居中'],['right','右对齐'],['top','顶对齐'],['middle','垂直居中'],['bottom','底对齐'],['distribute-x','水平分布'],['distribute-y','垂直分布']];
+  for(const [mode,label]of choices){const b=document.createElement('button');b.className='g-btn';b.textContent=label;b.dataset.align=mode;b.disabled=mode.startsWith('distribute')&&elements.length<3;b.onclick=()=>{finishNudge();const result=mode.startsWith('distribute')?distributeElements(elements,mode.endsWith('x')?'x':'y'):alignElements(elements,mode);for(const e of result){const target=findElement(page(),e.id)?.element;if(target){Object.assign(target,e);clearDocumentDraft(target);}}changed({boardOnly:true});};controls.querySelector('.ed-align').append(b);}host.append(controls);
+}
+function confirmAction(message,description="") {
+  return new Promise(resolve=>{modal(`<h2>${esc(message)}</h2><p class="g-sheet__note">${esc(description)}</p><div class="g-sheet__actions"><button class="g-btn" data-confirm-no>取消</button><button class="g-btn g-btn--prism" data-confirm-yes>确认</button></div>`);const root=$('#modal-root');S.confirmResolve=resolve;const finish=value=>{S.confirmResolve=null;closeModal();resolve(value);};root.querySelector('[data-confirm-no]').onclick=()=>finish(false);root.querySelector('[data-confirm-yes]').onclick=()=>finish(true);root.onclick=e=>{if(e.target===root)finish(false);};});
+}
+const projectManagement=createProjectManagement({api,confirm:confirmAction,modal,closeModal,notice,refresh:home,onOpen:open,onDeleted:async()=>{}});
+const workbenchClose=createWorkbenchClose({api,flush:async()=>{finishNudge();await flush();},confirm:confirmAction,notice,renderClosed(){S.pageViewsDispose?.();S.outlineView?.dispose();disconnectEvents();disposeStepView();S.project=null;S.view='closed';shell('home','<section class="hm-panel"><h1>工作台已关闭，可以关掉这个窗口了</h1></section>');}});
+
 const runtimeSettings = mountRuntimeSettings({api,app,modal,closeModal,notice,glass:openModalGlass,closeGlass:closeModalGlass});
 runtimeSettings.ready().then(home).catch((e) => {
   app.innerHTML = '<div class="startup-error">无法打开工作台，请检查本地服务。</div>';
@@ -1676,6 +1802,7 @@ function refreshInspector() {
   body.innerHTML = inspectorBody(page());
   document.querySelectorAll('.ed-inspector .g-seg button').forEach(b => b.classList.toggle('active', b.dataset.action === `tab-${S.tab === 'library' ? 'assets' : S.tab}`));
   if (S.tab === 'outline') mountEditorOutline();
+  mountAppearance();
   syncGlass(app);
 }
 function refreshSelection() {

@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {motionStatusText} from '../web/motion-status-text.js';
+test('legacy motion errors explain the format without exposing internal stack',()=>{const status=motionStatusText({formatVersion:1},{errors:[{message:'TypeError undefined getMotion'}]});assert.match(status.text,/旧格式.*暂时检查不了动效/);assert.doesNotMatch(status.text+status.detail,/TypeError|undefined|getMotion/);});
+test('current format failures identify page and first error line',()=>{const status=motionStatusText({formatVersion:2},{ok:false,results:[{page:'page_one',ok:false,error:'曲线出错\n at internal()'},{page:'page_two',ok:true}]});assert.equal(status.text,'动效检查未通过');assert.equal(status.detail,'page_one：曲线出错');assert.equal(motionStatusText({formatVersion:2},{ok:true}).text,'动效检查通过');});

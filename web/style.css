@@ -199,3 +199,25 @@ button:disabled {
 .hm-cell > .hm-master.is-on {
   opacity: 1;
 }
+/* Round 8 uses existing glass controls and keeps the canvas's neutral surface. */
+.ed-page-grid {flex:1;min-height:0;overflow:auto}
+.ed-grid.is-page-grid #canvas-well,.ed-grid.is-page-grid .ed-foot {display:none}
+.ed-page-timeline {flex:none;max-height:190px;border-top:1px solid rgba(80,70,100,.12)}
+.ed-grid.is-page-timeline .ed-pages > :not([data-action="toggle-pages"]) {display:none}
+.ed-grid.is-page-timeline #canvas-well {min-height:140px}
+.ed-col-head {flex-wrap:wrap}
+.ed-marquee {position:absolute;border:1px solid #38bdf8;background:rgba(56,189,248,.12);pointer-events:none;z-index:10000}
+.ed-guide {position:absolute;pointer-events:none;z-index:9998;border-color:#d673ba;border-style:solid;border-width:0}
+.ed-guide[data-axis=x] {border-left-width:1px}
+.ed-guide[data-axis=y] {border-top-width:1px}
+.ed-gap {position:absolute;pointer-events:none;z-index:9999;background:var(--g-paper,#fff);color:var(--g-ink-2,#555);border-radius:8px;padding:2px 6px;font-size:13px}
+.appearance-controls {display:flex;flex-wrap:wrap;gap:8px;padding:12px 0}
+.appearance-controls label {width:100%}
+.appearance-controls input {width:100%}
+.ed-align {display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.hm-project-actions {display:flex;flex-wrap:wrap;gap:4px;padding:4px 0}
+.hm-project-actions .g-btn {font-size:11px;padding:6px 8px}
+.ed-motion-status {flex:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.ed-motion-detail {flex-basis:100%;min-width:0;overflow-wrap:anywhere}
+.ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
+.ed-tools {flex-wrap:wrap;justify-content:flex-end;min-width:0}

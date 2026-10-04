@@ -152,7 +152,30 @@ function imageContent(node, element, src) {
   child.style.cssText = `width:100%;height:100%;display:block;object-fit:${fit}`;
 }
 
+// Keep persistent appearance below the outer node whose transform motion modules control.
+// Unflipped legacy nodes retain their DOM structure for existing integrations.
+const flipContents = new WeakMap();
+function appearanceContent(node, element) {
+  let content = flipContents.get(node);
+  if (!content && (element.flipX || element.flipY)) {
+    content = document.createElement('div');
+    content.dataset.vwFlip = '1';
+    content.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;transform-origin:center center';
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 1 && child.hasAttribute('data-resize')) continue;
+      content.append(child);
+    }
+    for (const key of ['background', 'border', 'boxSizing', 'borderRadius']) {
+      content.style[key] = node.style[key]; node.style[key] = '';
+    }
+    node.append(content); flipContents.set(node, content);
+  }
+  if (content) content.style.transform = `scale(${element.flipX ? -1 : 1}, ${element.flipY ? -1 : 1})`;
+  return content || node;
+}
+
 export function updateElementNode(node, element) {
+  const content = appearanceContent(node, element);
   node.style.position = 'absolute';
   node.style.left = px(element.x); node.style.top = px(element.y);
   node.style.width = px(element.width); node.style.height = px(element.height);
@@ -166,7 +189,7 @@ export function updateElementNode(node, element) {
   node.style.webkitMaskImage = node.style.maskImage;
   node.style.clipPath = clipPath(element.effects?.clip);
   if (element.type === 'text') { node.style.color = element.color || '#000000'; applyTextStyle(node, element); }
-  if (element.type === 'image' && imageSources.has(node)) imageContent(node, element, imageSources.get(node));
+  if (element.type === 'image' && imageSources.has(node)) imageContent(content, element, imageSources.get(node));
   if (element.type === 'shape') {
     if (element.shape === 'line' || element.shape === 'polygon') {
       const figure = node.querySelector('polygon,line');
@@ -175,7 +198,7 @@ export function updateElementNode(node, element) {
         figure.setAttribute('stroke', element.stroke?.color || 'none');
         figure.setAttribute('stroke-width', String(element.stroke?.width || 0));
       }
-    } else node.style.background = paint(element.fill);
+    } else content.style.background = paint(element.fill);
   }
   node.style.visibility = element.visible === false ? 'hidden' : 'visible';
   return node;

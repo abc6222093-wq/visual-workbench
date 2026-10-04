@@ -1,13 +1,15 @@
+import { motionStatusText } from './motion-status-text.js';
 const cache = new Map();
 
 // The editor only renders static JSON. Motion checks run in a disposable iframe.
 export function mountMotionStatus(project, assetBase, toolbar) {
   if (!toolbar) return;
   const chip = document.createElement('span');
-  chip.className = 'g-chip';
+  chip.className = 'g-chip ed-motion-status';
   chip.setAttribute('role', 'status');
   chip.textContent = '正在检查动效…';
   toolbar.append(chip);
+  if(project.formatVersion!==2){chip.textContent=motionStatusText(project,{}).text;chip.classList.add('g-chip--pink');chip.title=motionStatusText(project,{}).detail;return;}
   const key = JSON.stringify(project);
   if (!cache.has(key)) {
     const promise = new Promise(resolve => {
@@ -38,13 +40,14 @@ export function mountMotionStatus(project, assetBase, toolbar) {
   }
   cache.get(key).then(result => {
     if (!chip.isConnected) return;
-    chip.textContent = result.ok ? '动效检查通过' : '动效检查未通过';
+    const status=motionStatusText(project,result);
+    chip.textContent = status.text;
     chip.classList.toggle('g-chip--pink', !result.ok);
-    chip.title = (result.results || result.errors || []).filter(e => e.ok !== true).map(e => `${e.page || ''} ${e.variant || ''} ${e.error || e.message}`).join('\n');
+    chip.title = status.detail;
     if (!result.ok) {
       const detail = document.createElement('span');
-      detail.className = 'ed-note';
-      detail.textContent = [...new Set((result.results || result.errors || []).filter(e => e.ok !== true).map(e => `${e.page || ''}: ${String(e.error || e.message).split('\n')[0]}`))].join('; ');
+      detail.className = 'ed-note ed-motion-detail';
+      detail.textContent = status.detail;
       chip.after(detail);
     }
   });
