@@ -26,16 +26,17 @@ export function createPlayback(project, page, { root, onRender, onComplete, onEr
     } catch (error) { if (!activeController.signal.aborted) onError?.(error); throw error; }
     finally { if (hide) root.style.visibility = visibility; }
   };
-  // 快进：按顺序跑完 step(0..steps-1)，每步后把 root 里的有限动画直接跳到结尾。
+  // 快进：按顺序跑完 step(0..steps-1)，每步后把 root 里的有限动画（Web Animations 和 anime.js 的）直接跳到结尾。
   // 某一步出错只报告，不让 ready 失败：页面照常显示，下一次点击去下一页。
   async function fastForward(signal) {
-    finishAnimations(root);
+    const finishAll = () => { finishAnimations(root); runtime.finish?.(); };
+    finishAll();
     try {
       for (let index = 0; index < steps; index++) {
         if (signal.aborted) return;
         runtime.setStep(index);
         await runtime.handlers.step(index);
-        finishAnimations(root);
+        finishAll();
       }
     } catch (error) {
       if (!signal.aborted) onError?.(error);
