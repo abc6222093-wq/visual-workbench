@@ -138,6 +138,31 @@ test('round10 import: deck-data JSON slides with asset placeholders and CSS anim
   assert.equal(project.pages[0].background, '#0f172a');
 });
 
+test('round10 import: transform matrix rules, rotation, tinted mask, gradient mask, blend and @font-face placeholders', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'vw-round10-transform-'));
+  try {
+    const font = readFileSync(join(REPO, 'examples/sample-deck/fonts/Inter-Variable.ttf')).toString('base64');
+    writeFileSync(join(tmp, 'transforms.html'), readFileSync(join(FX, 'transforms-template.html'), 'utf8').replace('__INTER_TTF__', font));
+    const { job, project, projectDir } = await runImport([fileEntry('transforms.html', join(tmp, 'transforms.html'))]);
+    assert.equal(job.summary.method, 'deck'); const page = project.pages[0], els = page.elements;
+    // 资产表是纯字符串数组、@font-face 写 src:url(__T_ASSET_0__)：字体登记，weight 没写记 400，文字指向它
+    assert.deepEqual(project.fonts.map(f => [f.family, f.weight]), [['Display', 400]]);
+    const center = els.find(e => e.text === '居中标题'); assert.ok(center, '居中 translate 的文字不截图');
+    assert.equal(center.font, project.fonts[0].id); assert.ok(Math.abs(center.x + center.width / 2 - 960) < 2, `居中位置 ${center.x}`);
+    assert.equal(texts(page).includes('编辑文字'), false, '舞台外的播放器按钮不算页面内容');
+    const tilt = els.find(e => e.text === '旋转卡片'); assert.equal(tilt.rotation, -8);
+    assert.equal(els.find(e => e.type === 'shape' && e.fill === '#f4c430').rotation, -8);
+    assert.deepEqual(shots(page).map(e => e.name), ['[截图] transform']); // 只有斜切的块截图
+    assert.equal(els.find(e => e.fill === '#e76f51').width, 300); // scaleX 进度条按实际宽度
+    assert.equal(els.find(e => e.text === '放大文字').fontSize, 60); // scale(1.5) 的文字字号放大
+    const logo = els.find(e => e.tint); assert.equal(logo.tint, '#c0392b'); assert.equal(logo.fit, 'contain');
+    const fade = els.find(e => e.effects?.mask); assert.deepEqual(fade.effects.mask.stops.map(s => s.opacity), [0, 1, 1]); assert.equal(fade.effects.mask.angle, 90);
+    assert.equal(els.find(e => e.fill === '#7eddd2').effects.blend, 'multiply');
+    assert.equal(job.summary.missingImages, 0);
+    await checkMotion(projectDir);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
 test('round10 import: folder with relative image paths, and the same folder as a .zip', async () => {
   const files = walk(join(FX, 'folder')).map(f => ({ path: 'folder/' + relative(join(FX, 'folder'), f).split('\\').join('/'), file: f }));
   const before = files.map(f => sha(f.file));

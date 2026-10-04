@@ -15,6 +15,7 @@ export function install() {
     if (!str || str === 'transparent') return null;
     const m = /^rgba?\(([^)]+)\)$/.exec(str.trim());
     if (m) { const p = m[1].split(/[\s,/]+/).filter(Boolean); const a = p[3] === undefined ? 1 : p[3].endsWith('%') ? num(p[3]) / 100 : num(p[3]); return { r: num(p[0]), g: num(p[1]), b: num(p[2]), a }; }
+    if (!CSS.supports('color', str.trim())) return null;
     try { c2d.clearRect(0, 0, 1, 1); c2d.fillStyle = '#000'; c2d.fillStyle = str; c2d.fillRect(0, 0, 1, 1); const d = c2d.getImageData(0, 0, 1, 1).data; return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }; } catch { return null; }
   }
   const h2 = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
@@ -86,7 +87,13 @@ export function install() {
   const force = (el, prop, value) => el.style.setProperty(prop, value, 'important');
   function isolate(kind, index) {
     let root = document.body, box, mode = 'element';
-    if (kind === 'deck') { mode = 'viewport'; }
+    if (kind === 'deck') {
+      // 每页一份文档：有铺满大半个视口的舞台容器（如 .stage）就以它为页面，播放器按钮之类留在外面的不算
+      mode = 'viewport'; const area = innerWidth * innerHeight;
+      const cands = [...document.body.children, ...[...document.body.children].flatMap(c => [...c.children])].filter(el => !SKIP.has(el.tagName) && visibleBlock(el) && cs(el).visibility === 'visible');
+      const big = cands.map(el => ({ el, r: el.getBoundingClientRect() })).filter(c => c.r.width * c.r.height >= area * 0.5 && c.r.width * c.r.height <= area * 1.05 && c.r.left > -2 && c.r.top > -2).sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0];
+      if (big) { root = big.el; mode = 'element'; }
+    }
     else if (kind === 'fallback') { mode = 'fallback'; scrollTo(0, index * innerHeight); }
     else {
       const all = slideList(kind); root = all[index]; if (!root) throw new Error(`找不到第 ${index + 1} 页`);
@@ -138,7 +145,7 @@ export function install() {
   // ---------- 字体线索 ----------
   function fontInfo() {
     const faces = [];
-    const walkRules = (rules, base) => { for (const r of rules) { if (r instanceof CSSFontFaceRule) { const st = r.style; const src = st.getPropertyValue('src'); const urls = []; for (const part of splitTop(src)) { const u = /url\((['"]?)(.*?)\1\)/s.exec(part); if (!u) continue; let abs = u[2]; try { abs = new URL(u[2], base).href; } catch {} urls.push({ url: abs, format: (/format\((['"]?)(.*?)\1\)/.exec(part) || [])[2] || '' }); } faces.push({ family: st.getPropertyValue('font-family').trim().replace(/^['"]|['"]$/g, ''), weight: st.getPropertyValue('font-weight').trim() || '400', style: st.getPropertyValue('font-style').trim() || 'normal', urls }); } else if (r instanceof CSSImportRule && r.styleSheet) { try { walkRules(r.styleSheet.cssRules, r.styleSheet.href || base); } catch {} } else if (r.cssRules) { try { walkRules(r.cssRules, base); } catch {} } } };
+    const walkRules = (rules, base) => { for (const r of rules) { if (r instanceof CSSFontFaceRule) { const st = r.style; const src = st.getPropertyValue('src'); const urls = []; for (const part of splitTop(src)) { const u = /url\((['"]?)(.*?)\1\)/s.exec(part); if (!u) continue; let abs = u[2]; try { abs = new URL(u[2], base).href; } catch {} urls.push({ url: abs, format: (/format\((['"]?)(.*?)\1\)/.exec(part) || [])[2] || '' }); } faces.push({ family: st.getPropertyValue('font-family').trim().replace(/^['"]|['"]$/g, ''), weight: st.getPropertyValue('font-weight').trim() || '400', style: st.getPropertyValue('font-style').trim() || 'normal', range: st.getPropertyValue('unicode-range').trim(), urls }); } else if (r instanceof CSSImportRule && r.styleSheet) { try { walkRules(r.styleSheet.cssRules, r.styleSheet.href || base); } catch {} } else if (r.cssRules) { try { walkRules(r.cssRules, base); } catch {} } } };
     for (const sheet of document.styleSheets) try { walkRules(sheet.cssRules, sheet.href || document.baseURI); } catch {}
     const remote = [];
     for (const link of document.querySelectorAll('link[href]')) { const href = link.getAttribute('href') || ''; if (/fonts\.googleapis\.com|fonts\.loli\.net|fonts\.bunny\.net/.test(href)) { try { for (const f of new URL(href, document.baseURI).searchParams.getAll('family')) for (const one of f.split('|')) remote.push(one.split(':')[0].replace(/\+/g, ' ')); } catch {} } }
@@ -185,7 +192,7 @@ export function install() {
 
     const consumedBy = new WeakSet();
     const hasBlockInside = el => [...el.querySelectorAll('*')].some(d => { const s = cs(d); return s.display !== 'inline' && s.display !== 'contents' && s.display !== 'none' && !SKIP.has(d.tagName); });
-    const inlineChild = n => { if (n.nodeType !== 1 || SKIP.has(n.tagName) && n.tagName !== 'BR') return false; if (n.tagName === 'BR') return true; const s = cs(n); return (s.display === 'inline' || s.display === 'contents') && !SHOT_TAGS.has(n.tagName) && !(n instanceof SVGElement) && !n.querySelector('img, svg, canvas, video, iframe, embed, object') && !hasBlockInside(n) && !needsShot(n, s); };
+    const inlineChild = n => { if (n.nodeType !== 1 || SKIP.has(n.tagName) && n.tagName !== 'BR') return false; if (n.tagName === 'BR') return true; const s = cs(n); return (s.display === 'inline' || s.display === 'contents') && !SHOT_TAGS.has(n.tagName) && !(n instanceof SVGElement) && !n.querySelector('img, svg, canvas, video, iframe, embed, object') && !hasBlockInside(n) && !needsShot(n, s, { kind: 'plain' }); };
     function textParts(el) {
       const parts = [], nodes = [];
       const take = (node, transform) => {
@@ -205,28 +212,67 @@ export function install() {
       // 普通空白：连续空白（含源码里的换行）合成一个空格；只有 <br> 产生换行
       return text.replace(/[ \t\n\r\f\v]+/g, ' ').split('\u2028').map(l => l.trim()).join('\n').trim();
     }
-    function needsShot(el, s) {
+    const BLENDS = new Set(['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference', 'soft-light', 'hard-light']);
+    const hasText = el => !!el.textContent.trim();
+    const leaf = el => [...el.children].every(c => SKIP.has(c.tagName) || cs(c).display === 'none' || inlineChild(c));
+    // 变形：按计算后的矩阵（连同单独的 rotate / scale 属性）分类。平移、等比缩放不截图（位置大小直接取 rect）；
+    // 旋转 + 等比缩放写成 rotation；非等比缩放只在没有文字时按 rect 处理；斜切、镜像、3D 才截图
+    function transformOf(s) {
+      let m = new DOMMatrix(s.transform && s.transform !== 'none' ? s.transform : undefined);
+      if (s.scale && s.scale !== 'none') { const p = s.scale.trim().split(/\s+/).map(num); m = new DOMMatrix().scale(p[0], p[1] ?? p[0]).multiply(m); }
+      if (s.rotate && s.rotate !== 'none') { const a = /^(-?[\d.]+)deg$/.exec(s.rotate.trim()); if (!a) return { kind: 'other' }; m = new DOMMatrix().rotate(num(a[1])).multiply(m); }
+      if (!m.is2D) return { kind: 'other' };
+      const e = 1e-3, { a, b, c, d } = m, sx = Math.hypot(a, b), sy = Math.hypot(c, d);
+      if (sx < e || sy < e) return { kind: 'zero' };
+      if (Math.abs(a - d) < e * sx + e && Math.abs(b + c) < e * sx + e) { let angle = Math.atan2(b, a) * 180 / Math.PI; if (Math.abs(angle) < 0.05) angle = 0; return { kind: angle ? 'rotate' : 'plain', angle, scale: sx }; }
+      if (Math.abs(b) < e && Math.abs(c) < e && a > 0 && d > 0) return { kind: 'stretch', angle: 0, scale: 1 };
+      return { kind: 'other' };
+    }
+    // 遮罩：单层 url 遮罩 + 纯色背景 → 着色图片（tint）；单层渐变遮罩 → effects.mask；其余截图
+    function maskOf(el, s) {
+      const mi = s.maskImage && s.maskImage !== 'none' ? s.maskImage : s.webkitMaskImage && s.webkitMaskImage !== 'none' ? s.webkitMaskImage : null;
+      if (!mi) return null;
+      const layers = splitTop(mi); if (layers.length !== 1 || !leaf(el)) return { bad: true };
+      const u = urlOf(layers[0]);
+      if (u) { const bg = color(s.backgroundColor); return bg && bg.a > 0 && (!s.backgroundImage || s.backgroundImage === 'none') && !hasText(el) ? { tint: hex(bg), src: u, fit: fitOf(s.maskSize || s.webkitMaskSize || 'auto') } : { bad: true }; }
+      const g = gradient(layers[0]); if (!g) return { bad: true };
+      const alpha = h => (h.length === 9 ? parseInt(h.slice(7), 16) / 255 : 1);
+      return { mask: { type: g.type, ...(g.type === 'linear' ? { angle: g.angle } : {}), stops: g.stops.map(st => ({ offset: st.offset, opacity: round(alpha(st.color), 3) })) } };
+    }
+    // 裁切：inset 全为 0 当作没有；叶子元素的 polygon / inset 转成 effects.clip（按元素框百分比）
+    function clipOf(el, s) {
+      const cp = s.clipPath; if (!cp || cp === 'none') return null;
+      const ins = /^inset\((.*)\)$/.exec(cp), w = el.offsetWidth, h = el.offsetHeight;
+      const len = (v, total) => (/^-?[\d.]+%$/.test(v) ? num(v) : /^-?[\d.]+(px)?$/.test(v) ? num(v) / total * 100 : NaN);
+      if (ins && !/calc|round/.test(ins[1])) {
+        const v = ins[1].trim().split(/\s+/); if (v.every(x => num(x) === 0 && /^-?[\d.]+(px|%)?$/.test(x))) return null;
+        if (leaf(el) && w > 0 && h > 0) { const [t, r = t, bo = t, l = r] = v; const T = len(t, h), R = len(r, w), B = len(bo, h), L = len(l, w); if ([T, R, B, L].every(Number.isFinite)) { const pts = [[L, T], [100 - R, T], [100 - R, 100 - B], [L, 100 - B]]; if (pts.flat().every(n => n >= 0 && n <= 100)) return { clip: { type: 'polygon', points: pts.map(p => p.map(n => round(n, 2))) } }; } }
+      }
+      const poly = /^polygon\((.*)\)$/.exec(cp);
+      if (poly && leaf(el) && w > 0 && h > 0 && !/calc/.test(poly[1])) {
+        const pts = splitTop(poly[1].replace(/^(nonzero|evenodd)\s*,/, '')).map(pt => pt.trim().split(/\s+/).map((v, i) => len(v, i ? h : w)));
+        if (pts.length >= 3 && pts.every(p => p.length === 2 && p.every(n => Number.isFinite(n) && n >= 0 && n <= 100))) return { clip: { type: 'polygon', points: pts.map(p => p.map(n => round(n, 2))) } };
+      }
+      return { bad: true };
+    }
+    function needsShot(el, s, tf = { kind: 'plain' }) {
       if (SHOT_TAGS.has(el.tagName)) return el.tagName.toLowerCase();
       if (el === root || el === document.body || el === document.documentElement) return null;
       if (s.filter && s.filter !== 'none') return 'filter 滤镜';
       if (s.backdropFilter && s.backdropFilter !== 'none') return 'backdrop-filter 背景模糊';
-      if (s.clipPath && s.clipPath !== 'none') return 'clip-path 裁切';
-      if ((s.maskImage && s.maskImage !== 'none') || (s.webkitMaskImage && s.webkitMaskImage !== 'none')) return 'mask 遮罩';
-      if (s.mixBlendMode && s.mixBlendMode !== 'normal') return 'mix-blend-mode 混合';
+      if (clipOf(el, s)?.bad) return 'clip-path 裁切';
+      if (maskOf(el, s)?.bad) return 'mask 遮罩';
+      if (s.mixBlendMode && !BLENDS.has(s.mixBlendMode)) return 'mix-blend-mode 混合';
       if ((s.backgroundClip === 'text' || s.webkitBackgroundClip === 'text')) return 'background-clip:text 渐变字';
-      const r = el.getBoundingClientRect(), large = r.width * r.height >= boxArea * 0.5;
-      if (s.transform && s.transform !== 'none') {
-        const m = new DOMMatrixReadOnly(s.transform), e = 1e-3;
-        const translate = m.is2D && Math.abs(m.a - 1) < e && Math.abs(m.b) < e && Math.abs(m.c) < e && Math.abs(m.d - 1) < e;
-        const pureScale = m.is2D && Math.abs(m.b) < e && Math.abs(m.c) < e && m.a > 0 && Math.abs(m.a - m.d) < e;
-        if (!translate && !(pureScale && large)) return 'transform 变形';
-      }
-      if (s.rotate && s.rotate !== 'none') return 'transform 旋转';
-      if (s.scale && s.scale !== 'none' && !large) return 'transform 缩放';
+      if (tf.kind === 'other') return 'transform 斜切或镜像';
+      if (tf.kind === 'stretch' && hasText(el)) return 'transform 非等比缩放';
+      if (tf.kind === 'rotate' && !(el instanceof HTMLElement)) return 'transform 旋转';
       return null;
     }
-    function decoration(el, s, r, op, k) {
-      const b = toBox(r), radius = round(num(s.borderTopLeftRadius) * k * scale);
+    // 旋转后的几何：中心取 rect 中心（仿射变换下准确），宽高取未变形尺寸 × 累计缩放
+    const rotGeom = (r, w, h, angle) => { const cx = (r.left + r.width / 2 - box.left) * scale, cy = (r.top + r.height / 2 - box.top) * scale; const a = ((angle % 360) + 540) % 360 - 180; return { x: round(cx - w / 2), y: round(cy - h / 2), width: round(w), height: round(h), rotation: round(a, 2) }; };
+    function decoration(el, s, r, op, k, b, fx, extra) {
+      const radius = round(num(s.borderTopLeftRadius) * k * scale);
       const bw = num(s.borderTopWidth), bc = color(s.borderTopColor);
       const uniform = ['Right', 'Bottom', 'Left'].every(side => num(s[`border${side}Width`]) === bw && s[`border${side}Style`] === s.borderTopStyle) && /solid|double/.test(s.borderTopStyle);
       const stroke = bw > 0 && uniform && bc && bc.a > 0 ? { color: hex(bc), width: round(bw * k * scale) } : null;
@@ -234,12 +280,12 @@ export function install() {
       const urls = layers.map(urlOf), grads = layers.map(l => urlOf(l) ? null : gradient(l));
       const repeated = urls.some(Boolean) && !/no-repeat/.test(s.backgroundRepeat) && !/cover|contain|100%/.test(s.backgroundSize);
       const plain = layers.every((l, i) => urls[i] || grads[i]) && !repeated && grads.filter(Boolean).length <= 1;
-      if (layers.length && !plain) { push({ kind: 'shot', own: true, mark: mark(el), ...b, clip: raw(r), reason: '背景图案', name: '背景块', opacity: 1 }); return; }
+      if (layers.length && !plain) { push({ kind: 'shot', own: true, mark: mark(el), ...toBox(r), clip: raw(r), reason: '背景图案', name: '背景块', ...extra, ...(fx.effects?.blend ? { effects: { blend: fx.effects.blend } } : {}) }); return; }
       const bg = color(s.backgroundColor);
-      if ((bg && bg.a > 0) || stroke) push({ kind: 'shape', ...b, fill: bg && bg.a > 0 ? hex(bg) : null, stroke, radius, opacity: op, name: '色块' });
+      if ((bg && bg.a > 0) || stroke) push({ kind: 'shape', ...b, fill: bg && bg.a > 0 ? hex(bg) : null, stroke, radius, opacity: op, name: '色块', ...fx, ...extra });
       for (let i = layers.length - 1; i >= 0; i--) {
-        if (grads[i]) push({ kind: 'shape', ...b, fill: grads[i], stroke: null, radius, opacity: op, name: '渐变块' });
-        else push({ kind: 'image', ...b, src: urls[i], fit: fitOf(splitTop(s.backgroundSize)[i] || splitTop(s.backgroundSize)[0] || 'auto'), opacity: op, name: '背景图' });
+        if (grads[i]) push({ kind: 'shape', ...b, fill: grads[i], stroke: null, radius, opacity: op, name: '渐变块', ...fx, ...extra });
+        else push({ kind: 'image', ...b, src: urls[i], fit: fitOf(splitTop(s.backgroundSize)[i] || splitTop(s.backgroundSize)[0] || 'auto'), opacity: op, name: '背景图', ...fx, ...extra });
       }
     }
     function serializeSvg(svg) {
@@ -252,20 +298,32 @@ export function install() {
       clone.setAttribute('color', cs(svg).color);
       return new XMLSerializer().serializeToString(clone);
     }
-    async function walk(el, opacity) {
+    async function walk(el, opacity, acc) {
       if (SKIP.has(el.tagName)) return;
       const s = cs(el); if (s.display === 'none') return;
       const op = opacity * (el === root ? 1 : num(s.opacity === '' ? 1 : s.opacity));
       if (op <= 0.01) return;
+      const tf = el === root ? { kind: 'plain', angle: 0, scale: 1 } : transformOf(s);
+      if (tf.kind === 'zero') return;
       const hidden = s.visibility !== 'visible', r = el.getBoundingClientRect(), sized = r.width >= 0.5 && r.height >= 0.5;
       const shown = !hidden && sized && (s.display !== 'contents');
       if (items.length >= LIMIT) { if (shown && hits(r)) rest.push(el); return; }
-      const reason = el === root ? null : needsShot(el, s);
-      if (reason) { if (shown && owns(r)) push({ kind: 'shot', own: false, mark: mark(el), ...toBox(r), clip: raw(r), reason, name: `[截图] ${reason.split(' ')[0]}` }); return; }
-      if (el.tagName === 'IMG') { if (shown && owns(r) && (el.currentSrc || el.src)) push({ kind: 'image', ...toBox(r), src: await inlineBlob(el.currentSrc || el.src), fit: /contain|scale-down|none/.test(s.objectFit) ? 'contain' : s.objectFit === 'cover' ? 'cover' : 'fill', opacity: op, name: el.alt || '图片' }); return; }
-      if (el instanceof SVGSVGElement) { if (shown && owns(r)) push({ kind: 'image', ...toBox(r), svg: serializeSvg(el), fit: 'fill', opacity: op, name: '矢量图' }); return; }
+      const blend = el !== root && s.mixBlendMode && s.mixBlendMode !== 'normal' && BLENDS.has(s.mixBlendMode) ? s.mixBlendMode : null;
+      const acc2 = { angle: acc.angle + (tf.angle || 0), scale: acc.scale * (tf.scale || 1), blend: blend || acc.blend };
+      const cover = el !== root && r.width * r.height >= boxArea * 0.9 ? { locked: true } : {};
+      const reason = el === root ? null : needsShot(el, s, tf);
+      if (reason) { if (shown && owns(r)) push({ kind: 'shot', own: false, opaque: SHOT_TAGS.has(el.tagName), mark: mark(el), ...toBox(r), clip: raw(r), reason, name: `[截图] ${reason.split(' ')[0]}`, ...cover, ...(acc2.blend ? { effects: { blend: acc2.blend } } : {}) }); return; }
+      const mask = el === root ? null : maskOf(el, s), clip = el === root ? null : clipOf(el, s);
+      const ownFx = { ...(acc2.blend ? { blend: acc2.blend } : {}), ...(mask?.mask ? { mask: mask.mask } : {}), ...(clip?.clip ? { clip: clip.clip } : {}) };
+      const fx = Object.keys(ownFx).length ? { effects: ownFx } : {};
+      const rotated = acc2.angle !== 0 && el.offsetWidth !== undefined;
+      const k = rotated ? acc2.scale : elScale(el, r);
+      const geo = rotated ? rotGeom(r, el.offsetWidth * k * scale, el.offsetHeight * k * scale, acc2.angle) : toBox(r);
+      if (mask?.tint) { if (shown && owns(r)) push({ kind: 'image', ...geo, src: await inlineBlob(mask.src), fit: mask.fit, tint: mask.tint, opacity: op, name: el.getAttribute('aria-label') || '着色图形', ...fx, ...cover }); return; }
+      if (el.tagName === 'IMG') { if (shown && owns(r) && (el.currentSrc || el.src)) push({ kind: 'image', ...geo, src: await inlineBlob(el.currentSrc || el.src), fit: /contain|scale-down|none/.test(s.objectFit) ? 'contain' : s.objectFit === 'cover' ? 'cover' : 'fill', opacity: op, name: el.alt || '图片', ...fx, ...cover }); return; }
+      if (el instanceof SVGSVGElement) { if (shown && owns(r)) push({ kind: 'image', ...toBox(r), svg: serializeSvg(el), fit: 'fill', opacity: op, name: '矢量图', ...fx, ...cover }); return; }
       if (el instanceof SVGElement) return;
-      if (el !== root && shown && (page.mode === 'fallback' ? hits(r) : owns(r))) decoration(el, s, page.mode === 'fallback' ? clipToBox(r) : r, op, elScale(el, r));
+      if (el !== root && shown && (page.mode === 'fallback' ? hits(r) : owns(r))) decoration(el, s, page.mode === 'fallback' ? clipToBox(r) : r, op, k, page.mode === 'fallback' && !rotated ? toBox(clipToBox(r)) : geo, fx, cover);
       const { parts, nodes } = textParts(el);
       const text = cleanText(parts, s.whiteSpace);
       if (text && !hidden) {
@@ -273,30 +331,38 @@ export function install() {
         for (const n of nodes) { let rr; if (n.nodeType === 3) { range.selectNodeContents(n); rr = range.getBoundingClientRect(); lineRects.push(...[...range.getClientRects()].filter(x => x.width > 0 && x.height > 0)); } else rr = n.getBoundingClientRect(); if (rr.width <= 0 && rr.height <= 0) continue; u = u ? { left: Math.min(u.left, rr.left), top: Math.min(u.top, rr.top), right: Math.max(u.right, rr.right), bottom: Math.max(u.bottom, rr.bottom) } : { left: rr.left, top: rr.top, right: rr.right, bottom: rr.bottom }; }
         if (u) {
           u.width = u.right - u.left; u.height = u.bottom - u.top;
-          const k = elScale(el, r), pad = side => (num(s[`padding${side}`]) + num(s[`border${side}Width`])) * k;
+          const pad = side => (num(s[`padding${side}`]) + num(s[`border${side}Width`])) * k;
           const fs = num(s.fontSize), c = color(s.color) || { r: 0, g: 0, b: 0, a: 1 };
           // 行数：按文字行框的顶边分组；行高 normal 时，纯文字块按内容高度 / 行数推算，否则取 1.2
           const tops = []; for (const x of lineRects.sort((a, b) => a.top - b.top)) if (!tops.length || x.top - tops[tops.length - 1] > fs * k * 0.5) tops.push(x.top);
-          const lines = Math.max(1, tops.length), pureText = !nodes.some(n => n.nodeType === 1) || [...el.children].every(ch => consumedBy.has(ch));
+          const lines = Math.max(1, tops.length);
+          const pureText = !nodes.some(n => n.nodeType === 1) || [...el.children].every(ch => consumedBy.has(ch));
           let lh = s.lineHeight === 'normal' ? 1.2 : num(s.lineHeight) / (fs || 16);
-          if (s.lineHeight === 'normal' && pureText && !/flex|grid/.test(s.display)) { const m = (r.height - pad('Top') - pad('Bottom')) / lines / (fs * k || 16); if (m >= 1 && m <= 1.6) lh = m; }
-          let left = r.left + pad('Left'), right = r.right - pad('Right');
-          if (/flex|grid/.test(s.display) || right - left <= 0) { left = u.left; right = u.right + 2 * k; }
-          // 文字框以字形中心对齐原位置，高度 = 行数 × 行高，这样换成工作台的行高排法后位置不跑
-          const lineBox = lh * fs * k, boxH = Math.max(u.height, lines * lineBox);
-          const box2 = { left, top: u.top + u.height / 2 - boxH / 2, width: Math.max(right - left, u.width), height: boxH };
-          if (owns({ ...box2, right: box2.left + box2.width, bottom: box2.top + box2.height })) {
+          if (s.lineHeight === 'normal' && pureText && !/flex|grid/.test(s.display) && !rotated) { const m = (r.height - pad('Top') - pad('Bottom')) / lines / (fs * k || 16); if (m >= 1 && m <= 1.6) lh = m; }
+          let tbox = null;
+          if (rotated) { // 旋转的文字：取元素内容框（文字在框里自上而下排，和原来一致）
+            const w = (el.offsetWidth - num(s.paddingLeft) - num(s.paddingRight) - num(s.borderLeftWidth) - num(s.borderRightWidth)) * k * scale, h = (el.offsetHeight - num(s.paddingTop) - num(s.paddingBottom) - num(s.borderTopWidth) - num(s.borderBottomWidth)) * k * scale;
+            if (owns(r)) tbox = rotGeom(r, Math.max(w, 1), Math.max(h, lh * fs * k * scale, 1), acc2.angle); }
+          else {
+            let left = r.left + pad('Left'), right = r.right - pad('Right');
+            if (/flex|grid/.test(s.display) || right - left <= 0) { left = u.left; right = u.right + 2 * k; }
+            // 文字框以字形中心对齐原位置，高度 = 行数 × 行高，这样换成工作台的行高排法后位置不跑
+            const lineBox = lh * fs * k, boxH = Math.max(u.height, lines * lineBox);
+            const box2 = { left, top: u.top + u.height / 2 - boxH / 2, width: Math.max(right - left, u.width), height: boxH };
+            if (owns({ ...box2, right: box2.left + box2.width, bottom: box2.top + box2.height })) tbox = toBox(box2);
+          }
+          if (tbox) {
             const sh = s.textShadow && s.textShadow !== 'none' ? splitTop(s.textShadow)[0] : null;
             let shadow = null; if (sh) { const cm = /(rgba?\([^)]*\)|#[0-9a-f]+|[a-z]+)/i.exec(sh), lens = sh.replace(cm?.[0] || '', '').trim().split(/\s+/).map(num); const sc = color(cm?.[0] || s.color); if (sc && sc.a > 0) shadow = { color: hex(sc), x: round((lens[0] || 0) * k * scale), y: round((lens[1] || 0) * k * scale), blur: round(Math.max(0, lens[2] || 0) * k * scale) }; }
             const sw = num(s.webkitTextStrokeWidth), scol = color(s.webkitTextStrokeColor);
             const heading = el.closest('h1, h2, h3');
-            push({ kind: 'text', ...toBox(box2), text, fontSize: round(fs * k * scale), fontWeight: Math.max(100, Math.min(900, Math.round((num(s.fontWeight) || 400) / 100) * 100)), color: hex(c), family: (splitTop(s.fontFamily)[0] || '').replace(/^['"]|['"]$/g, ''), lineHeight: round(Math.max(0.5, Math.min(5, lh)), 3), letterSpacing: s.letterSpacing === 'normal' ? 0 : round(num(s.letterSpacing) * k * scale, 2), align: /center/.test(s.textAlign) ? 'center' : /right|end/.test(s.textAlign) ? 'right' : 'left', shadow, stroke: sw > 0 && scol && scol.a > 0 ? { color: hex(scol), width: round(sw * k * scale, 2) } : null, opacity: op, heading: heading ? Number(heading.tagName[1]) : 0 });
+            push({ kind: 'text', ...tbox, text, fontSize: round(fs * k * scale), fontWeight: Math.max(100, Math.min(900, Math.round((num(s.fontWeight) || 400) / 100) * 100)), color: hex(c), family: (splitTop(s.fontFamily)[0] || '').replace(/^['"]|['"]$/g, ''), lineHeight: round(Math.max(0.5, Math.min(5, lh)), 3), letterSpacing: s.letterSpacing === 'normal' ? 0 : round(num(s.letterSpacing) * k * scale, 2), align: /center/.test(s.textAlign) ? 'center' : /right|end/.test(s.textAlign) ? 'right' : 'left', shadow, stroke: sw > 0 && scol && scol.a > 0 ? { color: hex(scol), width: round(sw * k * scale, 2) } : null, opacity: op, heading: heading ? Number(heading.tagName[1]) : 0, ...fx });
           }
         }
       }
-      for (const c of el.children) if (!consumedBy.has(c)) await walk(c, op);
+      for (const c of el.children) if (!consumedBy.has(c)) await walk(c, op, acc2);
     }
-    await walk(root, 1);
+    await walk(root, 1, { angle: 0, scale: elScale(root, root.getBoundingClientRect()), blend: null });
     let limited = null;
     if (rest.length) {
       let u = null; for (const el of rest) { const r = el.getBoundingClientRect(); u = u ? { left: Math.min(u.left, r.left), top: Math.min(u.top, r.top), right: Math.max(u.right, r.right), bottom: Math.max(u.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }
@@ -310,7 +376,7 @@ export function install() {
   function shotOn({ marks, own, background }) {
     let st = document.getElementById('vw-import-shot');
     if (!st) { st = document.createElement('style'); st.id = 'vw-import-shot'; document.head.append(st); }
-    st.textContent = `html.vw-shot body *{visibility:hidden!important;caret-color:transparent!important}html.vw-shot [data-vw-show],html.vw-shot [data-vw-show] *{visibility:visible!important}html.vw-shot [data-vw-own]{visibility:visible!important}${background ? `html.vw-shot,html.vw-shot body{background:${background}!important}` : ''}`;
+    st.textContent = `html.vw-shot body *{visibility:hidden!important;caret-color:transparent!important}html.vw-shot [data-vw-show],html.vw-shot [data-vw-show] *{visibility:visible!important}html.vw-shot [data-vw-own]{visibility:visible!important}html.vw-shot,html.vw-shot body{background:${background || 'transparent'}!important}`;
     for (const m of marks) { const el = document.querySelector(`[data-vw-imp="${m}"]`); if (el) el.setAttribute(own ? 'data-vw-own' : 'data-vw-show', ''); }
     document.documentElement.classList.add('vw-shot');
   }

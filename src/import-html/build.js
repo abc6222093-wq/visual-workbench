@@ -64,15 +64,20 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
       for (const u of face.urls) { const b = bytesOf(u.url, { srcDir, origin }); if (b && b.length > 12 && fontExt(b)) { bytes = b; break; } }
       if (!bytes) { if (face.urls.some(u => isRemote(u.url, origin))) { missing.add(face.family); remoteFaces.add(face.family); } continue; }
       const weight = fontWeight(face.weight), style = /italic|oblique/.test(face.style) ? 'italic' : 'normal';
-      const key = `${face.family.toLowerCase()}|${weight}|${style}|${hash(bytes)}`; if (fontKeys.has(key)) continue;
+      const key = `${face.family.toLowerCase()}|${weight}|${style}|${hash(bytes)}`;
+      const partial = !!face.range && !/^U\+0+-10FFFF$/i.test(face.range.trim());
+      if (fontKeys.has(key)) { (page.fontIds ||= []).push({ id: fontKeys.get(key), partial }); continue; }
       const fid = rid('font_', 10), file = `fonts/${fileSafe(face.family)}-${weight}${style === 'italic' ? '-italic' : ''}-${fid.slice(5, 11)}${fontExt(bytes)}`;
       writeFileSync(join(projectDir, file), bytes);
-      fontKeys.set(key, fid); fonts.push({ id: fid, family: face.family, file, weight, style });
+      fontKeys.set(key, fid); fonts.push({ id: fid, family: face.family, file, weight, style }); (page.fontIds ||= []).push({ id: fid, partial });
     }
   }
   for (const f of fonts) missing.delete(f.family);
-  const fontFor = (family, weight) => {
-    const list = fonts.filter(f => f.family.toLowerCase() === String(family || '').toLowerCase()); if (!list.length) return null;
+  // 同名字体有多份（各页各自的子集）时，优先用这一页 @font-face 里登记的、不带 unicode-range 的那份
+  const fontFor = (family, weight, page) => {
+    const all = fonts.filter(f => f.family.toLowerCase() === String(family || '').toLowerCase()); if (!all.length) return null;
+    const mine = page?.fontIds || [], pick = ids => all.filter(f => ids.some(x => x.id === f.id));
+    const full = pick(mine.filter(x => !x.partial)), list = full.length ? full : pick(mine).length ? pick(mine) : all;
     return (list.find(f => f.weight === 'variable') || list.reduce((a, b) => (Math.abs(b.weight - weight) < Math.abs(a.weight - weight) ? b : a))).id;
   };
   // ---------- 图片 ----------
@@ -80,7 +85,7 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
   for (const page of analysis.pages) for (const item of page.items) {
     if (item.kind !== 'image') continue;
     const bytes = item.svg ? Buffer.from(item.svg, 'utf8') : bytesOf(item.src, { srcDir, origin });
-    if (!bytes?.length) { item.skip = true; missingImages++; continue; }
+    if (!bytes?.length) { item.skip = true; missingImages++; page.missing = [...(page.missing || []), String(item.src || '').slice(0, 160)]; continue; }
     const key = hash(bytes); item.key = key;
     const s = sources.get(key) || { bytes, w: 1, h: 1, name: item.name }; s.w = Math.max(s.w, item.width); s.h = Math.max(s.h, item.height); sources.set(key, s);
   }
@@ -107,12 +112,12 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
     const elements = [], shots = [], used = new Set();
     let z = 1; const bg = [];
     for (const item of res.items) {
-      const geo = { x: item.x, y: item.y, width: Math.max(1, item.width), height: Math.max(1, item.height) };
+      const geo = { x: item.x, y: item.y, width: Math.max(1, item.width), height: Math.max(1, item.height), ...(item.rotation ? { rotation: item.rotation } : {}) };
       const op = item.opacity !== undefined && item.opacity < 0.999 ? { opacity: Math.max(0, Math.round(item.opacity * 1000) / 1000) } : {};
       let el = null;
       if (item.kind === 'text') {
         used.add(item.family);
-        el = { id: rid('el_'), type: 'text', name: clean(item.text).slice(0, 12) || '文字', ...geo, ...op, text: item.text, font: fontFor(item.family, item.fontWeight), fontSize: Math.max(1, item.fontSize), fontWeight: item.fontWeight, lineHeight: item.lineHeight, letterSpacing: item.letterSpacing, align: item.align, color: item.color, stroke: item.stroke, shadow: item.shadow };
+        el = { id: rid('el_'), type: 'text', name: clean(item.text).slice(0, 12) || '文字', ...geo, ...op, text: item.text, font: fontFor(item.family, item.fontWeight, res), fontSize: Math.max(1, item.fontSize), fontWeight: item.fontWeight, lineHeight: item.lineHeight, letterSpacing: item.letterSpacing, align: item.align, color: item.color, stroke: item.stroke, shadow: item.shadow };
       } else if (item.kind === 'image') {
         if (item.skip || !assetOf.has(item.key)) continue;
         el = { id: rid('el_'), type: 'image', name: clean(item.name || '图片').slice(0, 30), ...geo, ...op, asset: assetOf.get(item.key), fit: item.fit || 'cover' };
@@ -128,6 +133,9 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
         if (item.role !== 'background') { shots.push(item.reason); shotReasons.set(item.reason, (shotReasons.get(item.reason) || 0) + 1); }
       }
       if (!el) continue;
+      if (item.effects && Object.keys(item.effects).length) el.effects = item.effects;
+      if (item.tint && el.type === 'image') el.tint = item.tint;
+      if (item.locked && el.type !== 'text') el.locked = true;
       if (item.role === 'background') { el.locked = true; bg.push(el); } else { el.zIndex = z++; elements.push(el); }
     }
     bg.forEach((el, i) => { el.zIndex = i - bg.length; });
@@ -149,6 +157,7 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
     if (pageMissing.length) lines.push(`- 缺失字体（网络字体，没有下载，文字暂用系统默认字体）：${pageMissing.join('、')}`);
     const unregistered = [...used].filter(f => f && !missing.has(f) && !GENERIC.has(f.toLowerCase()) && !fonts.some(x => x.family.toLowerCase() === f.toLowerCase()));
     if (unregistered.length) lines.push(`- 用到但没有内嵌文件的字体（暂用系统默认字体）：${unregistered.join('、')}`);
+    if (res.missing?.length) lines.push(`- 没有取到的图片（网络地址或文件不存在，没有导入）：${[...new Set(res.missing)].slice(0, 10).join('、')}`);
     if (res.limited) lines.push(`- 元素超过每页 300 个的上限，剩下的 ${res.limited} 个块合成一张截图`);
     if (res.error) lines.push(`- 这一页分析失败（${res.error}），整页截成了一张图`);
     lines.push(`- 原文件：import/${entry}`, '- 请按原 HTML 的动画意图用新格式重写 motion（不要搬旧代码）。');

@@ -35,7 +35,11 @@ export function deckData(html) {
     const slides = Array.isArray(data?.slides) ? data.slides.map(s => (typeof s === 'string' ? s : s?.html)) : null;
     if (!slides?.length || !slides.every(s => typeof s === 'string' && /<(html|body|div|section|h1|p)\b/i.test(s))) continue;
     const pairs = [], value = v => (typeof v === 'string' ? v : v && typeof v === 'object' ? [v.data, v.src, v.url, v.dataUrl].find(x => typeof x === 'string') : undefined);
-    if (Array.isArray(data.assets)) for (const a of data.assets) { const k = [a?.key, a?.id, a?.placeholder, a?.name].find(x => typeof x === 'string'), v = value(a); if (k && v) pairs.push([k, v]); }
+    if (Array.isArray(data.assets) && data.assets.every(a => typeof a === 'string')) {
+      // 纯字符串数组：占位符形如 __XXX_ASSET_n__，n 是数组下标；前缀从页面里找
+      const keys = new Set(); for (const h of slides) for (const m of h.matchAll(/__[A-Z0-9]+(?:_[A-Z0-9]+)*?_(\d+)__/g)) keys.add(m[0]);
+      for (const k of keys) { const v = data.assets[Number(/_(\d+)__$/.exec(k)[1])]; if (typeof v === 'string') pairs.push([k, v]); }
+    } else if (Array.isArray(data.assets)) for (const a of data.assets) { const k = [a?.key, a?.id, a?.placeholder, a?.name].find(x => typeof x === 'string'), v = value(a); if (k && v) pairs.push([k, v]); }
     else if (data.assets && typeof data.assets === 'object') for (const [k, v] of Object.entries(data.assets)) if (value(v)) pairs.push([k, value(v)]);
     pairs.sort((a, b) => b[0].length - a[0].length);
     return { slides: slides.map(h => pairs.reduce((s, [k, v]) => s.split(k).join(v), h)), assets: pairs.length, names: data.slides.map(s => (typeof s?.title === 'string' ? s.title : typeof s?.name === 'string' ? s.name : '')) };
@@ -80,6 +84,8 @@ export async function analyzeHtml({ srcDir, entry, width, height, signal, onPage
       const page = await open(deck ? urls[i] : entry);
       try {
         const work = (async () => {
+          // 每页一份文档的课件常用 End 键跳到最后一步（取「最后一步的画面」）
+          if (deck) { await page.keyboard.press('End').catch(() => {}); await page.waitForTimeout(100); }
           await page.evaluate(([k, n]) => window.__vwImport.isolate(k, n), [kind, deck ? 0 : i]);
           const res = await page.evaluate(o => window.__vwImport.analyze(o), { width });
           for (const item of res.items) {
@@ -87,8 +93,10 @@ export async function analyzeHtml({ srcDir, entry, width, height, signal, onPage
             const c = item.clip, x = Math.max(0, Math.floor(c.x)), y = Math.max(0, Math.floor(c.y));
             const w = Math.min(res.doc.width, Math.ceil(c.x + c.width)) - x, h = Math.min(res.doc.height, Math.ceil(c.y + c.height)) - y;
             if (w < 1 || h < 1) continue;
-            await page.evaluate(o => window.__vwImport.shotOn(o), { marks: item.marks || [item.mark], own: item.own, background: res.background });
-            item.png = await page.screenshot({ clip: { x, y, width: w, height: h }, fullPage: true, caret: 'hide' });
+            // canvas / video 等和背景层：底色取页面背景；叠在别的内容上的块：透明底，混合模式另写进 effects.blend
+            const opaque = item.opaque || item.role === 'background';
+            await page.evaluate(o => window.__vwImport.shotOn(o), { marks: item.marks || [item.mark], own: item.own, background: opaque ? res.background : null });
+            item.png = await page.screenshot({ clip: { x, y, width: w, height: h }, fullPage: true, caret: 'hide', omitBackground: !opaque });
             await page.evaluate(() => window.__vwImport.shotOff());
           }
           return res;
