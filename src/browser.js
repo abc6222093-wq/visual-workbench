@@ -1,6 +1,6 @@
 // 找一个能用的浏览器给「动效检查」和「导出图片 / PDF」用。
 // 顺序：Mac 上装的 Chrome → Edge → Playwright 自带的 Chromium → Playwright 自带的 WebKit（Safari 内核）。
-// 都没有时抛出一句中文说明和解决办法，不让エイ看到英文报错。
+// 都没有时抛出一句中文说明和解决办法，不让用户看到英文报错。
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, win32, posix } from 'node:path';

@@ -1,4 +1,4 @@
-// 给 agent 的开场白：エイ 开新的 agent 对话时粘贴，说明代码在哪、规则在哪、要改哪个项目、动手前后要做什么。
+// 给 agent 的开场白：用户开新的 agent 对话时粘贴，说明代码在哪、规则在哪、要改哪个项目、动手前后要做什么。
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROJECT_LAYOUT } from './data-dir.js';

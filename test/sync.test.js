@@ -8,10 +8,10 @@ const SAMPLE = JSON.parse(readFileSync(new URL('../examples/sample-deck/project.
 const fresh = () => structuredClone(SAMPLE);
 const pageOf = (project, id) => project.pages.find(page => page.id === id);
 const el = (project, pageId, id) => findElement(pageOf(project, pageId), id)?.element;
-// 三份独立副本：base / エイ / agent
+// 三份独立副本：base / 用户 / agent
 const trio = () => [fresh(), fresh(), fresh()];
 
-test('エイ 改元素 A 的位置、agent 改元素 B 的文字：两边都保留，无冲突', () => {
+test('用户改元素 A 的位置、agent 改元素 B 的文字：两边都保留，无冲突', () => {
   const [base, local, remote] = trio();
   el(local, 'page_cover1', 'el_title1').x = 222;
   el(remote, 'page_cover1', 'el_subtitle1').text = 'agent 改的副标题';
@@ -23,7 +23,7 @@ test('エイ 改元素 A 的位置、agent 改元素 B 的文字：两边都保�
   assert.deepEqual(conflicts, []);
 });
 
-test('エイ 改 A 的 x、agent 改同一个 A 的颜色：属性级合并，无冲突', () => {
+test('用户改 A 的 x、agent 改同一个 A 的颜色：属性级合并，无冲突', () => {
   const [base, local, remote] = trio();
   el(local, 'page_cover1', 'el_title1').x = 10;
   el(remote, 'page_cover1', 'el_title1').color = '#ff0000';
@@ -34,17 +34,17 @@ test('エイ 改 A 的 x、agent 改同一个 A 的颜色：属性级合并，�
   assert.equal(conflicts.length, 0);
 });
 
-test('双方改同一元素同一属性：默认保留 エイ 的并记一条冲突；prefer remote 时取 agent 的', () => {
+test('双方改同一元素同一属性：默认保留用户的并记一条冲突；prefer remote 时取 agent 的', () => {
   const [base, local, remote] = trio();
-  el(local, 'page_cover1', 'el_title1').text = 'エイ 的标题';
+  el(local, 'page_cover1', 'el_title1').text = '用户的标题';
   el(remote, 'page_cover1', 'el_title1').text = 'agent 的标题';
   const { merged, conflicts } = mergeProjects(base, local, remote);
-  assert.equal(el(merged, 'page_cover1', 'el_title1').text, 'エイ 的标题');
+  assert.equal(el(merged, 'page_cover1', 'el_title1').text, '用户的标题');
   assert.equal(conflicts.length, 1);
   assert.deepEqual(conflicts[0], {
     path: ['pages', 'page_cover1', 'elements', 'el_title1', 'text'],
     label: '第 1 页 · 标题 · 文字',
-    local: 'エイ 的标题',
+    local: '用户的标题',
     remote: 'agent 的标题',
   });
   const other = mergeProjects(base, local, remote, { prefer: 'remote' });
@@ -56,7 +56,7 @@ test('冲突标签：分组子元素、x/y 合并成「位置」、项目级名�
   const [base, local, remote] = trio();
   Object.assign(el(local, 'page_clip3', 'el_gtri3'), { x: 1, y: 2 });
   Object.assign(el(remote, 'page_clip3', 'el_gtri3'), { x: 3, y: 4 });
-  local.name = 'エイ 的名字';
+  local.name = '用户的名字';
   remote.name = 'agent 的名字';
   pageOf(local, 'page_scene2').background = '#000000';
   pageOf(remote, 'page_scene2').background = '#ffffff';
@@ -80,27 +80,27 @@ test('冲突标签里的页码按合并后的页序', () => {
   assert.equal(conflicts[0].label, '第 3 页 · 标题 · 字号');
 });
 
-test('agent 新增页面、元素、素材登记，エイ 同时改别的：都在，顺序合理', () => {
+test('agent 新增页面、元素、素材登记，用户同时改别的：都在，顺序合理', () => {
   const [base, local, remote] = trio();
   el(local, 'page_scene2', 'el_card2a').y = 999;
   remote.pages.push({ id: 'page_new4', name: '4 新页', background: '#ffffff', elements: [], steps: [] });
   const cover = pageOf(remote, 'page_cover1');
   cover.elements.splice(2, 0, { id: 'el_agent1', type: 'text', name: 'agent 新增', x: 0, y: 0, width: 10, height: 10, zIndex: 1, text: '新' });
   remote.assets.push({ id: 'asset_agent1', kind: 'image', file: 'assets/a.png', name: 'agent 素材', width: 1, height: 1 });
-  // エイ 也新增了一个元素，放在副标题后面
-  pageOf(local, 'page_cover1').elements.splice(2, 0, { id: 'el_ei1', type: 'shape', name: 'エイ 新增', x: 5, y: 5, width: 5, height: 5, zIndex: 1 });
+  // 用户也新增了一个元素，放在副标题后面
+  pageOf(local, 'page_cover1').elements.splice(2, 0, { id: 'el_ei1', type: 'shape', name: '用户新增', x: 5, y: 5, width: 5, height: 5, zIndex: 1 });
   const { merged, conflicts } = mergeProjects(base, local, remote);
   assert.deepEqual(conflicts, []);
   assert.deepEqual(merged.pages.map(p => p.id), ['page_cover1', 'page_scene2', 'page_clip3', 'page_new4']);
   assert.deepEqual(merged.assets.map(a => a.id), ['asset_city01', 'asset_logo01', 'asset_newpic1', 'asset_agent1']);
-  // エイ 没调顺序 → 用 agent 的顺序；エイ 新增的项插在它在本地的前一个兄弟「标题」之后
+  // 用户没调顺序 → 用 agent 的顺序；用户新增的项插在它在本地的前一个兄弟「标题」之后
   assert.deepEqual(pageOf(merged, 'page_cover1').elements.map(e => e.id), [
     'el_bgphoto', 'el_title1', 'el_ei1', 'el_agent1', 'el_subtitle1', 'el_bullet1', 'el_bullet2', 'el_bullet3', 'el_logo1',
   ]);
   assert.equal(el(merged, 'page_scene2', 'el_card2a').y, 999);
 });
 
-test('agent 删除元素、エイ 没动它：删除', () => {
+test('agent 删除元素、用户没动它：删除', () => {
   const [base, local, remote] = trio();
   const page = pageOf(remote, 'page_cover1');
   page.elements = page.elements.filter(e => e.id !== 'el_logo1');
@@ -111,7 +111,7 @@ test('agent 删除元素、エイ 没动它：删除', () => {
   assert.deepEqual(conflicts, []);
 });
 
-test('agent 删除元素、エイ 改了它：保留 エイ 的并记冲突', () => {
+test('agent 删除元素、用户改了它：保留用户的并记冲突', () => {
   const [base, local, remote] = trio();
   const page = pageOf(remote, 'page_cover1');
   page.elements = page.elements.filter(e => e.id !== 'el_logo1');
@@ -127,7 +127,7 @@ test('agent 删除元素、エイ 改了它：保留 エイ 的并记冲突', ()
   assert.equal(el(other.merged, 'page_cover1', 'el_logo1'), undefined);
 });
 
-test('エイ 删除元素、agent 改了它：默认按 エイ 删掉并记冲突', () => {
+test('用户删除元素、agent 改了它：默认按用户删掉并记冲突', () => {
   const [base, local, remote] = trio();
   const page = pageOf(local, 'page_cover1');
   page.elements = page.elements.filter(e => e.id !== 'el_logo1');
@@ -137,7 +137,7 @@ test('エイ 删除元素、agent 改了它：默认按 エイ 删掉并记冲�
   assert.equal(conflicts[0].label, '第 1 页 · 标志（一方删除）');
 });
 
-test('エイ 拖动页面顺序、agent 改某页内容：顺序按 エイ 的，内容按 agent 的', () => {
+test('用户拖动页面顺序、agent 改某页内容：顺序按用户的，内容按 agent 的', () => {
   const [base, local, remote] = trio();
   local.pages = [local.pages[2], local.pages[0], local.pages[1]];
   el(remote, 'page_scene2', 'el_caption2').text = 'agent 新说明';
@@ -149,7 +149,7 @@ test('エイ 拖动页面顺序、agent 改某页内容：顺序按 エイ 的�
   assert.deepEqual(conflicts, []);
 });
 
-test('agent 改动效代码、エイ 改同页元素位置：都在', () => {
+test('agent 改动效代码、用户改同页元素位置：都在', () => {
   const [base, local, remote] = trio();
   const motion = pageOf(remote, 'page_scene2').motion;
   motion.source = motion.source + '\n// agent 新加的一行';
@@ -164,7 +164,7 @@ test('agent 改动效代码、エイ 改同页元素位置：都在', () => {
   assert.deepEqual(conflicts, []);
 });
 
-test('只有 agent 变：结果等于磁盘版本；只有 エイ 变：结果等于本地（updatedAt 取磁盘的）', () => {
+test('只有 agent 变：结果等于磁盘版本；只有用户变：结果等于本地（updatedAt 取磁盘的）', () => {
   {
     const [base, local, remote] = trio();
     el(remote, 'page_cover1', 'el_title1').text = '新';
@@ -226,7 +226,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// 搭一个测试场景：local 是 エイ 界面的状态，disk 是磁盘
+// 搭一个测试场景：local 是用户界面的状态，disk 是磁盘
 function setup({ fetchImpl } = {}) {
   const base = fresh();
   const env = {
@@ -254,7 +254,7 @@ const agentEdits = env => {
   env.disk.revision = 'r2';
 };
 
-test('エイ 编辑中收到外部改动时不丢她的输入', async () => {
+test('用户编辑中收到外部改动时不丢她的输入', async () => {
   const env = setup();
   agentEdits(env);
   env.busy = true;
@@ -267,7 +267,7 @@ test('エイ 编辑中收到外部改动时不丢她的输入', async () => {
   await tick();
   assert.equal(env.fetches, 0);
   assert.equal(env.applied.length, 0);
-  // 拖动结束，エイ 的 x 已经写进本地项目
+  // 拖动结束，用户的 x 已经写进本地项目
   el(env.local.project, 'page_cover1', 'el_title1').x = 444;
   env.busy = false;
   env.timers.run();
@@ -284,7 +284,7 @@ test('エイ 编辑中收到外部改动时不丢她的输入', async () => {
   assert.equal(env.ctl.pending, false);
 });
 
-test('取数据期间 エイ 变忙：不应用，稍后重试成功', async () => {
+test('取数据期间用户变忙：不应用，稍后重试成功', async () => {
   const gates = [];
   const env = setup({ fetchImpl: () => { const d = deferred(); gates.push(d); return d.promise; } });
   agentEdits(env);
@@ -315,7 +315,7 @@ test('revision 没变：不调用 apply', async () => {
   assert.equal(env.ctl.pending, false);
 });
 
-test('只有 agent 改动、エイ 没有未保存修改：remoteChanged 为真，needsSave 为假', async () => {
+test('只有 agent 改动、用户没有未保存修改：remoteChanged 为真，needsSave 为假', async () => {
   const env = setup();
   agentEdits(env);
   env.ctl.notify();
@@ -414,8 +414,8 @@ test('dispose 之后 notify 无效', async () => {
 });
 
 // 浏览器里 setTimeout / clearTimeout 不能挂在别的对象上调用（Illegal invocation）。
-// 这里把全局定时器换成和浏览器一样挑剔的版本，确认默认定时器在 エイ 忙的时候也能正常重试。
-test('默认定时器在浏览器里也能用：エイ 忙时不报错，忙完后照常合并', async () => {
+// 这里把全局定时器换成和浏览器一样挑剔的版本，确认默认定时器在用户忙的时候也能正常重试。
+test('默认定时器在浏览器里也能用：用户忙时不报错，忙完后照常合并', async () => {
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;
   const strict = (real) => function (...args) {
@@ -441,7 +441,7 @@ test('默认定时器在浏览器里也能用：エイ 忙时不报错，忙完�
     controller.notify();
     await new Promise((done) => realSet(done, 30));
     assert.equal(applied.length, 0);
-    local.pages[0].elements[0].x = 99; // エイ 这时拖完了
+    local.pages[0].elements[0].x = 99; // 用户这时拖完了
     busy = false;
     await controller.settle();
     assert.equal(applied.length, 1);

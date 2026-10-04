@@ -38,7 +38,7 @@ import {
   resizeBounds,
   referenceText,
 } from "./editor.js";
-// 实时连接（第 3 轮）：合并エイ 和 agent 的修改
+// 实时连接（第 3 轮）：合并用户和 agent 的修改
 import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
 import { icon } from "./ui/icons.js";
@@ -159,7 +159,7 @@ function shell(active, body) {
     `<button class="ed-ibtn ${active === a ? "is-on" : ""}" data-action="${a}" title="${title}" aria-label="${title}" ${active === a ? 'aria-current="page"' : ""}>${icon(name, 18)}</button>`;
   disposeStepView();
   const focus = active === "editor" && S.focus ? " is-focus" : "";
-  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="用户">用</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
 }
 // 总览页、素材库的顶部：左边页面名直接放在背景上，右边一个白色圆钮
 function head(name, count, action) {
@@ -410,7 +410,7 @@ function setAgent(state) {
   refreshAgentChip();
 }
 // ---------- 实时连接 ----------
-// エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
+// 用户正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
 function isBusy() {
   if(nudgePending)return true;
   if (S.view !== "editor" || !S.project) return true;
@@ -426,7 +426,7 @@ function keepSelection() {
   S.selected = S.selected.filter((id) => findElement(page(), id));
   for (const id of [...S.checked]) if (!S.project.pages.some((p) => p.id === id)) S.checked.delete(id);
 }
-// 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留エイ 的并提示
+// 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留用户的并提示
 function reconcileLinkedPages() {
   let changed = false;
   for (const p of S.project.pages) if (p.outline?.mode === 'document') changed = reconcileDocument(S.project,p).changed || changed;
@@ -462,7 +462,7 @@ function makeSync() {
     apply: applySync,
   });
 }
-// agent 只换了素材 / 动效代码文件内容（项目文件没变）：等エイ 不忙时重画，图片地址带上时间戳重新加载
+// agent 只换了素材 / 动效代码文件内容（项目文件没变）：等用户不忙时重画，图片地址带上时间戳重新加载
 function refreshFiles(files) {
   const stamp = Date.now();
   for (const file of files) if (file !== "project.json") S.stale.set(file, stamp);
@@ -1154,7 +1154,7 @@ async function flush() {
       else saveStatus(SAVE_TEXT.ok);
     } catch (e) {
       if (e.status === 409) {
-        // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（エイ 的修改保留，agent 的修改并进来）
+        // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（用户的修改保留，agent 的修改并进来）
         e.message = "agent 刚改过这个项目，正在合并，请稍后再试";
         setText($("#save-status"), SAVE_TEXT.busy);
         setTimeout(() => S.sync?.notify(), 0);
@@ -1172,7 +1172,7 @@ async function flush() {
   if (S.saved < S.dirty) return flush();
 }
 
-// 两边改了同一处：已经保留エイ 的修改，这里告诉她是哪些地方，并让她可以改用 agent 的
+// 两边改了同一处：已经保留用户的修改，这里告诉她是哪些地方，并让她可以改用 agent 的
 function conflictDialog() {
   const labels = S.lastConflict?.labels || [];
   modal(
@@ -1379,7 +1379,7 @@ async function versions() {
   await flush();
   const list = await api(`${path()}/versions`);
   modal(
-    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "エイ", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}${ibtn("version-delete", "trash", "删除这个版本", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
+    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "用户", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}${ibtn("version-delete", "trash", "删除这个版本", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
   );
 }
 function versionTime(v) {

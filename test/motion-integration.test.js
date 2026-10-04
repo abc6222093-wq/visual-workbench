@@ -210,20 +210,20 @@ test('母版：从母版新建带上动效代码（series.json 的 motions 原�
 test('三方合并：动效代码整体保留、不被逐字合并或截断', () => {
   const trio = () => [structuredClone(SAMPLE_PROJECT), structuredClone(SAMPLE_PROJECT), structuredClone(SAMPLE_PROJECT)];
 
-  // (a) agent 重写第 1 页 source；エイ 挪第 1 页元素、改第 2 页文字
+  // (a) agent 重写第 1 页 source；用户挪第 1 页元素、改第 2 页文字
   {
     const [base, local, remote] = trio();
     pageOf(remote, 'page_cover1').motion.source = SOURCE_B;
     el(local, 'page_cover1', 'el_title1').x = 321;
-    el(local, 'page_scene2', 'el_caption2').text = 'エイ 改的说明';
+    el(local, 'page_scene2', 'el_caption2').text = '用户改的说明';
     const { merged, conflicts } = mergeProjects(base, local, remote);
     assert.deepEqual(conflicts, []);
     assert.equal(pageOf(merged, 'page_cover1').motion.source, SOURCE_B);
     assert.equal(el(merged, 'page_cover1', 'el_title1').x, 321);
-    assert.equal(el(merged, 'page_scene2', 'el_caption2').text, 'エイ 改的说明');
+    assert.equal(el(merged, 'page_scene2', 'el_caption2').text, '用户改的说明');
   }
 
-  // (b) agent 给原来没有动效的页加动效；エイ 同时改这一页
+  // (b) agent 给原来没有动效的页加动效；用户同时改这一页
   {
     const [base, local, remote] = trio();
     for (const p of [base, local, remote]) delete pageOf(p, 'page_clip3').motion;
@@ -246,7 +246,7 @@ test('三方合并：动效代码整体保留、不被逐字合并或截断', ()
     assert.equal(el(merged, 'page_scene2', 'el_card2a').y, 77);
   }
 
-  // (d) エイ 删除了 agent 新 source 引用的元素 → 元素按原规则删掉，source 原样保留
+  // (d) 用户删除了 agent 新 source 引用的元素 → 元素按原规则删掉，source 原样保留
   {
     const [base, local, remote] = trio();
     const newSource = SOURCE_A.replace('el_title1', 'el_logo1');

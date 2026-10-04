@@ -2,14 +2,14 @@
 
 机器可读定义：`schema/project.schema.json`（JSON Schema 2020-12）。示例：`examples/sample-deck/`。校验：`npm run validate <项目路径>`。
 
-本文是给 agent 和エイ看的说明书。**schema 与本文冲突时以 schema 为准**，并请修正本文。
+本文是给 agent 和用户看的说明书。**schema 与本文冲突时以 schema 为准**，并请修正本文。
 
 ## 1. 设计原则
 
-1. **项目文件是唯一的真相来源**：エイ 和 agent 读写同一份 `project.json`。放映动效不能回写编辑数据。
+1. **项目文件是唯一的真相来源**：用户和 agent 读写同一份 `project.json`。放映动效不能回写编辑数据。
 2. **编号稳定**：页面、元素、素材、字体的 `id` 一旦生成就不改。动效按元素编号查找，不按数组位置或名字。
 3. **动效由 agent 自由写代码**：每页可内嵌一个 JavaScript ES module。没有固定动效种类；放映器只负责提供最新元素状态与点击步数。
-4. **布局取实时数据**：每次放映从最新项目文件创建只读快照。代码根据元素当前的位置、尺寸、外观计算动效，エイ 挪动、缩放或改字后仍能从新状态出发。
+4. **布局取实时数据**：每次放映从最新项目文件创建只读快照。代码根据元素当前的位置、尺寸、外观计算动效，用户挪动、缩放或改字后仍能从新状态出发。
 5. **编辑默认全部显示**：默认按项目文件画静止状态；可以手动查看动效的第 N 屏。动效及换页只在放映、屏幕视图、预览、检查和导出时运行，不回写编辑数据。
 6. **素材随项目走**：素材、字体文件都存在项目文件夹里。
 
@@ -29,7 +29,7 @@
       versions/             版本存档，见 §10
       series.json           从系列母版新建时才有：母版来源、配色、动效代码
   exports/<项目编号>/       导出的放映版 HTML、图片、PDF，见 §12
-  workbench-state.json      哪些项目是系列母版（エイ 在界面上标）
+  workbench-state.json      哪些项目是系列母版（用户在界面上标）
   library/                  公共素材库，所有项目都能取用
     assets/
     fonts/
@@ -99,7 +99,7 @@
 - `outline`：可选，页内联动文稿及排版要求；见 §15。
 - `motion`：可选。`steps` 是点击推进的次数，`source` 是本页动效与离页换页代码，见 §9。没有动效可省略 `motion`。
 
-页码 = 在 `pages` 里的位置（从 1 数）。页码会随增删变化，所以工具间传递用 `id`，只有给エイ看的命令行参数用页码。
+页码 = 在 `pages` 里的位置（从 1 数）。页码会随增删变化，所以工具间传递用 `id`，只有给用户看的命令行参数用页码。
 
 ## 6. 元素
 
@@ -118,7 +118,7 @@
 | `locked` | 布尔 | 锁定后工作台不让拖，默认 false |
 | `effects` | 对象 | 混合、滤镜、遮罩、裁切，见 §6.6。**只由 agent 写** |
 
-**エイ 在工作台里改的就是这些**：`x` `y` `width` `height` `rotation` `zIndex`，以及文字类的 `text` `color` `font` `fontSize` 等。agent 下一轮必须以文件里的最新值为准。
+**用户在工作台里改的就是这些**：`x` `y` `width` `height` `rotation` `zIndex`，以及文字类的 `text` `color` `font` `fontSize` 等。agent 下一轮必须以文件里的最新值为准。
 
 ### 6.2 文字 `text`
 
@@ -132,7 +132,7 @@
 - `fontWeight` 100–900；`lineHeight` 是倍数；`align` 为 left / center / right。
 - `stroke`（可选）：文字描边，`{ "color": "#RRGGBB[AA]", "width": 数字 ≥ 0 }` 或 `null`（没有描边）。`width` 是线宽（画板像素），线沿字形边缘居中画，字的填充色盖在描边上面，所以描边不会吃掉字形，露在字外的约为线宽的一半。
 - `shadow`（可选）：文字阴影，`{ "color": "#RRGGBB[AA]", "x": 数字, "y": 数字, "blur": 数字 ≥ 0 }` 或 `null`（没有阴影）。`x` 向右、`y` 向下偏移，`blur` 模糊半径，单位都是画板像素。
-- 描边和阴影是**元素属性**：编辑、放映、动效检查、导出（放映版 HTML、图片、PDF）都按同一份画法显示。不要再在动效代码里临时加描边 / 阴影（那样只在放映时出现）。エイ 可以在工作台里改它们，改过的值 agent 不动。
+- 描边和阴影是**元素属性**：编辑、放映、动效检查、导出（放映版 HTML、图片、PDF）都按同一份画法显示。不要再在动效代码里临时加描边 / 阴影（那样只在放映时出现）。用户可以在工作台里改它们，改过的值 agent 不动。
 
 ```json
 { "id": "el_title2", "type": "text", "x": 160, "y": 300, "width": 1600, "height": 160, "zIndex": 10,
@@ -150,7 +150,7 @@
 
 - `asset`：引用 `assets[].id`，校验会检查它存在。
 - `fit`：cover（裁满）/ contain（完整放进去）/ fill（拉伸）。
-- `tint`（可选）：重新着色，`"#RRGGBB[AA]"` 或 `null`（原色）。设了以后，图片按自己的透明度当形状，整体画成这一种颜色——用来给**单色矢量标志（SVG）**换颜色，透明底的单色 PNG / WebP 也可以。多色图片会变成一块单色剪影；JPEG 没有透明部分，会整块变成纯色，所以校验会报 `TINT_NEEDS_ALPHA`。エイ 可以在工作台里改颜色。
+- `tint`（可选）：重新着色，`"#RRGGBB[AA]"` 或 `null`（原色）。设了以后，图片按自己的透明度当形状，整体画成这一种颜色——用来给**单色矢量标志（SVG）**换颜色，透明底的单色 PNG / WebP 也可以。多色图片会变成一块单色剪影；JPEG 没有透明部分，会整块变成纯色，所以校验会报 `TINT_NEEDS_ALPHA`。用户可以在工作台里改颜色。
 
 ```json
 { "id": "el_logo1", "type": "image", "x": 80, "y": 60, "width": 240, "height": 80, "zIndex": 20,
@@ -226,7 +226,7 @@
 
 ```json
 { "id": "asset_newpic1", "kind": "image", "file": "assets/new-photo.png",
-  "name": "エイ 新拖进来的照片", "width": 400, "height": 300,
+  "name": "用户新拖进来的照片", "width": 400, "height": 300,
   "pendingLayout": true, "addedAt": "2026-10-01T12:30:00.000Z",
   "source": { "type": "upload" } }
 ```
@@ -236,8 +236,8 @@
 | `id` | 稳定编号 |
 | `kind` | 目前只有 `image` |
 | `file` | 相对路径，必须在 `assets/` 下；校验检查文件存在 |
-| `pendingLayout` | **待排版标记**。工作台把エイ拖进来的新素材登记为 `true`；agent 把它排进页面后改成 `false` |
-| `source` | 来源：`upload`（エイ拖入）/ `library`（从公共素材库取）/ `copied-from-project`（从别的项目复制页面带来） |
+| `pendingLayout` | **待排版标记**。工作台把用户拖进来的新素材登记为 `true`；agent 把它排进页面后改成 `false` |
+| `source` | 来源：`upload`（用户拖入）/ `library`（从公共素材库取）/ `copied-from-project`（从别的项目复制页面带来） |
 
 **agent 每轮开工要做的事**：`npm run validate <项目>` 会在末尾列出待排版素材；或者直接找 `pendingLayout: true`。
 
@@ -290,7 +290,7 @@ export default async function (ctx) {
 
 返回对象中的三个函数均可选；但 `steps > 0` 时必须返回 `step` 函数。`steps: 0` 的页面可以只提供 `transition`。每次点击等当前异步步骤完成后才能继续；最后一步完成后的**下一次点击**才翻到下一页。`transition` 接收的 `from` / `to` 是实际放映页 DOM 容器（`to` 为已渲染的下一页），`direction` 为 `1`（前进）或 `-1`（后退）；没有 `transition` 时直接切换。切换或重置时调用 `dispose`。页内自动连续推进可在一次 `step` 内串联多个 `await ctx.animate(...)` 和 `await ctx.timer(...)`，不必增加点击次数。
 
-工作台开着时エイ 和 agent 同时改同一个项目，三方合并把每页 `motion`（`steps` + `source`）当作一个整体：双方都改了时取 agent 的整份并提示エイ，不会把两份代码拼在一起。
+工作台开着时用户和 agent 同时改同一个项目，三方合并把每页 `motion`（`steps` + `source`）当作一个整体：双方都改了时取 agent 的整份并提示用户，不会把两份代码拼在一起。
 
 从系列母版新建的项目，`series.json` 的 `motions` 里原样记录了母版各页的 `{ pageId, pageName, steps, source }`，供 agent 照着为新页面改写。
 
@@ -298,7 +298,7 @@ export default async function (ctx) {
 
 | 成员 | 说明 |
 |---|---|
-| `ctx.project`、`ctx.page` | 放映初始化时，从最新项目文件复制并递归冻结的只读快照；包含エイ 最新的元素数据。 |
+| `ctx.project`、`ctx.page` | 放映初始化时，从最新项目文件复制并递归冻结的只读快照；包含用户最新的元素数据。 |
 | `ctx.root` | 本页放映 DOM 容器；代码可在其中创建临时粒子等节点。不要修改编辑器 DOM。 |
 | `ctx.element(id)` | 返回 `{ node, base }`；`node` 是本页该编号的放映 DOM 节点，`base` 是含 `x/y/width/height/rotation/opacity/颜色/字体/层级` 等属性的冻结元素快照。找不到编号会抛错，动效检查会报告。分组子元素也可查。 |
 | `ctx.step` | 当前正在执行的从 0 开始的步索引；初始化时为 `-1`。 |
@@ -310,11 +310,11 @@ export default async function (ctx) {
 
 动效代码在放映时运行于浏览器。可使用 DOM、Web Animations API，也可导入本地现成库，例如 `await ctx.importModule('/vendor/anime.esm.min.js')`；不依赖云端 CDN。内嵌模块使用数据 URL 加载，因此相对路径及 `/vendor/...` 这样的根路径直接 import 不支持；用 `ctx.importModule` 解析同源本地路径，或 import 完整的本地 HTTP URL。未内置的库可打包内联进 `source`（保留许可证），或由开发者放入本地 `web/vendor/`；后一方式依赖该工作台安装，不随项目存版。第三方库的额外计时器或动画须在 `dispose` 或 `ctx.signal` 中清理。代码异常由动效检查命令报告。动效代码以 `motion.source` 为准；项目文件夹里的附属 .js 不能用 `ctx.importModule` 导入，只当参考或存档。导出放映版时如何打包库见 §12。
 
-### 9.3 从エイ 修改后的状态出发
+### 9.3 从用户修改后的状态出发
 
 每次放映，`ctx.element(id).base` 都来自项目文件的最新值；`node` 是按该值渲染的放映节点。相对平移可以用 `transform: translate(...)`，曲线路径可按 `base.width`、`base.height` 算控制点；元素间联动可同时读取两个元素的 `base` 或 DOM 尺寸。不要在代码里固化元素的画板坐标、宽高、文字、颜色、字体、层级，也不要把播放后的样式写回项目文件。若动效跨几个点击持续移动同一元素，应在放映节点上延续前一步状态，或依据 `base` 计算累计位移。
 
-エイ 删除了动效代码引用的元素后，agent 必须修正 `source`；复制元素不会自动复制动效逻辑。编辑器只按文件数据显示静止状态，因此エイ 仍能摆放所有元素，包括放映开头会被隐藏的元素。
+用户删除了动效代码引用的元素后，agent 必须修正 `source`；复制元素不会自动复制动效逻辑。编辑器只按文件数据显示静止状态，因此用户仍能摆放所有元素，包括放映开头会被隐藏的元素。
 
 ### 9.4 检查
 
@@ -327,10 +327,10 @@ export default async function (ctx) {
 ## 10. 版本
 
 - 工作台自动保存：覆盖同一份 `project.json`，不产生历史。
-- 产生版本的时机：エイ 手动"存一版"；agent 每轮**动手改之前**执行 `npm run save-version -- <项目> -m "备注"`；エイ 退回到旧版本前，工作台自动存一份「退回前自动存档」。
+- 产生版本的时机：用户手动"存一版"；agent 每轮**动手改之前**执行 `npm run save-version -- <项目> -m "备注"`；用户退回到旧版本前，工作台自动存一份「退回前自动存档」。
 - 一个版本 = `versions/<时间戳>/` 下项目文件夹里除 `versions/` 外的全部文件（`project.json`（含 `motion.source`）、`assets/`、`fonts/`、`series.json`、附属文件）+ `meta.json`（时间、备注、谁存的）。
 - 去重：文件内容按 sha256 存进 `versions/.objects/`，版本目录里是指向它的硬链接，同样的文件只占一份空间。
-- 回收：エイ 可以在版本列表里删除版本；「退回前自动存档」只保留最近 10 条（`AUTO_BACKUP_KEEP`）。删除后，不再被任何版本用到的对象自动清掉。agent 不要手动删 `versions/` 或改 `.objects/`。
+- 回收：用户可以在版本列表里删除版本；「退回前自动存档」只保留最近 10 条（`AUTO_BACKUP_KEEP`）。删除后，不再被任何版本用到的对象自动清掉。agent 不要手动删 `versions/` 或改 `.objects/`。
 - 版本编号可能在删除后被复用，不要假设编号单调递增；新旧以 `meta.json` 的 `savedAt` 为准。
 - 版本目录不进 git（整个数据目录都不进）。
 

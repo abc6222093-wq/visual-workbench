@@ -90,7 +90,7 @@
         "name": { "type": "string" },
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
-        "pendingLayout": { "type": "boolean", "description": "true = 待排版：エイ 新拖进来、还没被 agent 排进页面的素材" },
+        "pendingLayout": { "type": "boolean", "description": "true = 待排版：用户新拖进来、还没被 agent 排进页面的素材" },
         "addedAt": { "$ref": "#/$defs/timestamp" },
         "source": {
           "type": "object",
@@ -128,7 +128,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/pageId" },
         "name": { "type": "string" },
-        "notes": { "type": "string", "description": "给 agent 或 エイ 的备注，不渲染" },
+        "notes": { "type": "string", "description": "给 agent 或用户的备注，不渲染" },
         "background": { "$ref": "#/$defs/fill" },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
         "motion": { "$ref": "#/$defs/motion" },
@@ -328,7 +328,7 @@
       }
     },
     "effects": {
-      "description": "视觉效果（只由 agent 写，エイ 不碰）：混合模式、滤镜、渐变遮罩、多边形裁切",
+      "description": "视觉效果（只由 agent 写，用户不碰）：混合模式、滤镜、渐变遮罩、多边形裁切",
       "type": "object",
       "additionalProperties": false,
       "properties": {
