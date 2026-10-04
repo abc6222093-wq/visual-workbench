@@ -25,8 +25,8 @@ function baseProject(text = {}) {
     pages: [{
       id: 'page_text01', name: '描边', background: '#ffffff',
       elements: [
-        { id: 'el_stroke1', type: 'text', x: 40, y: 40, width: 440, height: 340, zIndex: 1, text: 'H', fontSize: 240, fontWeight: 900, color: '#ffffff', stroke: STROKE, shadow: SHADOW, ...text },
-        { id: 'el_plain1', type: 'text', x: 520, y: 40, width: 240, height: 100, zIndex: 2, text: '原样', fontSize: 40, color: '#000000' },
+        { id: 'el_stroke1', type: 'text', x: 40, y: 40, width: 440, height: 336, zIndex: 1, text: 'H', fontSize: 240, fontWeight: 900, color: '#ffffff', stroke: STROKE, shadow: SHADOW, ...text },
+        { id: 'el_plain1', type: 'text', x: 520, y: 40, width: 240, height: 56, zIndex: 2, text: '原样', fontSize: 40, color: '#000000' },
       ],
     }],
   };

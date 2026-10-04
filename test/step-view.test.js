@@ -131,7 +131,7 @@ test('步骤视图：拖动改元素自己的 x，松手后仍停在这一步、
   const after = await look(page, 'el_title1');
   assert.deepEqual([after.tx, after.translate], [100, ''], '重画后动效从新位置重新快进');
   assert.equal(await page.locator('#artboard [data-element-id="el_title1"]').evaluate(n => n.style.left), `${xAfter}px`);
-  assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 8, '四角和四条边的缩放把手还在');
+  assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 6, '四角和左右两边的缩放把手还在（文字框高度由内容决定，没有上下把手）');
   assert.deepEqual(errors, []);
 });
 

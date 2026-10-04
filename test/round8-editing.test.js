@@ -2,7 +2,8 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
 const now='2026-10-01T12:00:00.000Z';
-const text=(id,x,y)=>({id,type:'text',x,y,width:120,height:60,zIndex:1,text:id,fontSize:24,color:'#111111'});
+// 第 10 轮：文字框高度由内容决定，夹具按单行 16px（ceil(16×1.4)=23）写，打开时不触发校正
+const text=(id,x,y)=>({id,type:'text',x,y,width:120,height:23,zIndex:1,text:id,fontSize:16,color:'#111111'});
 async function editor(t,{transformed=false,motionFailure=false,viewport={width:1600,height:1100}}={}){
  const dir=mkdtempSync(join(tmpdir(),'vw-round8-editor-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
@@ -11,7 +12,7 @@ async function editor(t,{transformed=false,motionFailure=false,viewport={width:1
  if(motionFailure)project.pages[0].motion={steps:0,source:'export default ()=>{throw new Error("motion warning fixture")}'};
  if(transformed){
   const {elementInPage}=await import('../web/element-operations.js'),{visualBounds}=await import('../web/layout-tools.js');
-  project.pages[0].elements=[{id:'el_group_first',type:'group',x:120,y:200,width:400,height:240,zIndex:2,rotation:30,flipX:true,children:[{...text('el_child',60,70),width:80,height:40,rotation:20}]}];
+  project.pages[0].elements=[{id:'el_group_first',type:'group',x:120,y:200,width:400,height:240,zIndex:2,rotation:30,flipX:true,children:[{...text('el_child',60,70),text:'ab',width:80,height:23,rotation:20}]}];
   const child=visualBounds(elementInPage(project.pages[0],'el_child'));
   project.pages[0].elements.push({id:'el_resize_target',type:'shape',shape:'rect',fill:'#999999',x:child.x-2,y:600,width:4,height:4,zIndex:1});
  }
@@ -27,10 +28,10 @@ async function gesture(page,start,end){await page.mouse.move(start.x,start.y);aw
 test('round8 elements: marquee, whole groups, drill in, Escape, clipboard and batch arrows',async t=>{
  const {page,file,errors,requests}=await editor(t);const board=await page.locator('#artboard').boundingBox(),scale=board.width/1000;
  await gesture(page,{x:board.x+40*scale,y:board.y+40*scale},{x:board.x+450*scale,y:board.y+180*scale});
- assert.equal(await page.locator('[data-resize="el_first"]').count(),8);assert.equal(await page.locator('[data-resize="el_second"]').count(),8);assert.equal(await page.locator('[data-resize="el_locked"]').count(),0);
+ assert.equal(await page.locator('[data-resize="el_first"]').count(),6);assert.equal(await page.locator('[data-resize="el_second"]').count(),6);assert.equal(await page.locator('[data-resize="el_locked"]').count(),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize]').count(),0);
  const child=await center(page,'el_child');await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="el_group_first"]').count(),8);
- await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="el_child"]').count(),8);
+ await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="el_child"]').count(),6);
  await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize="el_group_first"]').count(),8);await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize]').count(),0);
  await select(page,'el_first');const before=disk(file).pages[0].elements[0];const count=requests.length;
  await saved(page,async()=>{for(let i=0;i<4;i++)await page.keyboard.press('ArrowRight');await page.keyboard.press('Shift+ArrowDown');});
@@ -39,7 +40,7 @@ test('round8 elements: marquee, whole groups, drill in, Escape, clipboard and ba
  await select(page,'el_first');await page.keyboard.press('ControlOrMeta+c');await page.keyboard.press('PageDown');await saved(page,()=>page.keyboard.press('ControlOrMeta+v'));
  const pasted=disk(file).pages[1].elements[0];assert.equal(pasted.text,'el_first');assert.equal(pasted.x,before.x);assert.notEqual(pasted.id,'el_first');
  await page.keyboard.press('Escape');await page.keyboard.press('ArrowUp');assert.equal(await page.locator('#artboard').getAttribute('data-page-id'),'page_first');
- await page.keyboard.press('ControlOrMeta+a');assert.equal(await page.locator('[data-resize="el_locked"]').count(),0);assert.equal(await page.locator('[data-resize]').count(),32);assert.deepEqual(errors,[]);
+ await page.keyboard.press('ControlOrMeta+a');assert.equal(await page.locator('[data-resize="el_locked"]').count(),0);assert.equal(await page.locator('[data-resize]').count(),26);assert.deepEqual(errors,[]);
 });
 
 test('round8 pages: list multiselect, batch clipboard, grid exit, timeline persistence, context insertion and undo',async t=>{

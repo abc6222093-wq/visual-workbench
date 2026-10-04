@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
 // 第 9 轮：画布上直接做（就地编辑文字、旋转把手、悬停描边、拖放替换图片、属性栏补齐、形状选择、总览选择、Esc 逐层退出）
 const now='2026-10-04T12:00:00.000Z';
-const text=(id,x,y,extra={})=>({id,type:'text',x,y,width:360,height:80,zIndex:2,text:'hello world',fontSize:32,color:'#111111',...extra});
+const text=(id,x,y,extra={})=>({id,type:'text',x,y,width:360,height:45,zIndex:2,text:'hello world',fontSize:32,color:'#111111',...extra});
 const project=(id,name)=>({format:'visual-workbench/project',formatVersion:2,id,name,createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1000,height:700},
  assets:[{id:'asset_pica',kind:'image',file:'assets/a.png',name:'图 A',width:40,height:30,pendingLayout:false,addedAt:now},{id:'asset_picb',kind:'image',file:'assets/b.png',name:'图 B',width:40,height:30,pendingLayout:false,addedAt:now}],fonts:[],
  pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[text('el_text',80,80),{id:'el_shape',type:'shape',shape:'rect',x:500,y:300,width:200,height:120,zIndex:3,fill:'#88aadd',cornerRadius:0},{id:'el_image',type:'image',x:80,y:360,width:240,height:180,zIndex:1,asset:'asset_pica',fit:'cover'}]},
@@ -48,7 +48,7 @@ test('round9 canvas text: double-click edits in place with IME, Esc/blank finish
  await page.keyboard.press('End');await page.keyboard.press('Enter');await page.keyboard.type('第二行');
  const during=await page.locator('#artboard [data-element-id="el_text"]').evaluate(n=>{const r=n.getBoundingClientRect();return [r.x,r.y,r.width,getComputedStyle(n).fontSize];});assert.deepEqual(during,before);
  await saved(page,()=>page.keyboard.press('Escape'));assert.equal(await editing(page),false);
- assert.equal(el(file,'el_text').text,'A 日本hello world\n第二行');assert.equal(await page.locator('[data-resize="el_text"]').count(),8);
+ assert.equal(el(file,'el_text').text,'A 日本hello world\n第二行');assert.equal(await page.locator('[data-resize="el_text"]').count(),6);
  // 一次编辑会话 = 一条撤销记录
  await saved(page,()=>page.locator('[data-action="undo"]').click());assert.equal(el(file,'el_text').text,'hello world');
  await saved(page,()=>page.locator('[data-action="redo"]').click());assert.equal(el(file,'el_text').text,'A 日本hello world\n第二行');

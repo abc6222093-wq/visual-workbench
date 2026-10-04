@@ -15,9 +15,9 @@ async function editor(t){
   assets:[{id:'asset_picture',kind:'image',file:'assets/pic.png',name:'图',width:40,height:30,pendingLayout:false,addedAt:now}],fonts:[],
   pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[
    {id:'el_image',type:'image',x:60,y:60,width:200,height:150,zIndex:1,asset:'asset_picture',fit:'cover'},
-   {id:'el_text',type:'text',x:320,y:80,width:300,height:80,zIndex:2,text:'原来的字',fontSize:32,color:'#111111'},
+   {id:'el_text',type:'text',x:320,y:80,width:300,height:45,zIndex:2,text:'原来的字',fontSize:32,color:'#111111'},
    {id:'el_shape',type:'shape',shape:'rect',x:420,y:360,width:200,height:160,zIndex:3,fill:'#dd8844',cornerRadius:12}]},
-  {id:'page_second',name:'第二页',background:'#ffffff',elements:[{id:'el_second_text',type:'text',x:100,y:100,width:300,height:80,zIndex:1,text:'第二页',fontSize:32,color:'#111111'}]}]};
+  {id:'page_second',name:'第二页',background:'#ffffff',elements:[{id:'el_second_text',type:'text',x:100,y:100,width:300,height:45,zIndex:1,text:'第二页',fontSize:32,color:'#111111'}]}]};
  writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1600,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const assetRequests=[],gets=[];page.on('request',r=>{const u=r.url();if(u.includes('/data/projects/demo/assets/')&&r.frame()===page.mainFrame())assetRequests.push(`${stage.name}: ${u.split('/').pop()}`);if(r.method()==='GET'&&/\/api\/projects\/demo(\?|$)/.test(u))gets.push(u);});

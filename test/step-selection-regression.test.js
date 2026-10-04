@@ -82,7 +82,7 @@ for (const mode of ['normal', 'pointer-none', 'decoration']) {
     const box = await title.boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     // Coordinate clicks exercise actual hit testing, even when motion disables native pointer events.
-    assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 8, 'visible element stays selected after pointerup');
+    assert.equal(await page.locator('#artboard [data-resize="el_title1"]').count(), 6, 'visible element stays selected after pointerup（文字框没有上下把手）');
     assert.equal(await page.evaluate(() => document.querySelector('#artboard') === window.__selectionBoard), true, 'selection must not replace the board');
     assert.equal(await page.evaluate(() => window.__selectionMotionInits), initCount, 'selection must not restart motion');
     const boardBox = await page.locator('#artboard').boundingBox();
@@ -126,7 +126,7 @@ test('screen drag and resize preserve motion DOM during the gesture', async t =>
   await page.waitForFunction(() => document.querySelector('#artboard') !== window.__selectionBoard
     && document.querySelector('#artboard')?.dataset.stepShown === '1');
   await page.waitForSelector('#artboard[data-step-shown="1"]');
-  assert.equal(await page.locator('[data-resize="el_title1"]').count(), 8);
+  assert.equal(await page.locator('[data-resize="el_title1"]').count(), 6);
   assert.deepEqual(errors, []);
 });
 
@@ -201,7 +201,7 @@ for (const kind of ['drag', 'resize', 'hold']) {
       && document.querySelector('#artboard')?.dataset.stepShown === '1');
     assert.equal(await page.evaluate(() => window.__snapshotPrepared), kind === 'hold' ? 2 : 3);
     if (kind === 'resize') assert.equal(await title.evaluate(n => n.style.width), latest.width);
-    assert.equal(await page.locator('[data-resize="el_title1"]').count(), 8);
+    assert.equal(await page.locator('[data-resize="el_title1"]').count(), 6);
     assert.deepEqual(errors, []);
   });
 }
