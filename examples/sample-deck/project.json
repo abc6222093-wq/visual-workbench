@@ -140,7 +140,7 @@
           "width": 1200,
           "height": 70,
           "zIndex": 10,
-          "text": "① 格式稳定：每个元素有编号",
+          "text": "① 双击文字直接改，拖动元素不闪",
           "font": "font_inter",
           "fontSize": 40,
           "color": "#ffffff"
@@ -154,7 +154,7 @@
           "width": 1200,
           "height": 70,
           "zIndex": 10,
-          "text": "② 动效只挂编号，只写相对变化",
+          "text": "② agent 写动效，用户只管微调",
           "font": "font_inter",
           "fontSize": 40,
           "color": "#ffffff"
@@ -168,7 +168,7 @@
           "width": 1200,
           "height": 70,
           "zIndex": 10,
-          "text": "③ 位置随便挪，动效照样跑",
+          "text": "③ 挪了位置，动效从新位置接着播",
           "font": "font_inter",
           "fontSize": 40,
           "color": "#ffffff"
