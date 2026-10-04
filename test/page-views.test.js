@@ -19,3 +19,19 @@ test('mounted views route multi-selection, grid exit, clipboard and batch drop t
   handlers.get('drop')({...event,clientY:80,altKey:true,dataTransfer:{getData:()=>JSON.stringify(['page_first'])}});assert.equal(calls.at(-1)[0],'move-pages');assert.equal(calls.at(-1)[1].position,'after');
   dispose();
 });
+
+test('round8 page view event delegation uses cards when a thumbnail contains page metadata',async()=>{
+ const {mountPageViews}=await import('../web/page-views.js');const handlers=new Map(),calls=[];
+ const row={dataset:{pageId:'page_first',pageIndex:'0'},getBoundingClientRect:()=>({left:0,top:0,width:100,height:100})};
+ const nested={dataset:{pageId:'preview_only'}};
+ const target={closest:selector=>selector==='[data-page-index][data-page-id]'?row:nested,matches:()=>false};
+ const root={addEventListener:(name,handler)=>handlers.set(name,handler)};
+ const context={project:{pages:[{id:'page_first'},{id:'page_second'}]},selectedPageIds:['page_second'],currentPageId:'page_second',mode:'list'};
+ const dispose=mountPageViews(root,{getContext:()=>context,callbacks:{selection:ids=>calls.push(['selection',ids]),openPage:id=>calls.push(['open',id]),action:(name,payload)=>calls.push([name,payload])}});
+ const event={target,stopPropagation(){},preventDefault(){}};
+ handlers.get('click')(event);assert.deepEqual(calls,[['selection',['page_first']],['open','page_first']]);
+ const transfer={setData:(type,data)=>calls.push([type,JSON.parse(data)]),getData:()=>JSON.stringify(['page_second'])};
+ handlers.get('dragstart')({...event,dataTransfer:transfer});assert.deepEqual(calls.at(-1),['application/x-vw-pages',['page_first']]);
+ handlers.get('drop')({...event,dataTransfer:transfer,clientY:90});assert.deepEqual(calls.at(-1),['move-pages',{ids:['page_second'],targetId:'page_first',position:'after'}]);
+ dispose();
+});
