@@ -33,7 +33,7 @@
 3. 运行 `npm run save-version -- <项目> -m "<本轮说明>"` 存一版。
 
 ## 分工
-- 排版的主体是 agent。エイ 在「大纲」里写每页文案、层级、强调、图片要求和各屏内容，交给 agent 排版；排好后回来改字、微调位置、大小、颜色、字体、层级。她调过的这些内容，除非她要求，一律不改。
+- 排版的主体是 agent。エイ 在「大纲」里写每页文案、层级、强调、图片要求和各屏内容，交给 agent 排版；排好后回来改字、微调位置、大小、旋转、颜色、字体、层级、对齐、行高、字距、图片显示方式（fit）、圆角，也可能把图片拖到另一张图上替换素材。她调过的这些内容，除非她要求，一律不改。第 9 轮起她可以在画布上双击直接改字，改动和属性栏、大纲一样写进元素的 `text`。
 - 动效和换页全部由 agent 写，エイ 不碰。
 - 素材里 `pendingLayout: true` 表示「待排版」：把它排进页面后，改为 `false`。
 - 素材、字体一律复制进项目自己的 `assets/`、`fonts/`，不跨项目引用。从素材库取用、或从别的项目复制页面，都是复制一份。
@@ -102,9 +102,14 @@
 - 存版按内容去重（`versions/.objects/` 里同样的文件只存一份）。エイ 可以在版本列表里删除版本；「退回前自动存档」只保留最近 10 条。删版本后，不再被任何版本用到的文件会被清掉。
 - agent 不要手动删 `versions/` 里的东西，也不要改 `.objects/`。
 
+## 工作台界面代码约定（改 `web/` 时）
+- 编辑后只做增量刷新：数据变了调用 `updateEditor()`（或其中的 `refreshBoard()` / `refreshInspector()` / `refreshPageViews()`）；画板用 `render.js` 的 `patchPage` 原地协调，页面项用 `page-items.js` 的 `patchPageItems`。`renderEditor()` 只用于打开项目、从放映返回这类换画面；不要为一次编辑重建整个编辑器或重新创建图片节点。`test/round9-smooth.test.js` 会检查重建次数、节点身份和图片请求。
+- 保存要安静：`#save-status` 给读屏和测试读，看得见的保存标签只在保存超过 1.5 秒或失败时变化；自己写盘的监听事件（`external:false`）不触发同步或刷新。
+- 选择习惯三处统一（画布、页面区、项目总览）：点空白取消、拖框多选、Shift 加选、Esc 逐层取消。
+
 ## 测试与本机配置隔离
 - 测试只使用临时数据目录和临时用户主目录：配置测试传入 `home`，服务端夹具使用 `test/helpers/isolated-server.js`（`configHome` 注入临时目录）。不得读写真实 `~/.visual-workbench/config.json`，也不能靠覆盖真实配置让测试通过。临时目录结束后清理。
-- macOS、Ubuntu 跑全部测试；Windows 通过 `node scripts/test-windows.js` 跑系统与真实浏览器导出测试，清单用 `--list` 查看。Windows 没有建符号链接权限时只省略链接部分并说明，其余断言继续。
+- 仓库已公开（第 9 轮），GitHub Actions 在推送和 PR 时自动运行，不占付费额度：macOS、Ubuntu 跑全部测试；Windows 通过 `node scripts/test-windows.js` 跑系统与真实浏览器导出测试，清单用 `--list` 查看。公开仓库里不得出现密钥、令牌、真实项目内容。Windows 没有建符号链接权限时只省略链接部分并说明，其余断言继续。
 
 ## 改完必须做
 - `npm run validate -- <项目>` 和 `npm run check-motion -- <项目>` 都通过，才算完成；动效检查会实际运行每页的模块、步骤及换页。
