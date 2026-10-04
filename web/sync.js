@@ -256,7 +256,8 @@ export function createSyncController({
             project: merged,
             base: remote.project,
             revision: remote.revision,
-            remoteChanged: !deepEqual(merged, project),
+            // 只差 updatedAt（例如读回的是自己刚写的文件）不算有修改，画面不用刷新
+            remoteChanged: !deepEqual(withoutUpdatedAt(merged), withoutUpdatedAt(project)),
             needsSave: !deepEqual(withoutUpdatedAt(merged), withoutUpdatedAt(remote.project)),
             conflicts,
           });

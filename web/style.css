@@ -221,3 +221,6 @@ button:disabled {
 .ed-motion-detail {flex-basis:100%;min-width:0;overflow-wrap:anywhere}
 html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
 .ed-tools {flex-wrap:wrap;justify-content:flex-end;min-width:0}
+/* 保存状态（第 9 轮）：#save-status 只给读屏，看得见的是旁边去抖后的标签 */
+.vw-sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.ed-save {position:relative}

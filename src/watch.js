@@ -136,19 +136,23 @@ export function createProjectWatcher({ projectsDir, debounceMs = 120, agentIdleM
   function setSelf(projectId, rel, hash) {
     let recs = selfRecords.get(projectId);
     if (!recs) selfRecords.set(projectId, recs = new Map());
-    recs.set(rel, { hash, at: Date.now() });
+    // 同一文件连续写好几次（连续保存）时都记着：去抖后监听可能只看到其中某一次
+    const list = (recs.get(rel) || []).filter(rec => Date.now() - rec.at <= SELF_TTL_MS);
+    list.push({ hash, at: Date.now() });
+    recs.set(rel, list.slice(-20));
   }
 
-  /** 这次变化是否是自己写的；匹配上就消耗掉记录 */
+  /** 这次变化是否是自己写的；匹配上就消耗掉这条以及更早的记录（更早的那几次已被这次覆盖） */
   function consumeSelf(projectId, rel, hash) {
     const recs = selfRecords.get(projectId);
-    const rec = recs && recs.get(rel);
-    if (!rec) return false;
-    if (Date.now() - rec.at > SELF_TTL_MS) { recs.delete(rel); return false; }
-    if (rec.hash !== hash) return false; // 可能是读到写了一半的内容，先留着记录
-    recs.delete(rel);
-    if (!recs.size) selfRecords.delete(projectId);
-    return true;
+    const list = recs && recs.get(rel);
+    if (!list) return false;
+    const live = list.filter(rec => Date.now() - rec.at <= SELF_TTL_MS);
+    const index = live.findIndex(rec => rec.hash === hash); // 没匹配上：可能是读到写了一半的内容，先留着记录
+    if (index >= 0) live.splice(0, index + 1);
+    if (live.length) recs.set(rel, live);
+    else { recs.delete(rel); if (!recs.size) selfRecords.delete(projectId); }
+    return index >= 0;
   }
 
   function createProject(projectId) {

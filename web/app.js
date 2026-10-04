@@ -11,7 +11,8 @@ import { mountOutlinePanel } from "./outline-panel.js";
 import { captureOutlinePage } from "./outline-capture.js";
 import { reconcileDocument } from "./outline-document.js";
 import { pickCanvasElement } from "./editor-hit-test.js";
-import { renderPage, updateElementNode } from "./render.js";
+import { renderPage, patchPage, updateElementNode } from "./render.js";
+import { patchPageItems } from "./page-items.js";
 import { showMotionPage } from "./motion-stage.js";
 import { mountMotionStatus } from "./motion-status.js";
 // 编辑器里预览本页动效（第 4 轮）：临时层里播一遍，播完拿掉，不改项目
@@ -38,7 +39,7 @@ import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.
 // 玻璃界面组件（第 2 轮视觉）
 import { icon } from "./ui/icons.js";
 import { mascot } from "./ui/mascot.js";
-import { liven, hop, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
+import { liven, stopLoops, fadeOut, loaderLoop } from "./ui/motion.js";
 import {
   syncGlass,
   openModalGlass,
@@ -88,6 +89,9 @@ const S = {
   outlineView: null,
   outlineBusy: false,
   focus: false, // 专注模式：藏起顶栏和左右面板，画板放大（刷新后不记得）
+  ownRevisions: new Set(), // 工作台自己写盘得到的版本号：文件监听读回这些版本时不再刷新画面
+  echoRevision: null, // 自己的保存还没回来时收到的「文件变了」：保存回来后再判断是不是别人写的
+  pageViewRoots: new Set(), // 已挂好事件的页面视图根（每个根只挂一次）
 };
 const esc = (s) =>
   String(s ?? "").replace(
@@ -176,15 +180,64 @@ function thumb(project, p) {
     assetBase: `/data/projects/${encodeURIComponent(project.id)}`,
   });
   wrapper.append(board);
-  requestAnimationFrame(() => {
-    const s = Math.min(
-      wrapper.clientWidth / project.artboard.width,
-      wrapper.clientHeight / project.artboard.height,
-    );
-    board.style.transform = `scale(${s})`;
-    board.style.transformOrigin = "top left";
-  });
+  requestAnimationFrame(() => fitThumb(wrapper, board, project));
   return wrapper;
+}
+function fitThumb(wrapper, board, project) {
+  if (!wrapper.clientWidth) return;
+  const s = Math.min(
+    wrapper.clientWidth / project.artboard.width,
+    wrapper.clientHeight / project.artboard.height,
+  );
+  if (board.style.transform !== `scale(${s})`) board.style.transform = `scale(${s})`;
+  board.style.transformOrigin = "top left";
+}
+// 编辑器里的素材地址：被 agent 换过内容的文件带上时间戳（只有这些图片重新加载，其余 <img> 不动）
+function assetSrc(file) {
+  const stamp = S.stale.get(file);
+  return `${base()}/${String(file).split("/").map(encodeURIComponent).join("/")}${stamp ? `?v=${stamp}` : ""}`;
+}
+// 编辑器左侧的缩略图：节点不带 data-page-id、不带 .is-selected（它们只是静态预览，不是页面卡片）
+const thumbOptions = () => ({ assetBase: base(), resolveAsset: assetSrc, pageId: false });
+function editorThumb(p) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "miniature";
+  const board = renderPage(S.project, p, thumbOptions());
+  board.removeAttribute("data-page-id");
+  wrapper.append(board);
+  requestAnimationFrame(() => fitThumb(wrapper, board, S.project));
+  return wrapper;
+}
+// 缩略图：空的宿主立刻填上；内容变了的页（按页 JSON 签名比较）空闲时在原来的迷你画板上原地更新，图片复用、不闪
+function refreshThumbnails() {
+  if (!S.project) return;
+  const signatures = new Map();
+  const signature = (p) => {
+    if (!signatures.has(p.id)) signatures.set(p.id, JSON.stringify([p, S.project.artboard, S.project.fonts, S.project.assets, [...S.stale]]));
+    return signatures.get(p.id);
+  };
+  let pending = false;
+  for (const host of app.querySelectorAll("[data-preview]")) {
+    const p = S.project.pages.find((x) => x.id === host.dataset.preview);
+    if (!p) continue;
+    if (!host.querySelector(":scope > .miniature")) { host.replaceChildren(editorThumb(p)); host._thumbSig = signature(p); }
+    else if (host._thumbSig !== signature(p)) pending = true;
+  }
+  if (!pending) return;
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 60));
+  (window.cancelIdleCallback || clearTimeout)(refreshThumbnails.handle);
+  refreshThumbnails.handle = idle(() => {
+    if (S.view !== "editor" || !S.project) return;
+    signatures.clear();
+    for (const host of app.querySelectorAll("[data-preview]")) {
+      const p = S.project.pages.find((x) => x.id === host.dataset.preview);
+      const wrapper = host.querySelector(":scope > .miniature"), board = wrapper?.querySelector(":scope > .vw-artboard");
+      if (!p || !board || host._thumbSig === signature(p)) continue;
+      host._thumbSig = signature(p);
+      patchPage(board, S.project, p, thumbOptions());
+      fitThumb(wrapper, board, S.project);
+    }
+  }, { timeout: 400 });
 }
 async function home() {
   await flush();
@@ -273,6 +326,8 @@ async function open(id, data) {
   if (reconciled) { S.history.commit(S.project); S.dirty++; schedule(); }
   S.lastConflict = null;
   S.stale.clear();
+  S.ownRevisions.clear();
+  S.echoRevision = null;
   S.stepView = 0;
 
   S.focus = false;
@@ -363,7 +418,7 @@ function applySync({ project, base, revision, remoteChanged, needsSave, conflict
     S.dirty++;
     schedule();
   } else S.saved = S.dirty;
-  if (remoteChanged || conflicts.length) renderEditor();
+  if (remoteChanged || conflicts.length) updateEditor(); // 只更新变了的部分，不整页重建
   if (conflicts.length) {
     S.lastConflict = { ...before, labels: summarizeConflicts(conflicts) };
     conflictDialog();
@@ -383,10 +438,30 @@ function refreshFiles(files) {
   for (const file of files) if (file !== "project.json") S.stale.set(file, stamp);
   clearTimeout(refreshFiles.t);
   const attempt = () => {
-    if (S.view === "editor" && S.project && !isBusy()) return renderEditor();
+    if (S.view === "editor" && S.project && !isBusy()) return refreshAssets();
     if (S.project) refreshFiles.t = setTimeout(attempt, 300);
   };
   attempt();
+}
+// 只给受影响的图片 / 遮罩换地址（画板和缩略图按 assetSrc 重新取地址）；动效附属文件变了时步骤视图重新准备、动效检查重跑
+function refreshAssets() {
+  refreshBoard();
+  refreshThumbnails();
+  const body = $(".ed-inspector__body");
+  if (body) bustStale(body);
+  scheduleMotionStatus(true);
+}
+// 自己写盘拿到的版本号记下来（只留最近一些）
+function ownRevision(revision) {
+  S.revision = revision;
+  S.ownRevisions.add(revision);
+  if (S.ownRevisions.size > 40) S.ownRevisions.delete(S.ownRevisions.values().next().value);
+}
+// 自己的保存进行中收到过「文件变了」：保存回来后，如果那个版本不是自己写的，再去同步
+function checkEcho() {
+  const revision = S.echoRevision;
+  S.echoRevision = null;
+  if (revision && revision !== S.revision && !S.ownRevisions.has(revision)) S.sync?.notify();
 }
 function bustStale(root) {
   if (!S.stale.size || !S.project) return;
@@ -430,8 +505,14 @@ function connectEvents(id) {
   events.addEventListener("changed", (e) => {
     if (!mine()) return;
     const d = data(e);
-    if (d.revision && d.revision !== S.revision) S.sync.notify();
     if (d.external && (d.files || []).some((f) => f !== "project.json")) refreshFiles(d.files);
+    if (!d.revision || d.revision === S.revision) return;
+    // 工作台自己写的文件被监听读回：不拉取、不刷新画面；自己的保存还没回来时，等它回来再判断
+    if (!d.external) {
+      if (S.ownRevisions.has(d.revision)) return;
+      if (S.saving || S.assetPromise) { S.echoRevision = d.revision; return; }
+    }
+    S.sync.notify();
   });
   events.addEventListener("agent", (e) => {
     if (mine()) setAgent(data(e).state);
@@ -455,6 +536,21 @@ function inspectorBody(p) {
     return `${tbtn("browse-library", "公共素材库", "library", "ed-tbtn--block")}<div class="ed-assets">${S.project.assets.map((a) => `<button class="g-row g-row--tall" data-action="place" data-id="${a.id}" draggable="true" data-asset="${a.id}"><img class="g-row__thumb" src="${base()}/${a.file}" alt=""><span class="g-row__text">${esc(a.name || a.file)}</span>${a.pendingLayout ? `<span class="g-chip g-chip--quiet g-chip--pink">待排版</span>` : ""}</button>`).join("")}</div>`;
   return `<div class="ed-layers ed-scroll">${layers(p.elements)}</div><h3 class="ed-heading ed-heading--main">基础编辑</h3><div class="ed-props">${property()}</div>`;
 }
+// ---------- 编辑器画面：一次性挂好外壳，之后只做增量更新 ----------
+// 全量重建（renderEditor）只用于打开项目、从放映返回等真正换画面的场合；
+// 编辑、撤销重做、换页、同步载入都走 updateEditor()：画板、左右面板、缩略图节点保持同一个，只更新内容。
+const SAVE_TEXT = { warn: "保存冲突", busy: "正在保存…", ok: "已保存" };
+function gridClass() {
+  return `ed-grid${S.inspectorCollapsed ? " is-inspector-collapsed" : ""}${S.pagesCollapsed || S.pageViewMode === "timeline" ? " is-pages-collapsed" : ""}${S.pageViewMode === "grid" ? " is-page-grid" : ""}${S.pageViewMode === "timeline" ? " is-page-timeline" : ""}`;
+}
+const pagesToggleButton = () => ibtn("toggle-pages", S.pagesCollapsed || S.pageViewMode === "timeline" ? "chevronRight" : "chevronLeft", S.pageViewMode === "timeline" ? "切回页面列表" : S.pagesCollapsed ? "展开页面栏" : "收起页面栏", `aria-expanded="${!S.pagesCollapsed && S.pageViewMode !== "timeline"}"`);
+const inspectorToggleButton = () => ibtn("toggle-inspector", S.inspectorCollapsed ? "chevronLeft" : "chevronRight", S.inspectorCollapsed ? "展开属性栏" : "收起属性栏", `aria-expanded="${!S.inspectorCollapsed}"`);
+const headTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers");
+const toolGridButton = () => tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize");
+const toolTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers");
+const focusExitBar = () => `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>`;
+const pageViewHost = (mode) => `<div class="ed-page-${mode} ed-scroll">${renderPageItems(pageViewContext(mode))}</div>`;
+const footText = () => `${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}`;
 function renderEditor() {
   if (!S.project) return;
   stopPreview();
@@ -464,45 +560,95 @@ function renderEditor() {
   clampStepView();
   const p = page();
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
+  // 保存状态：#save-status 只给读屏（文字照旧实时变化），看得见的标签去抖后才变，普通保存画面上没有任何变化
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="g-dot ${saveState === "ok" ? "" : `g-dot--${saveState}`}"></i><span id="save-status">${{ warn: "保存冲突", busy: "正在保存…", ok: "已保存" }[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="ed-grid${S.inspectorCollapsed ? " is-inspector-collapsed" : ""}${S.pagesCollapsed || S.pageViewMode === "timeline" ? " is-pages-collapsed" : ""}${S.pageViewMode === "grid" ? " is-page-grid" : ""}${S.pageViewMode === "timeline" ? " is-page-timeline" : ""}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${ibtn("toggle-pages", S.pagesCollapsed || S.pageViewMode === "timeline" ? "chevronRight" : "chevronLeft", S.pageViewMode === "timeline" ? "切回页面列表" : S.pagesCollapsed ? "展开页面栏" : "收起页面栏", `aria-expanded="${!S.pagesCollapsed && S.pageViewMode !== "timeline"}"`)}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers")}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize")}${tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers")}${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div>${S.pageViewMode === "grid" ? `<div class="ed-page-grid ed-scroll">${renderPageItems(pageViewContext("grid"))}</div>` : ""}${S.pageViewMode === "timeline" ? `<div class="ed-page-timeline ed-scroll">${renderPageItems(pageViewContext("timeline"))}</div>` : ""}<div class="ed-foot">${S.project.artboard.width} × ${S.project.artboard.height} px <span>·</span> ${esc(S.project.artboard.preset)}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${ibtn("toggle-inspector", S.inspectorCollapsed ? "chevronLeft" : "chevronRight", S.inspectorCollapsed ? "展开属性栏" : "收起属性栏", `aria-expanded="${!S.inspectorCollapsed}"`)}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll">${inspectorBody(p)}</div></aside></div>${S.focus ? `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>` : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("brief", "复制给 agent", "copy")}${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${toolGridButton()}${toolTimelineButton()}${tbtn("add-text", "文字", "type")}${tbtn("add-shape", "形状", "shapes")}${tbtn("import", "素材导入", "imagePlus")}${stepSwitcher(p)}${tbtn("preview-motion", "预览动效", "play", "", 'aria-pressed="false"')}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="g-seg"><button data-action="tab-layers" class="${S.tab === "layers" ? "active" : ""}">图层</button><button data-action="tab-assets" class="${S.tab === "assets" || S.tab === "library" ? "active" : ""}">素材</button><button data-action="tab-outline" class="${S.tab === "outline" ? "active" : ""}">大纲</button></div><div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
   );
+  if (saveState === "busy") saveStatus(SAVE_TEXT.busy);
+  $("#canvas-well").onpointerdown = (e) => { if (e.button === 0 && !e.target.closest("#artboard-holder")) { if (S.preview) return; startMarquee($("#artboard"), e); } };
   renderBoard();
-  if (S.tab === "outline") mountEditorOutline();
-  mountMotionStatus(S.project, base(), $(".ed-toolbar"));
-  S.project.pages.forEach(p=>app.querySelectorAll(`[data-preview="${p.id}"]`).forEach(host=>host.append(thumb(S.project,p))));
+  $(".ed-inspector__body")._key = null;
+  refreshInspector();
+  S.motionSig = null;
+  refreshMotionStatus();
+  refreshThumbnails();
   mountEditorPageViews();
-  mountAppearance();
   bindDrag();
-  decorateEditor();
-  bustStale(app);
+  liven(app); // 小兔眨眼呼吸
   syncGlass(app);
 }
-// 画面上的小反馈：小兔眨眼呼吸、保存状态的小圆点跟着文字变
-function decorateEditor() {
-  liven(app);
-  const status = $("#save-status");
-  if (status) new MutationObserver(() => onSaveText(status)).observe(status, { childList: true });
+// 增量刷新入口：数据变了以后调用它，只更新变了的部分（不替换 #app、画板、面板、缩略图节点）
+function updateEditor() {
+  if (!S.project || S.view !== "editor") return;
+  if (!$(".ed-shell .ed-grid") || !$("#artboard-holder")) return renderEditor();
+  clampStepView();
+  refreshTopbar();
+  refreshToolbar();
+  refreshPageViews();
+  refreshBoard();
+  refreshInspector();
+  scheduleMotionStatus();
 }
-function onSaveText(status) {
-  const chip = $("#save-chip");
-  if (!chip || !chip.contains(status)) return;
-  const text = status.textContent;
-  const state = text === "已保存" ? "ok" : text === "正在保存…" ? "busy" : "warn";
-  const mark = chip.firstElementChild;
-  if (state !== "ok") {
-    mark.outerHTML = `<i class="g-dot g-dot--${state}"></i>`;
-    return;
+function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
+function setHTML(node, html) { if (node && node._html !== html) { node.innerHTML = html; node._html = html; } }
+// 按钮换成新的样子（图标、文字、aria 变了才换）
+function replaceButton(selector, html) {
+  const node = $(selector);
+  if (!node || node._html === html) return;
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  const next = box.firstElementChild;
+  next._html = html;
+  node.replaceWith(next);
+}
+// 顶栏：标题、撤销重做按钮（保存状态由 saveStatus 管）
+function refreshTopbar() {
+  setText($(".ed-title"), S.project.name);
+  refreshHistoryButtons();
+}
+// 画板上方的工具条和底部尺寸：页面名、屏幕下拉（选项变了才换）、尺寸
+function refreshToolbar() {
+  const p = page(), crumb = $(".ed-crumb");
+  setText(crumb, p.name);
+  if (crumb && crumb.title !== p.name) crumb.title = p.name;
+  const html = stepSwitcher(p), current = $(".ed-stepview");
+  if (!html) current?.remove();
+  else if (!current) $('.ed-tools [data-action="preview-motion"]')?.insertAdjacentHTML("beforebegin", html);
+  else if (current._html !== html) { current.outerHTML = html; }
+  const fresh = $(".ed-stepview");
+  if (fresh) fresh._html = html;
+  setHTML($(".ed-foot"), footText());
+}
+// 布局开关（专注模式、折叠面板、网格 / 时间轴）：只切 class、换对应按钮、挂 / 卸对应容器
+function refreshLayout() {
+  const shellNode = $(".ed-shell"), grid = $(".ed-grid");
+  if (!shellNode || !grid) return renderEditor();
+  shellNode.classList.toggle("is-focus", S.focus);
+  if (grid.className !== gridClass()) grid.className = gridClass();
+  replaceButton('.ed-pages > [data-action="toggle-pages"]', pagesToggleButton());
+  replaceButton('.ed-inspector > [data-action="toggle-inspector"]', inspectorToggleButton());
+  replaceButton('.ed-col-head [data-action="page-timeline"]', headTimelineButton());
+  replaceButton('.ed-tools [data-action="page-grid"]', toolGridButton());
+  replaceButton('.ed-tools [data-action="page-timeline"]', toolTimelineButton());
+  replaceButton('.ed-tools [data-action="focus"]', focusButton());
+  const exit = $(".ed-focus-exit");
+  if (S.focus && !exit) $(".ed-main").insertAdjacentHTML("beforeend", focusExitBar());
+  else if (!S.focus) exit?.remove();
+  for (const mode of ["grid", "timeline"]) {
+    const host = $(`.ed-page-${mode}`), want = S.pageViewMode === mode;
+    if (want && !host) {
+      $(".ed-foot").insertAdjacentHTML("beforebegin", pageViewHost(mode));
+      mountEditorPageViews();
+    } else if (!want && host) {
+      host.querySelectorAll("[data-page-view]").forEach(unmountPageView);
+      host.remove();
+    }
   }
-  // 保存成功：小圆点换成小对勾，轻轻跳一下，再变回小圆点
-  mark.outerHTML = `<span class="ed-save__ok">${icon("check", 11)}</span>`;
-  const ok = chip.firstElementChild;
-  hop(ok, 4);
-  clearTimeout(onSaveText.t);
-  onSaveText.t = setTimeout(() => {
-    if (ok.isConnected) ok.outerHTML = `<i class="g-dot"></i>`;
-  }, 1400);
+  refreshThumbnails();
+  if (!S.stepView) fitBoard();
+  else renderBoard(); // 步骤视图里画板尺寸变了：重新准备
+  syncGlass(app);
 }
 function renderBoard() {
   stopPreview();
@@ -511,15 +657,48 @@ function renderBoard() {
   const holder = $("#artboard-holder");
   if (!holder) return;
   holder.replaceChildren();
-  const board = renderPage(S.project, page(), {
-    assetBase: base(),
-    interactive: true,
-    selectedIds: S.selected,
-    onSelect: selectCanvas,
-  });
+  pageNodes.clear();
+  const board = renderPage(S.project, page(), boardOptions());
   board.id = "artboard";
   holder.append(board);
-  const well = $("#canvas-well");
+  fitBoard();
+  // 按下时自己挑要操作的元素（捕获阶段，先于各元素自己的处理）：
+  // 锁定的元素（例如盖满整页的纸纹）点不中、也不挡住下面的元素；已选中的元素优先，被别的元素盖住也能接着拖、拉把手。
+  bindBoardPointer(holder);
+  markSelection();
+  if (S.stepView) startStepView(board);
+}
+const boardOptions = () => ({ assetBase: base(), resolveAsset: assetSrc, interactive: true, selectedIds: S.selected, onSelect: selectCanvas });
+// 画板增量刷新：静止画面在同一个 #artboard 上原地更新（换页也是）；
+// 步骤视图（动效会任意改 DOM）例外：照旧在隐藏层准备好新快照再一次替换；刚离开步骤视图的画板被动效改过，重画一次
+function refreshBoard() {
+  const board = $("#artboard");
+  if (!board) return renderBoard();
+  if (S.stepView) return refreshBoardSnapshot();
+  cancelSnapshot();
+  if (S.stepRun || board.dataset.stepShown) return renderBoard();
+  stopPreview();
+  if (board.dataset.pageId !== page().id) swapPageNodes(board);
+  patchPage(board, S.project, page(), boardOptions());
+  fitBoard();
+  bindBoardPointer($("#artboard-holder"));
+  markSelection();
+}
+// 换页时把旧页的元素节点收起来（最近几页），换回来时放回去再原地更新：同一页上的 <img> 节点复用，图片不重新加载
+const pageNodes = new Map();
+function swapPageNodes(board) {
+  const nodes = [...board.children].filter((node) => node.dataset.elementId !== undefined);
+  nodes.forEach((node) => node.remove());
+  if (board.dataset.pageId) { pageNodes.delete(board.dataset.pageId); pageNodes.set(board.dataset.pageId, nodes); }
+  if (pageNodes.size > 8) pageNodes.delete(pageNodes.keys().next().value);
+  const cached = pageNodes.get(page().id);
+  pageNodes.delete(page().id);
+  if (cached) board.prepend(...cached);
+}
+// 画板按画布区大小缩放（窗口大小、面板开合变了时调用）
+function fitBoard() {
+  const board = $("#artboard"), holder = $("#artboard-holder"), well = $("#canvas-well");
+  if (!board || !holder || !well) return;
   S.scale = Math.max(
     0.07,
     Math.min(
@@ -528,28 +707,72 @@ function renderBoard() {
       1,
     ),
   );
-  board.style.transform = `scale(${S.scale})`;
+  const transform = `scale(${S.scale})`;
+  if (board.style.transform !== transform) board.style.transform = transform;
   board.style.transformOrigin = "top left";
-  holder.style.width = `${S.project.artboard.width * S.scale}px`;
-  holder.style.height = `${S.project.artboard.height * S.scale}px`;
-  $("#zoom-label").textContent = `${Math.round(S.scale * 100)}%`;
-  bustStale(holder);
-  // 按下时自己挑要操作的元素（捕获阶段，先于各元素自己的处理）：
-  // 锁定的元素（例如盖满整页的纸纹）点不中、也不挡住下面的元素；已选中的元素优先，被别的元素盖住也能接着拖、拉把手。
-  bindBoardPointer(holder, board);
-  well.onpointerdown=e=>{if(e.button===0&&!e.target.closest("#artboard-holder")){if(S.preview)return;startMarquee(board,e);}};
-  markSelection();
-  if (S.stepView) startStepView(board);
+  const width = `${S.project.artboard.width * S.scale}px`, height = `${S.project.artboard.height * S.scale}px`;
+  if (holder.style.width !== width) holder.style.width = width;
+  if (holder.style.height !== height) holder.style.height = height;
+  setText($("#zoom-label"), `${Math.round(S.scale * 100)}%`);
 }
-function bindBoardPointer(holder, board) {
-  holder._pickController?.abort();
+// 每个画板宿主只挂一次；每次按下时读当前的 #artboard（步骤视图换了画板也不用重挂）
+function bindBoardPointer(holder) {
+  if (!holder || holder._pickController) return;
   const controller = new AbortController(); holder._pickController = controller;
   holder.addEventListener('pointerdown', e => {
     if(e.button!==0){e.stopPropagation();return;}
     if (S.preview) { e.preventDefault();e.stopPropagation();return; }
+    const board = holder.querySelector('#artboard'); if (!board) return;
     const {id,resize}=pickElement(board,e);e.stopPropagation();
     if(id)selectCanvas(id,e,resize);else startMarquee(board,e);
   }, {capture:true,signal:controller.signal});
+}
+// 保存状态：#save-status 的文字照旧实时变化（读屏、测试都读它）；
+// 看得见的标签去抖：1.5 秒内完成的普通保存没有任何可见变化，超过 1.5 秒才显示「正在保存…」，失败 / 冲突立即显示
+function saveStatus(text) {
+  setText($("#save-status"), text);
+  clearTimeout(saveStatus.t);
+  if (text === SAVE_TEXT.busy) saveStatus.t = setTimeout(() => showSaveLabel(text), 1500);
+  else showSaveLabel(text);
+}
+const saveDotClass = (text) => `g-dot ed-save__dot${text === SAVE_TEXT.ok ? "" : text === SAVE_TEXT.busy ? " g-dot--busy" : " g-dot--warn"}`;
+function showSaveLabel(text) {
+  const chip = $("#save-chip");
+  if (!chip) return;
+  const dot = chip.querySelector(".ed-save__dot"), cls = saveDotClass(text);
+  if (dot && dot.className !== cls) dot.className = cls;
+  setText(chip.querySelector(".ed-save__label"), text);
+}
+// 动效检查状态：内容变了才重查（停手 0.8 秒后）；新结果出来前旧的状态留着，结果出来再一次换上，不闪「正在检查」
+function scheduleMotionStatus(force = false) {
+  clearTimeout(scheduleMotionStatus.t);
+  if (force) S.motionSig = null;
+  scheduleMotionStatus.t = setTimeout(refreshMotionStatus, 800);
+}
+function refreshMotionStatus() {
+  const toolbar = $(".ed-toolbar");
+  if (!toolbar || !S.project || S.view !== "editor") return;
+  // 没有任何动效的项目检查结果不会变：不为每次编辑重跑检查
+  const sig = S.project.pages.some((p) => p.motion) ? JSON.stringify({ ...S.project, updatedAt: null }) : `static:${S.project.formatVersion}`;
+  if (sig === S.motionSig) return;
+  const first = S.motionSig == null && !toolbar.querySelector(":scope > .ed-motion-status");
+  S.motionSig = sig;
+  if (first) return mountMotionStatus(S.project, base(), toolbar);
+  toolbar.querySelectorAll(":scope > .ed-motion-stage").forEach((node) => node.remove());
+  const stage = document.createElement("span");
+  stage.className = "ed-motion-stage";
+  stage.hidden = true;
+  toolbar.append(stage);
+  mountMotionStatus(S.project, base(), stage);
+  const swap = () => {
+    observer.disconnect();
+    if (!stage.isConnected) return;
+    toolbar.querySelectorAll(":scope > .ed-motion-status, :scope > .ed-motion-detail").forEach((node) => node.remove());
+    stage.replaceWith(...stage.childNodes);
+  };
+  const observer = new MutationObserver(swap);
+  if (stage.firstElementChild?.textContent !== "正在检查动效…") swap();
+  else observer.observe(stage, { childList: true, subtree: true, characterData: true });
 }
 // ---------- 步骤视图 ----------
 // 下拉选「第 k 步后」：画板按本页动效快进到第 k 步之后的样子（还没出现的元素藏着、移动过的在移动后的位置）。
@@ -630,7 +853,7 @@ function focusButton() {
 function setFocus(on) {
   if (S.focus === on) return;
   S.focus = on;
-  renderEditor();
+  refreshLayout();
 }
 // 点下去的位置上从上到下有哪些元素；跳过锁定的（含锁定分组里的），选中的元素排在最前面
 function pickElement(board, e) {
@@ -767,12 +990,13 @@ function changed({ boardOnly = false } = {}) {
   S.history.commit(S.project);
   S.dirty++;
   schedule();
-  if (boardOnly) { refreshSelection(); refreshBoardSnapshot(); }
-  else renderEditor();
+  // boardOnly（拖动、对齐、外观滑块等只动画板的修改）与其他修改一样只做增量更新；参数保留给调用方表明意图
+  void boardOnly;
+  updateEditor();
 }
 function schedule() {
   clearTimeout(S.timer);
-  if ($("#save-status")) $("#save-status").textContent = "正在保存…";
+  saveStatus(SAVE_TEXT.busy);
   S.timer = setTimeout(() => flush().catch(() => {}), 600);
 }
 async function flush() {
@@ -794,24 +1018,25 @@ async function flush() {
   S.savePromise = (async () => {
     try {
       const result = await api(path(), "PUT", { project: snapshot, revision });
-      S.revision = result.revision;
+      ownRevision(result.revision);
       S.saved = generation;
       S.base = clone(result.project);
-      if ($("#save-status"))
-        $("#save-status").textContent = S.saved < S.dirty ? "正在保存…" : "已保存";
+      if (S.saved < S.dirty) setText($("#save-status"), SAVE_TEXT.busy); // 还有没保存的：看得见的标签继续按原来的计时
+      else saveStatus(SAVE_TEXT.ok);
     } catch (e) {
       if (e.status === 409) {
         // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（エイ 的修改保留，agent 的修改并进来）
         e.message = "agent 刚改过这个项目，正在合并，请稍后再试";
-        if ($("#save-status")) $("#save-status").textContent = "正在保存…";
+        setText($("#save-status"), SAVE_TEXT.busy);
         setTimeout(() => S.sync?.notify(), 0);
       } else {
         notice(e.message);
-        if ($("#save-status")) $("#save-status").textContent = "保存失败";
+        saveStatus("保存失败");
       }
       throw e;
     } finally {
       S.saving = false;
+      checkEcho();
     }
   })();
   await S.savePromise;
@@ -939,7 +1164,8 @@ async function addAsset(body, coords) {
   } finally {
     S.assetPromise = null;
   }
-  S.revision = result.revision;
+  ownRevision(result.revision);
+  checkEcho();
   S.project.assets.push(result.asset);
   S.project.updatedAt = result.project.updatedAt;
   if (S.dirty === generation) S.history.commit(S.project);
@@ -986,7 +1212,7 @@ async function library() {
 async function browseLibrary() {
   S.libraryChoices = await api("/api/library");
   S.tab = "library";
-  renderEditor();
+  refreshInspector();
 }
 
 async function versions() {
@@ -1021,15 +1247,16 @@ async function restore(id) {
   await flush();
   const d = await api(`${path()}/versions/${encodeURIComponent(id)}/restore`, "POST", {});
   S.project = d.project;
-  S.revision = d.revision;
+  ownRevision(d.revision);
   S.base = clone(d.project);
   S.history.commit(S.project);
   S.saved = S.dirty;
+  saveStatus(SAVE_TEXT.ok);
   S.stale.clear();
   for (const a of S.project.assets) S.stale.set(a.file, Date.now());
   keepSelection();
   closeModal();
-  renderEditor();
+  updateEditor();
   notice("已退回；退回前的内容已自动存了一版");
 }
 function versionDialog() {
@@ -1302,9 +1529,7 @@ app.addEventListener("click", async (e) => {
         closeModal();
         break;
       case "switch":
-        S.pageId = id;
-        S.selected = [];
-        renderEditor();
+        switchPage(id);
         break;
       case "select":
         if (!editable(page(), id)) {
@@ -1326,18 +1551,20 @@ app.addEventListener("click", async (e) => {
         if (S.history.canUndo) {
           S.project = S.history.undo();
           S.selected = [];
+          keepSelection();
           S.dirty++;
           schedule();
-          renderEditor();
+          updateEditor();
         }
         break;
       case "redo":
         if (S.history.canRedo) {
           S.project = S.history.redo();
           S.selected = [];
+          keepSelection();
           S.dirty++;
           schedule();
-          renderEditor();
+          updateEditor();
         }
         break;
       case "add-page":
@@ -1453,12 +1680,12 @@ app.addEventListener("click", async (e) => {
         if(S.pageViewMode === "timeline") {S.pagesCollapsed=false;localStorage.setItem("vw-pages-collapsed","false");setPageView("list");break;}
         S.pagesCollapsed = !S.pagesCollapsed;
         localStorage.setItem("vw-pages-collapsed", String(S.pagesCollapsed));
-        renderEditor();
+        refreshLayout();
         break;
       case "toggle-inspector":
         S.inspectorCollapsed = !S.inspectorCollapsed;
         localStorage.setItem("vw-inspector-collapsed", String(S.inspectorCollapsed));
-        renderEditor();
+        refreshLayout();
         break;
       case "focus":
         setFocus(!S.focus);
@@ -1526,7 +1753,7 @@ app.addEventListener("click", async (e) => {
           S.lastConflict = null;
         }
         closeModal();
-        renderEditor();
+        updateEditor();
         break;
       }
     }
@@ -1631,7 +1858,7 @@ app.addEventListener("input", (event) => {
   });
   if(!different)return;
   reconcileLinkedPages();S.history.commit(S.project);S.dirty++;schedule();
-  patchDocumentCanvas(before);refreshHistoryButtons();S.outlineView?.refresh();
+  patchDocumentCanvas(before);refreshHistoryButtons();if(S.tab==="layers")refreshInspector();else S.outlineView?.refresh(); // 图层名跟着字变，正在输入的框不动
 });
 app.addEventListener("change", (e) => {
   if (e.target.matches("[data-step-view]")) {
@@ -1697,30 +1924,51 @@ window.addEventListener("keydown", e => {
     const arrow={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
     if(arrow&&S.selected.length){e.preventDefault();nudge(arrow[0]*(e.shiftKey?10:1),arrow[1]*(e.shiftKey?10:1));return;}
     const direction=['PageUp','ArrowUp'].includes(e.key)?-1:['PageDown','ArrowDown'].includes(e.key)?1:0;
-    if(direction){e.preventDefault();finishNudge();const i=S.project.pages.findIndex(p=>p.id===S.pageId),p=S.project.pages[i+direction];if(p){S.pageId=p.id;S.selected=[];S.checked.clear();renderEditor();}}
+    if(direction){e.preventDefault();finishNudge();const i=S.project.pages.findIndex(p=>p.id===S.pageId),p=S.project.pages[i+direction];if(p)switchPage(p.id,{clearChecked:true});}
   }catch(error){notice(error.message);}
 });
 window.addEventListener("resize", () => {
-  if (S.view === "editor") renderBoard();
+  if (S.view === "editor") { if (S.stepView) renderBoard(); else fitBoard(); }
   else if (S.view === "play") showPage(S.pageId);
 });
+// 换页：同一个 #artboard 上原地更新成新页（根节点不换），左右面板只更新内容
+function switchPage(id, { clearChecked = false } = {}) {
+  finishNudge();
+  S.pageId = id;
+  S.selected = [];
+  if (clearChecked) S.checked.clear();
+  updateEditor();
+}
 // ---------- 页面操作：三种视图共用同一份选择和历史 ----------
 function pageViewContext(mode = S.pageViewMode) {
   return { project:S.project,currentPageId:S.pageId,selectedPageIds:[...S.checked],anchorId:S.pageAnchor,mode,returnMode:readPageViewPreference(),canPaste:S.pageClipboard?.projectId===S.project?.id };
 }
-function setPageView(mode) { finishNudge(); S.pageViewMode=mode;writePageViewPreference(mode);renderEditor(); }
+function setPageView(mode) { finishNudge(); S.pageViewMode=mode;writePageViewPreference(mode);refreshLayout(); }
+// 每个视图根只挂一次事件（mountPageViews 用事件委托，之后原地更新页面项不用重挂）
 function mountEditorPageViews() {
-  const disposers=[...app.querySelectorAll('[data-page-view]')].map(root=>mountPageViews(root,{getContext:()=>pageViewContext(root.dataset.pageView),callbacks:{
-    selection(ids,anchor){S.checked=new Set(ids);S.pageAnchor=anchor;S.selected=[];app.querySelectorAll('[data-page-index]').forEach(row=>{const on=S.checked.has(row.dataset.pageId);row.classList.toggle('is-selected',on);row.querySelector('[data-check]').checked=on;});refreshSelection();},
-    openPage(id){if(S.pageId===id)return;finishNudge();S.pageId=id;S.selected=[];renderEditor();},
-    view:setPageView,
-    action:(name,payload)=>{try{pageAction(name,payload);}catch(e){notice(e.message);}}
-  }}));
-  S.pageViewsDispose=()=>disposers.forEach(dispose=>dispose());
+  for (const root of app.querySelectorAll('[data-page-view]')) {
+    if (root._vwDispose) continue;
+    root._vwDispose=mountPageViews(root,{getContext:()=>pageViewContext(root.dataset.pageView),callbacks:{
+      selection(ids,anchor){S.checked=new Set(ids);S.pageAnchor=anchor;S.selected=[];refreshPageViews();refreshSelection();},
+      openPage(id){if(S.pageId===id)return;switchPage(id);},
+      view:setPageView,
+      action:(name,payload)=>{try{pageAction(name,payload);}catch(e){notice(e.message);}}
+    }});
+    S.pageViewRoots.add(root);
+  }
+  S.pageViewsDispose=()=>{for(const root of S.pageViewRoots)unmountPageView(root);};
+}
+function unmountPageView(root) { root._vwDispose?.();root._vwDispose=null;S.pageViewRoots.delete(root); }
+// 页面列表 / 网格 / 时间轴：原地协调页面项（序号、名称、当前页、勾选），新页的缩略图立刻填上，内容变了的稍后更新
+function refreshPageViews() {
+  for (const root of app.querySelectorAll('[data-page-view]')) patchPageItems(root, pageViewContext(root.dataset.pageView));
+  mountEditorPageViews();
+  setText($('.ed-col-head .ed-count'), String(S.project.pages.length));
+  refreshThumbnails();
 }
 function pageAction(name,{ids=[...S.checked],targetId=S.pageId,position='after'}={}) {
   finishNudge(); if(!ids.length)ids=[targetId];let result;
-  if(name==='select-pages'){S.checked=new Set(S.project.pages.map(p=>p.id));renderEditor();return;}
+  if(name==='select-pages'){S.checked=new Set(S.project.pages.map(p=>p.id));refreshPageViews();return;}
   if(name==='copy-pages'){S.pageClipboard=copyPages(S.project,ids);notice('页面已复制，可在同一个项目中粘贴');return;}
   if(name==='paste-pages')result=pastePages(S.project,S.pageClipboard,targetId);
   if(name==='duplicate-pages')result=duplicatePages(S.project,ids,targetId);
@@ -1789,16 +2037,22 @@ function paintGuides(snap){
   for(const guide of snap.guides||[]){const n=document.createElement('div');n.className='ed-guide';n.dataset.axis=guide.axis;const value=guide.value??guide.position;n.style.cssText=guide.axis==='x'?`left:${value}px;top:0;height:100%`:`top:${value}px;left:0;width:100%`;board.append(n);}
   for(const gap of snap.gaps||[]){const n=document.createElement('span');n.className='ed-gap';n.textContent=`间距 ${Math.round(gap.value??gap.distance??gap.gap)} px`;n.style.left=`${snap.bounds.x}px`;n.style.top=`${Math.max(0,snap.bounds.y-30)}px`;board.append(n);}
 }
+// 外观（透明度、翻转）和对齐控件：选中的元素对象没变就留着原来的控件（拖滑块时不被打断）；
+// 撤销、同步后 S.project 换了对象，控件持有的旧元素引用失效，重新挂
 function mountAppearance(){
-  const host=$('.ed-props');if(!host||!S.selected.length)return;
-  const elements=rootSelection(page(),S.selected).map(id=>findElement(page(),id)?.element).filter(Boolean);
+  const host=$('.ed-props');if(!host)return;
+  const elements=S.selected.length?rootSelection(page(),S.selected).map(id=>findElement(page(),id)?.element).filter(Boolean):[];
+  if(host._elements&&host._elements.length===elements.length&&host._elements.every((e,i)=>e===elements[i]))return;
+  host.querySelectorAll(':scope > [data-appearance]').forEach(node=>node.remove());
+  host._elements=elements;
   if(!elements.length)return;
-  host.append(appearanceControls(elements,{
+  const appearance=appearanceControls(elements,{
     change(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);const node=$(`#artboard [data-element-id="${CSS.escape(e.id)}"]`),transform=node?.style.transform;paintDragged(e);if(S.stepView&&node)node.style.transform=transform;}},
     commit(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);}changed({boardOnly:true});}
-  }));
+  });
+  appearance.dataset.appearance='1';host.append(appearance);
   if(elements.length<2)return;
-  const controls=document.createElement('section');controls.className='ed-section';controls.innerHTML='<h3 class="ed-heading">对齐与分布</h3><div class="ed-align"></div>';
+  const controls=document.createElement('section');controls.className='ed-section';controls.dataset.appearance='1';controls.innerHTML='<h3 class="ed-heading">对齐与分布</h3><div class="ed-align"></div>';
   const choices=[['left','左对齐'],['center','水平居中'],['right','右对齐'],['top','顶对齐'],['middle','垂直居中'],['bottom','底对齐'],['distribute-x','水平分布'],['distribute-y','垂直分布']];
   for(const [mode,label]of choices){const b=document.createElement('button');b.className='g-btn';b.textContent=label;b.dataset.align=mode;b.disabled=mode.startsWith('distribute')&&elements.length<3;b.onclick=()=>{finishNudge();const globalElements=elements.map(e=>elementInPage(page(),e.id));const result=mode.startsWith('distribute')?distributeElements(globalElements,mode.endsWith('x')?'x':'y'):alignElements(globalElements,mode);for(let i=0;i<result.length;i++){const e=result[i],target=findElement(page(),e.id)?.element;if(target){nudgeElements(page(),[e.id],e.x-globalElements[i].x,e.y-globalElements[i].y);clearDocumentDraft(target);}}changed({boardOnly:true});};controls.querySelector('.ed-align').append(b);}host.append(controls);
 }
@@ -1814,16 +2068,66 @@ runtimeSettings.ready().then(home).catch((e) => {
   notice(e.message);
 });
 
+// 属性栏刷新入口：只更新内容，不换 .ed-inspector / .ed-inspector__body，不丢滚动位置。
+// 选择没变时原地改各 [data-prop] 的值（焦点所在的输入框不覆盖）；选择、页面、标签页变了才重写面板内容。
 // Selection changes only update controls: never restart page motion on a click.
+function inspectorKey() {
+  const p = page();
+  return JSON.stringify([S.tab, S.pageId, S.selected, S.selected.map(id => findElement(p, id)?.element?.type || ""), S.project.fonts.map(f => [f.id, f.family])]);
+}
 function refreshInspector() {
-  S.outlineView?.dispose(); S.outlineView = null;
   const body = $('.ed-inspector__body');
   if (!body) return;
+  document.querySelectorAll('.ed-inspector .g-seg button').forEach(b => { const on = b.dataset.action === `tab-${S.tab === 'library' ? 'assets' : S.tab}`; if (b.classList.contains('active') !== on) b.classList.toggle('active', on); });
+  if (S.tab === 'outline') {
+    // 大纲：同一页的文稿面板留着，只刷新；换页或刚切到大纲才重新挂
+    if ($('#outline-host') && S.outlinePage === S.pageId && (S.outlineView || S.outlineBusy)) { S.outlineView?.refresh(); return; }
+    S.outlineView?.dispose(); S.outlineView = null;
+    body.innerHTML = inspectorBody(page()); body._key = null; S.outlinePage = S.pageId;
+    mountEditorOutline();
+    syncGlass(app);
+    return;
+  }
+  S.outlineView?.dispose(); S.outlineView = null;
+  const key = inspectorKey();
+  if (body._key === key && patchInspector(body)) return;
+  const scroll = body.scrollTop, layersScroll = body.querySelector('.ed-layers')?.scrollTop || 0;
   body.innerHTML = inspectorBody(page());
-  document.querySelectorAll('.ed-inspector .g-seg button').forEach(b => b.classList.toggle('active', b.dataset.action === `tab-${S.tab === 'library' ? 'assets' : S.tab}`));
-  if (S.tab === 'outline') mountEditorOutline();
+  body._key = key; body._html = S.tab === 'layers' ? null : body.innerHTML;
+  const list = body.querySelector('.ed-layers');
+  if (list) { list._html = list.innerHTML; list.scrollTop = layersScroll; }
   mountAppearance();
+  bustStale(body);
+  body.scrollTop = scroll;
   syncGlass(app);
+}
+// 原地更新属性栏；结构对不上（字段不同）时返回 false，交给整块重写
+function patchInspector(body) {
+  if (S.tab !== 'layers') {
+    const box = document.createElement('div');
+    box.innerHTML = inspectorBody(page());
+    return box.innerHTML === body._html;
+  }
+  const list = body.querySelector('.ed-layers'), props = body.querySelector('.ed-props');
+  if (!list || !props) return false;
+  const box = document.createElement('div');
+  box.innerHTML = property();
+  const fresh = [...box.querySelectorAll('[data-prop]')], live = [...props.querySelectorAll('[data-prop]')];
+  if (fresh.length !== live.length || fresh.some((node, i) => node.dataset.prop !== live[i].dataset.prop || node.tagName !== live[i].tagName || node.type !== live[i].type)) return false;
+  const html = layers(page().elements);
+  if (list._html !== html) { const top = list.scrollTop; list.innerHTML = html; list._html = html; list.scrollTop = top; }
+  fresh.forEach((node, i) => {
+    const field = live[i];
+    if (field === document.activeElement) return; // 正在输入的框不打断
+    if (field.tagName === 'SELECT') { if (field.value !== node.value) field.value = node.value; return; }
+    if (field.defaultValue !== node.defaultValue) field.defaultValue = node.defaultValue;
+    if (field.value !== node.value) field.value = node.value;
+  });
+  const freshClear = [...box.querySelectorAll('[data-clear]')], liveClear = [...props.querySelectorAll('[data-clear]')];
+  freshClear.forEach((node, i) => { if (liveClear[i] && liveClear[i].disabled !== node.disabled) liveClear[i].disabled = node.disabled; });
+  for (const selector of ['.ed-selected strong', '.ed-selected small']) setText(props.querySelector(selector), box.querySelector(selector)?.textContent ?? '');
+  mountAppearance();
+  return true;
 }
 function refreshSelection() {
   markSelection();
@@ -1867,7 +2171,7 @@ function swapReadySnapshot() {
 }
 async function refreshBoardSnapshot() {
   cancelSnapshot(); // Each new request supersedes both preparing and ready frames.
-  if (!S.stepView) { renderBoard(); return; }
+  if (!S.stepView) { refreshBoard(); return; }
   const holder = $('#artboard-holder'), old = $('#artboard'), oldRun = S.stepRun;
   if (!holder || !old) return;
   const generation = ++snapshotGeneration, view = S.stepView, pageId = S.pageId;
@@ -1893,6 +2197,13 @@ async function refreshBoardSnapshot() {
 function patchDocumentCanvas(before) {
   cancelSnapshot();
   const board = $('#artboard'); if (!board) return;
+  refreshThumbnails();
+  // 静止画面：直接原地更新（样式、增删都照顾到）；步骤视图里只补文字和几何，保留动效改过的 DOM
+  if (!S.stepView && !S.stepRun && !board.dataset.stepShown) {
+    patchPage(board, S.project, page(), boardOptions());
+    S.selected = S.selected.filter(id=>findElement(page(),id)); markSelection();
+    return;
+  }
   const current = allElements(page()), prior = new Map(allElements(before).map(e=>[e.id,e]));
   const ids = new Set(current.map(e=>e.id));
   board.querySelectorAll('[data-element-id]').forEach(node=>{if(!ids.has(node.dataset.elementId))node.remove();});
@@ -1982,7 +2293,7 @@ async function outlineLibrary() {
         await flush();
         const asset = choices[Number(button.dataset.outlineLibrary)];
         const result = await api(`${path()}/assets`, "POST", {libraryFile:asset.file,width:asset.width,height:asset.height,revision:S.revision});
-        S.project = result.project; S.revision = result.revision; S.base = clone(S.project); S.history.commit(S.project);
+        S.project = result.project; ownRevision(result.revision); S.base = clone(S.project); S.history.commit(S.project);
         closeModal(); finish(result.asset);
       } catch(error) { notice(error.message); }
     });
