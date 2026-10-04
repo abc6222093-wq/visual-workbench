@@ -4,6 +4,7 @@ import { readFileSync, existsSync, statSync, openSync, readSync, closeSync } fro
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { WEB_DEVICES, projectKind } from '../web/project-kinds.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = resolve(HERE, '..', 'schema', 'project.schema.json');
@@ -142,6 +143,25 @@ export function validateProjectData(data, opts = {}) {
     if (el.type === 'text' && el.font != null && !fontIds.has(el.font)) {
       errors.push({ code: ERROR_CODES.UNKNOWN_FONT_REF, path: `${path}/font`, message: `文字元素 ${el.id} 引用了不存在的字体：${el.font}` });
     }
+  }
+
+  // 4. 网页项目（第 11 轮；错误码 WEB_PAGE_DEVICE / WEB_PAGE_SIZE / VARIANT_REF，与 CROP_RANGE 一样直接写字面量）：每页必须有 device 与 size，宽度等于设备宽度；课件项目的页面不带这两项（课件行为完全不变）
+  const kind = projectKind(data);
+  const pageIds = new Set(pages.map((p) => p && p.id));
+  const elementIds = new Set(allElements.map((e) => e.id));
+  pages.forEach((page, pi) => {
+    if (!page || typeof page !== 'object') return;
+    if (kind === 'web') {
+      const device = WEB_DEVICES[page.device];
+      if (!device || !page.size) errors.push({ code: 'WEB_PAGE_DEVICE', path: `/pages/${pi}`, message: `网页项目的每一页都要写 device（desktop / mobile）和 size：${page.id}` });
+      else if (page.size.width !== device.width) errors.push({ code: 'WEB_PAGE_SIZE', path: `/pages/${pi}/size/width`, message: `${page.id} 的宽度应等于${device.label}宽度 ${device.width}，现在是 ${page.size.width}` });
+    } else if (page.device !== undefined || page.size !== undefined) {
+      errors.push({ code: 'WEB_PAGE_DEVICE', path: `/pages/${pi}`, message: `只有网页项目（kind: "web"）的页面才有 device / size：${page.id}` });
+    }
+    if (page.variantOf !== undefined && (!pageIds.has(page.variantOf) || page.variantOf === page.id)) errors.push({ code: 'VARIANT_REF', path: `/pages/${pi}/variantOf`, message: `${page.id} 的 variantOf 指向不存在的页面：${page.variantOf}` });
+  });
+  for (const { el, path } of allElements) {
+    if (el.variantOf !== undefined && (!elementIds.has(el.variantOf) || el.variantOf === el.id)) errors.push({ code: 'VARIANT_REF', path: `${path}/variantOf`, message: `${el.id} 的 variantOf 指向不存在的元素：${el.variantOf}` });
   }
 
   pages.forEach((page, pi) => {

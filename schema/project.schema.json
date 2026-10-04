@@ -11,6 +11,7 @@
     "formatVersion": { "const": 2 },
     "id": { "$ref": "#/$defs/projectId" },
     "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "kind": { "description": "项目类型（第 11 轮）：deck 课件 / 海报（默认，不写等于 deck）；web 网页（每页有自己的设备与尺寸）", "enum": ["deck", "web"] },
     "description": { "type": "string" },
     "createdAt": { "$ref": "#/$defs/timestamp" },
     "updatedAt": { "$ref": "#/$defs/timestamp" },
@@ -129,6 +130,18 @@
         "id": { "$ref": "#/$defs/pageId" },
         "name": { "type": "string" },
         "notes": { "type": "string", "description": "给 agent 或用户的备注，不渲染" },
+        "device": { "description": "网页项目（第 11 轮）：这一页是电脑端还是手机端窗口", "enum": ["desktop", "mobile"] },
+        "size": {
+          "description": "网页项目（第 11 轮）：整页尺寸。width 固定等于设备宽度（desktop 1440 / mobile 390），height 是整页内容长度，可以比窗口高",
+          "type": "object", "additionalProperties": false, "required": ["width", "height"],
+          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        },
+        "origin": {
+          "description": "导入来源（第 11 轮）：抓取的网址或导入的文件、抓取时间",
+          "type": "object", "additionalProperties": false,
+          "properties": { "url": { "type": "string" }, "file": { "type": "string" }, "capturedAt": { "$ref": "#/$defs/timestamp" } }
+        },
+        "variantOf": { "$ref": "#/$defs/pageId", "description": "多试几版（第 11 轮）：这一页是哪一页的变体" },
         "background": { "$ref": "#/$defs/fill" },
         "elements": { "type": "array", "items": { "$ref": "#/$defs/element" } },
         "motion": { "$ref": "#/$defs/motion" },
@@ -153,7 +166,13 @@
         "flipY": { "type": "boolean", "default": false },
         "zIndex": { "type": "integer", "description": "层级，大的在上" },
         "locked": { "type": "boolean", "default": false },
-        "effects": { "$ref": "#/$defs/effects" }
+        "effects": { "$ref": "#/$defs/effects" },
+        "origin": {
+          "description": "导入网页时记下的原网页位置（第 11 轮）：selector 能在原网页里定位到这个元素的 CSS 选择器；tag 标签名；text 原文开头（最多 80 字），只给改动清单用，工作台不渲染",
+          "type": "object", "additionalProperties": false, "required": ["selector"],
+          "properties": { "selector": { "type": "string", "minLength": 1 }, "tag": { "type": "string" }, "text": { "type": "string", "maxLength": 80 } }
+        },
+        "variantOf": { "$ref": "#/$defs/elementId", "description": "多试几版（第 11 轮）：这个元素是哪个元素的变体" }
       }
     },
     "element": {
