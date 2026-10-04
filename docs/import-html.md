@@ -45,8 +45,10 @@
 - **图片**：`<img>`、CSS `background-image: url()`、内嵌 `<svg>`（outerHTML 存成 .svg，计算后的填充 / 描边写进去）。`fit` 由 `object-fit` / `background-size` 推断（cover / contain / fill）。字节来源：`data:` 地址、上传的本地文件、`blob:` 地址（页面里转成 data:）；网络图片不下载。位图用 sharp 压到最大显示尺寸的 2 倍以内转 webp；不安全的 SVG（脚本、事件、外链等）转成位图。同一张图只登记一次，素材 `source: {type:'upload'}`、`pendingLayout: false`。
 - **色块**：有背景色或统一实线边框的块 → 矩形形状（`fill`、`stroke`、`cornerRadius`）；能解析的线性 / 径向渐变 → 渐变填充的形状。重复平铺的背景图案、解析不了的多层背景 → 只截这个块自身（子元素隐藏）。
 - **背景**：页面容器、body、html 中第一个不透明的背景色 → 页面 `background`；单层可解析渐变 → 页面渐变；背景图 → 铺满整页的图片元素（`locked: true`，zIndex 最低）。
-- **字体**：`@font-face` 的 src 是 `data:` 或上传的文件 → 复制进 `fonts/` 登记（family 保留原名，weight 取 descriptor，范围写法如 `100 900` 记为 `variable`，拿不到为 400）；网络字体（非本地的 http/https）和 Google Fonts 链接不下载，记入缺失字体。文字元素的 `font` 指向同名登记字体（优先可变字体，否则字重最接近的），没有就是 `null`。
-- **截图块**：`<canvas>`、`<video>`、`<iframe>`、`<embed>`、`<object>`，以及用了 filter / backdrop-filter / clip-path / mask / mix-blend-mode / 渐变字 / 非平移 transform（铺满半页以上的纯缩放容器除外）的块 → 截图时只显示这个块（其余内容隐藏、底色为页面背景）→ PNG 图片元素，`name` 以「[截图]」开头，列入摘要。
+- **字体**：`@font-face` 的 src 是 `data:` 或上传的文件 → 复制进 `fonts/` 登记（family 保留原名，weight 取 descriptor，范围写法如 `100 900` 记为 `variable`，拿不到为 400）；网络字体（非本地的 http/https）和 Google Fonts 链接不下载，记入缺失字体。课件 JSON 里 assets 是纯字符串数组时，按下标替换页面里 `__XXX_n__` 形式的占位符（含不带引号的 `src:url(...)`）；同名字体在不同页是不同子集文件时各自登记，文字优先指向本页登记的那份。文字元素的 `font` 指向同名登记字体（优先可变字体，否则字重最接近的），没有就是 `null`。
+- **变形、遮罩、混合（按计算后的矩阵判断）**：单位矩阵、纯平移、等比缩放 → 不截图，位置大小取实际框，缩放后的字号按累计缩放算；旋转（可带等比缩放）→ 写成元素的 `rotation`（中心取实际框中心，子元素角度累加）；非等比缩放的无文字块 → 按实际框；斜切、镜像、3D → 截图。单层 `url()` 遮罩加纯色背景（单色 logo 的常见写法）→ 图片元素加 `tint`；单层渐变遮罩 → `effects.mask`；常见的 `mix-blend-mode`（multiply、screen、overlay 等 9 种）→ `effects.blend`（向子元素传递）；简单的 `inset` / `polygon` `clip-path` → `effects.clip`。这些只写在没有子元素的块上，做不到的照旧截图。
+- **取画面的时机**：每页加载后先按一次 End（分步课件会跳到最后一步），再等字体就绪、把有限动画 finish、无限动画暂停，取结束态的画面；优先取铺满视口的舞台容器（如 `.stage`）作为页面，页面外的「编辑」「保存」按钮不算内容。
+- **截图块**：`<canvas>`、`<video>`、`<iframe>`、`<embed>`、`<object>`，以及 filter / backdrop-filter、解析不了的 clip-path / mask、渐变字、斜切或镜像的块 → PNG 图片元素，`name` 以「[截图]」开头，列入摘要。叠在别的内容上的截图块用透明底并带上 blend；canvas / video 和背景层仍以页面背景作底色。覆盖页面 90% 以上的装饰元素加 `locked: true`。
 - 看不见的（display none、opacity 0、visibility hidden、尺寸为 0、在页面框外）跳过；叠放顺序按 DOM 顺序。
 - 每页元素上限 300，超出后剩余部分合成一张截图并在 notes 里说明。
 - 某一页分析失败或超时（90 秒）：这一页整页截一张图，notes 写原因，其他页照常。
@@ -62,7 +64,7 @@
 ## 已知限制
 
 - 文字按块合并：同一段里不同颜色 / 字号的 span 合成一个文字元素，取块的样式。
-- 叠放只按 DOM 顺序，不读 CSS `z-index`；旋转、倾斜的块截成图片，不转成 `rotation`。
+- 叠放只按 DOM 顺序，不读 CSS `z-index`；斜切、镜像的块截成图片（旋转会写成 `rotation`）。
 - 依赖网络的脚本、样式、字体、图片都不加载（离线、安全）；靠 CDN 脚本才能排版的页面会按没有脚本时的样子导入。
 - 截图块和截图背景是位图，不能改字；agent 之后可以按截图重做成可编辑元素。
 - 不支持 ZIP64 和加密的压缩包。
