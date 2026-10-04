@@ -3,7 +3,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
 const now='2026-10-01T12:00:00.000Z';
 const text=(id,x,y)=>({id,type:'text',x,y,width:120,height:60,zIndex:1,text:id,fontSize:24,color:'#111111'});
-async function editor(t,{transformed=false,motionFailure=false}={}){
+async function editor(t,{transformed=false,motionFailure=false,viewport={width:1600,height:1100}}={}){
  const dir=mkdtempSync(join(tmpdir(),'vw-round8-editor-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  mkdirSync(join(dir,'projects/demo'),{recursive:true});const file=join(dir,'projects/demo/project.json');
@@ -15,7 +15,7 @@ async function editor(t,{transformed=false,motionFailure=false}={}){
   const child=visualBounds(elementInPage(project.pages[0],'el_child'));
   project.pages[0].elements.push({id:'el_resize_target',type:'shape',shape:'rect',fill:'#999999',x:child.x-2,y:600,width:4,height:4,zIndex:1});
  }
- writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1600,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));const requests=[];page.on('request',r=>{if(r.method()==='PUT'&&r.url().endsWith('/api/projects/demo'))requests.push(r);});
+ writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});browser=await launchBrowser();const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message));const requests=[];page.on('request',r=>{if(r.method()==='PUT'&&r.url().endsWith('/api/projects/demo'))requests.push(r);});
  const url=`http://127.0.0.1:${server.address().port}`;await page.goto(url);await page.locator('[data-action="open"][data-id="demo"]').click();await page.waitForSelector('#artboard');return {page,file,errors,requests,server,dir,url};
 }
 const disk=file=>JSON.parse(readFileSync(file,'utf8'));
@@ -128,15 +128,18 @@ test('round8 motion warning stays on one line at narrow width and legacy formats
 
 
 test('round8 multiple elements resize together, snap their combined edge, retain opposite anchors and undo once',async t=>{
- const {page,file,errors}=await editor(t);const original=disk(file).pages[0].elements;
+ // At 1:1 scale, exact pointer pixels avoid float32 subpixel input rounding.
+ const {page,file,errors}=await editor(t,{viewport:{width:2000,height:1400}});const original=disk(file).pages[0].elements;
  await select(page,'el_first');await page.locator('[data-action="select"][data-id="el_second"]').click({modifiers:['Shift']});
- const scale=await page.locator('#artboard').evaluate(n=>new DOMMatrix(getComputedStyle(n).transform).a);
+ const scale=await page.locator('#artboard').evaluate(n=>new DOMMatrix(getComputedStyle(n).transform).a);assert.equal(scale,1);
  async function resize(){const handle=await page.locator('[data-resize="el_second"][data-handle="e"]').boundingBox();await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();await page.mouse.move(handle.x+handle.width/2+77*scale,handle.y+handle.height/2);}
  await resize();assert.ok(await page.locator('.ed-guide[data-axis="x"]').count()>0);await saved(page,()=>page.mouse.up());
  const after=disk(file).pages[0].elements;
  for(const id of ['el_first','el_second']){const old=original.find(e=>e.id===id),next=after.find(e=>e.id===id);assert.ok(Math.abs(next.width-200)<1e-6);assert.equal(next.x,old.x);assert.equal(next.y,old.y);assert.equal(next.height,old.height);assert.deepEqual({...next,width:old.width},old);}
  assert.deepEqual(after.slice(2),original.slice(2));assert.equal(await page.locator('.ed-guide').count(),0);
  await saved(page,()=>page.keyboard.press('ControlOrMeta+z'));assert.deepEqual(disk(file).pages[0].elements,original);
+ // Undo intentionally clears selection; select the same pair before testing Alt.
+ await select(page,'el_first');await page.locator('[data-action="select"][data-id="el_second"]').click({modifiers:['Shift']});
  await page.keyboard.down('Alt');await resize();assert.equal(await page.locator('.ed-guide').count(),0);await saved(page,()=>page.mouse.up());await page.keyboard.up('Alt');
  for(const id of ['el_first','el_second'])assert.ok(Math.abs(disk(file).pages[0].elements.find(e=>e.id===id).width-197)<1e-6);
  assert.deepEqual(errors,[]);
