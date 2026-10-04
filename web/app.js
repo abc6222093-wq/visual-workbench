@@ -279,7 +279,8 @@ async function home() {
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
   // 总览的选择习惯与画布、页面区一致：Shift/Cmd 加选、拖框、点空白与 Esc 取消、右键菜单
-  S.homeSel = mountHomeSelection($(".hm-scroll"), {
+  const scroll = app.querySelector(".hm-scroll"); // 只认自己画的总览，不碰页面上别的同名节点
+  if (scroll) S.homeSel = mountHomeSelection(scroll, {
     onOpen: (id) => open(id).catch((e) => notice(e.message)),
     onAction: (action, ids) => homeAction(action, ids),
   });
