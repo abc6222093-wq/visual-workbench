@@ -7,6 +7,8 @@ import { validateProjectData } from '../validate.js';
 import { unzip } from './zip.js';
 import { analyzeHtml, cancelledError } from './analyze.js';
 import { buildProject } from './build.js';
+import { analyzeWebFiles, captureUrls, normalizeDevices, MAX_URLS } from './web.js';
+import { WEB_DEFAULT_ARTBOARD } from '../../web/project-kinds.js';
 
 export const IMPORT_PRESETS = { 'slide-16x9': [1920, 1080], 'web-desktop': [1440, 900], 'web-mobile': [390, 844], 'poster-a4': [2480, 3508], 'poster-a3': [3508, 4961], custom: [1920, 1080] };
 export const IMPORT_MAX_BYTES = 380_000_000;
@@ -31,7 +33,7 @@ export function pickEntry(paths, wanted) {
   return html[0];
 }
 
-export function createImportJobs({ dataDir, analyze = analyzeHtml, pageTimeout } = {}) {
+export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = analyzeWebFiles, capture = captureUrls, pageTimeout, urlTimeout } = {}) {
   const jobs = new Map(), tmpRoot = join(dataDir, '.import-tmp');
   // 上次异常退出留下的临时文件：超过一天的清掉
   try { if (existsSync(tmpRoot) && !lstatSync(tmpRoot).isSymbolicLink()) for (const name of readdirSync(tmpRoot)) { const p = join(tmpRoot, name); if (Date.now() - statSync(p).mtimeMs > 86400000) rmSync(p, { recursive: true, force: true }); } } catch {}
@@ -39,10 +41,32 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, pageTimeout }
 
   function create(b) {
     if (typeof b?.name !== 'string' || !b.name.trim()) throw fail(400, '请填写项目名称');
-    const preset = b.preset || 'slide-16x9'; if (!IMPORT_PRESETS[preset]) throw fail(400, '画板类型不正确');
-    const width = b.width ?? IMPORT_PRESETS[preset][0], height = b.height ?? IMPORT_PRESETS[preset][1];
-    for (const v of [width, height]) if (!Number.isInteger(v) || v < 1 || v > 8000) throw fail(400, '画板宽高必须是 1–8000 的整数');
-    if (!Array.isArray(b.files) || !b.files.length) throw fail(400, '请选择要导入的 HTML 文件、文件夹或 .zip');
+    const kind = b.kind === undefined || b.kind === 'deck' ? 'deck' : b.kind === 'web' ? 'web' : null;
+    if (!kind) throw fail(400, '项目类型不正确（课件 deck / 网页 web）');
+    let preset, width, height, devices = null;
+    if (kind === 'web') {
+      ({ preset, width, height } = WEB_DEFAULT_ARTBOARD);
+      devices = normalizeDevices(b.devices); if (!devices.length) throw fail(400, '请至少勾选电脑端或手机端中的一个');
+      // 网址抓取：不需要上传文件
+      if (b.urls !== undefined && !(Array.isArray(b.files) && b.files.length)) {
+        if (!Array.isArray(b.urls) || b.urls.some(u => typeof u !== 'string')) throw fail(400, '网址列表不正确');
+        const urls = b.urls.map(u => u.trim()).filter(Boolean);
+        if (!urls.length) throw fail(400, '请输入至少一个网址（每行一个）');
+        if (urls.length > MAX_URLS) throw fail(400, `一次最多导入 ${MAX_URLS} 个网址`);
+        if (existsSync(tmpRoot) && lstatSync(tmpRoot).isSymbolicLink()) throw fail(403, '数据目录中的文件夹不能是符号链接');
+        const id = randomUUID().replaceAll('-', '').slice(0, 16), dir = join(tmpRoot, id);
+        mkdirSync(dir, { recursive: true });
+        const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null };
+        jobs.set(id, job);
+        run(job, { kind, source: 'urls', name: b.name.trim().slice(0, 200), preset, width, height, urls, devices, entry: null, files: [] });
+        return { jobId: id };
+      }
+    } else {
+      preset = b.preset || 'slide-16x9'; if (!IMPORT_PRESETS[preset]) throw fail(400, '画板类型不正确');
+      width = b.width ?? IMPORT_PRESETS[preset][0]; height = b.height ?? IMPORT_PRESETS[preset][1];
+      for (const v of [width, height]) if (!Number.isInteger(v) || v < 1 || v > 8000) throw fail(400, '画板宽高必须是 1–8000 的整数');
+    }
+    if (!Array.isArray(b.files) || !b.files.length) throw fail(400, kind === 'web' ? '请选择要导入的网页文件、文件夹或 .zip，或者输入网址' : '请选择要导入的 HTML 文件、文件夹或 .zip');
     let list = [], total = 0;
     for (const f of b.files) {
       if (typeof f?.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(f.data)) throw fail(400, `文件内容不正确：${f?.path}`);
@@ -65,7 +89,7 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, pageTimeout }
     catch (e) { rmSync(dir, { recursive: true, force: true }); throw e; }
     const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备文件', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null };
     jobs.set(id, job);
-    run(job, { name: b.name.trim().slice(0, 200), preset, width, height, entry, files: list.map(f => f.path) });
+    run(job, { kind, source: 'files', name: b.name.trim().slice(0, 200), preset, width, height, devices, entry, files: list.map(f => f.path) });
     return { jobId: id };
   }
 
@@ -75,15 +99,21 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, pageTimeout }
     const check = () => { if (signal.aborted) throw cancelledError(); };
     try {
       step(0.05, '正在启动后台浏览器');
-      const analysis = await analyze({ srcDir: join(job.dir, 'src'), entry: opts.entry, width: opts.width, height: opts.height, signal, pageTimeout,
+      const hooks = { signal, pageTimeout,
         onBrowser: b => { job.browser = b; if (signal.aborted) b.close().catch(() => {}); },
-        onPages: n => { job.pages = n; step(0.1, `识别出 ${n} 页`); },
-        onPage: (i, n) => step(0.1 + 0.75 * i / n, `正在分析第 ${i + 1} / ${n} 页`) });
-      check(); step(0.86, '正在整理素材与字体');
+        onPages: n => { job.pages = n; step(0.1, opts.kind === 'web' ? `共 ${n} 页要抓取` : `识别出 ${n} 页`); },
+        onPage: (i, n) => step(0.1 + 0.75 * i / n, opts.kind === 'web' ? `正在抓取第 ${i + 1} / ${n} 页` : `正在分析第 ${i + 1} / ${n} 页`) };
+      const analysis = opts.source === 'urls' ? await capture({ urls: opts.urls, devices: opts.devices, ...(urlTimeout ? { timeout: urlTimeout } : {}), ...hooks })
+        : opts.kind === 'web' ? await analyzeWeb({ srcDir: join(job.dir, 'src'), entry: opts.entry, devices: opts.devices, ...hooks })
+        : await analyze({ srcDir: join(job.dir, 'src'), entry: opts.entry, width: opts.width, height: opts.height, ...hooks });
+      check();
+      // 网址全部被跳过：任务失败，并列出原因
+      if (opts.kind === 'web' && !analysis.pages.length) throw new Error(`没有导入任何网页：${analysis.skipped.map(s => `${s.url}（${s.reason}）`).join('；') || '没有可用的网址'}`);
+      step(0.86, '正在整理素材与字体');
       const projectsDir = join(dataDir, 'projects'); let id;
       do id = `import-${randomUUID().slice(0, 8)}`; while (existsSync(join(projectsDir, id)) || !ID.test(id));
       const tmpProject = join(job.dir, 'project');
-      const { project, summary } = await buildProject({ analysis, srcDir: join(job.dir, 'src'), projectDir: tmpProject, id, name: opts.name, preset: opts.preset, width: opts.width, height: opts.height, entry: opts.entry, files: opts.files, startedAt, check });
+      const { project, summary } = await buildProject({ analysis, srcDir: opts.source === 'urls' ? null : join(job.dir, 'src'), projectDir: tmpProject, id, name: opts.name, preset: opts.preset, width: opts.width, height: opts.height, entry: opts.entry, files: opts.files, startedAt, check });
       check(); step(0.96, '正在校验并写入项目');
       const result = validateProjectData(project, { projectDir: tmpProject });
       if (!result.ok) throw new Error(`导入结果没通过校验：${result.errors.slice(0, 3).map(e => `${e.path} ${e.message}`).join('；')}`);

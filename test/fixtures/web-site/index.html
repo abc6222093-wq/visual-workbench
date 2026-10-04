@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>晨光书店</title>
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<nav class="site-nav">
+  <img class="logo" src="img/logo.svg" alt="晨光书店标志">
+  <div class="links"><a href="#books">新书</a><a href="#about">关于我们</a><a href="members.html">会员专区</a></div>
+</nav>
+<header class="hero">
+  <h1>晨光书店</h1>
+  <p>每一本书都是一扇窗。</p>
+  <a class="btn" href="#books">浏览新书</a>
+</header>
+<section id="books" class="books">
+  <h2>本月新书</h2>
+  <div class="grid">
+    <div class="card"><h3>山中来信</h3><p>一位护林员十年的书信集。</p></div>
+    <div class="card"><h3>海边的数学课</h3><p>把几何讲给渔村的孩子听。</p></div>
+    <div class="card"><h3>城市夜行</h3><p>凌晨三点的城市观察笔记。</p></div>
+  </div>
+</section>
+<section id="about" class="about">
+  <h2>关于我们</h2>
+  <p>晨光书店开在老街拐角，二十年来只卖我们自己读过的书。</p>
+  <form class="subscribe" method="post" action="/api/subscribe">
+    <input type="text" name="nick" placeholder="昵称">
+    <button type="submit">订阅书讯</button>
+  </form>
+</section>
+<footer class="site-footer"><p>晨光书店 · 老街 12 号</p><p>每天 10:00–22:00</p></footer>
+<script>
+  // 打点：只读导入时这些写请求都应该被拦下，测试网站不应收到
+  fetch('/api/track', { method: 'POST', body: 'view' }).catch(() => {});
+  try { navigator.sendBeacon('/api/beacon', 'view'); } catch (e) {}
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: sans-serif; background: #fffaf0; color: #222222; }
+.site-nav { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; height: 72px; padding: 0 48px; background: #1f2937; }
+.site-nav .logo { width: 40px; height: 40px; }
+.site-nav .links { display: flex; gap: 32px; }
+.site-nav .links a { color: #ffffff; text-decoration: none; font-size: 18px; }
+.hero { height: 640px; padding: 160px 48px 0; background: #fde68a; text-align: center; }
+.hero h1 { margin: 0; font-size: 64px; }
+.hero p { margin: 24px 0 40px; font-size: 24px; }
+.btn { display: inline-block; padding: 16px 40px; border-radius: 999px; background: #b45309; color: #ffffff; text-decoration: none; font-size: 20px; }
+.books { padding: 80px 48px; min-height: 900px; }
+.books h2, .about h2 { margin: 0 0 40px; font-size: 40px; }
+.grid { display: flex; gap: 32px; }
+.card { flex: 1; height: 360px; padding: 32px; border-radius: 16px; background: #ffffff; border: 2px solid #e5e7eb; }
+.card h3 { margin: 0 0 16px; font-size: 28px; }
+.card p { margin: 0; font-size: 18px; }
+.about { padding: 80px 48px; min-height: 600px; background: #ecfccb; }
+.about p { font-size: 20px; }
+.subscribe { display: flex; gap: 12px; margin-top: 32px; }
+.subscribe input { width: 240px; height: 44px; font-size: 16px; }
+.subscribe button { height: 44px; padding: 0 24px; font-size: 16px; }
+.site-footer { height: 200px; padding: 48px; background: #111827; color: #d1d5db; }
+.site-footer p { margin: 0 0 12px; }
+@media (max-width: 600px) {
+  .site-nav { padding: 0 16px; }
+  .site-nav .links { gap: 12px; }
+  .site-nav .links a { font-size: 14px; }
+  .hero { height: 520px; padding: 120px 16px 0; }
+  .hero h1 { font-size: 40px; }
+  .grid { flex-direction: column; }
+  .card { flex: none; }
+  .books, .about { padding: 48px 16px; }
+}

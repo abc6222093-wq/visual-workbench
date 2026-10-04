@@ -85,8 +85,13 @@ export function install() {
 
   // ---------- 单独显示某一页 ----------
   const force = (el, prop, value) => el.style.setProperty(prop, value, 'important');
-  function isolate(kind, index) {
+  function isolate(kind, index, opts = {}) {
     let root = document.body, box, mode = 'element';
+    if (kind === 'web') { // 网页（第 11 轮）：不分页，整页一页；在页顶取位置（固定 / 粘性元素按页顶时的位置记一次）
+      scrollTo(0, 0);
+      window.__vwPage = { kind, index, root: document.body, mode: 'web', maxHeight: opts.maxHeight || 20000 };
+      return;
+    }
     if (kind === 'deck') {
       // 每页一份文档：有铺满大半个视口的舞台容器（如 .stage）就以它为页面，播放器按钮之类留在外面的不算
       mode = 'viewport'; const area = innerWidth * innerHeight;
@@ -111,6 +116,7 @@ export function install() {
     const p = window.__vwPage;
     if (p.mode === 'viewport') return { left: 0, top: 0, width: innerWidth, height: innerHeight };
     if (p.mode === 'fallback') return { left: -scrollX, top: p.index * innerHeight - scrollY, width: innerWidth, height: innerHeight };
+    if (p.mode === 'web') return { left: -scrollX, top: -scrollY, width: innerWidth, height: Math.max(innerHeight, Math.min(p.maxHeight, document.documentElement.scrollHeight)) };
     const r = p.root.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height };
   }
 
@@ -156,14 +162,80 @@ export function install() {
   // ---------- 取一页内容 ----------
   const SHOT_TAGS = new Set(['CANVAS', 'VIDEO', 'IFRAME', 'EMBED', 'OBJECT', 'AUDIO']);
   const LIMIT = 300;
-  async function analyze({ width, wait: waitMs = 250 }) {
-    const page = window.__vwPage; const root = page.root;
+
+  // ---------- 原网页位置（第 11 轮）：唯一的 CSS 选择器 ----------
+  // 优先 #id；否则自下而上拼「父 > tag:nth-of-type(n)」直到唯一；第一层先试一个稳定 class（不像自动生成的）
+  const cssEsc = s => (window.CSS?.escape ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c));
+  const unique = (sel, el) => { try { const all = document.querySelectorAll(sel); return all.length === 1 && all[0] === el; } catch { return false; } };
+  const stableClass = el => [...el.classList].find(c => /^[a-zA-Z][a-zA-Z0-9_-]{1,40}$/.test(c) && !/\d{3,}|^(vw|css|sc|jsx|svelte|astro)-|^_/.test(c) && !/^(active|show|visible|hidden|open|selected|current|aos-animate|fragment)$/.test(c));
+  const selectorCache = new WeakMap();
+  function selectorOf(el) {
+    if (selectorCache.has(el)) return selectorCache.get(el);
+    let sel = null;
+    if (el === document.documentElement) sel = 'html';
+    else if (el === document.body) sel = 'body';
+    else if (el.id && unique('#' + cssEsc(el.id), el)) sel = '#' + cssEsc(el.id);
+    else {
+      const tag = el.localName, cls = stableClass(el);
+      if (cls && unique(`${tag}.${cssEsc(cls)}`, el)) sel = `${tag}.${cssEsc(cls)}`;
+      else {
+        const parts = []; let cur = el;
+        while (cur && cur.parentElement) {
+          if (cur !== el && cur.id && unique('#' + cssEsc(cur.id), cur)) { parts.unshift('#' + cssEsc(cur.id)); break; }
+          const same = [...cur.parentElement.children].filter(c => c.localName === cur.localName);
+          parts.unshift(cur === document.body ? 'body' : same.length > 1 ? `${cur.localName}:nth-of-type(${same.indexOf(cur) + 1})` : cur.localName);
+          if (cur === document.body) break;
+          const s = parts.join(' > ');
+          if (unique(s, el)) { sel = s; break; }
+          cur = cur.parentElement;
+        }
+        if (!sel) sel = parts.join(' > ');
+      }
+    }
+    selectorCache.set(el, sel);
+    return sel;
+  }
+  const short = (s, n) => Array.from(String(s || '').replace(/\s+/g, ' ').trim()).slice(0, n).join('');
+  function originOf(el, text) {
+    if (!el || el.nodeType !== 1) return undefined;
+    const o = { selector: selectorOf(el), tag: el.localName };
+    if (text) { const t = short(text, 80); if (t) o.text = t; }
+    return o;
+  }
+  // ---------- 分组（第 11 轮，网页）：按 DOM 结构判断哪些容器算一个组件 ----------
+  const GROUP_TAGS = { HEADER: '页眉', NAV: '导航栏', FOOTER: '页脚', SECTION: '区块', ARTICLE: '文章', ASIDE: '侧栏', MAIN: '主体' };
+  const GROUP_CLASS = /card|item|btn|button|nav|hero|footer|header/i;
+  const signature = el => `${el.localName}.${[...el.classList].sort().join('.')}|${[...el.children].map(c => c.localName).join(',')}`;
+  function groupLabel(el) {
+    const cls = String(el.getAttribute('class') || '');
+    if (GROUP_TAGS[el.tagName]) return GROUP_TAGS[el.tagName];
+    if (/nav/i.test(cls)) return '导航栏';
+    if (/hero/i.test(cls)) return '首屏';
+    if (/header/i.test(cls)) return '页眉';
+    if (/footer/i.test(cls)) return '页脚';
+    if (el.tagName === 'BUTTON' || /btn|button/i.test(cls)) return '按钮';
+    if (el.tagName === 'A') return '链接';
+    if (/card/i.test(cls)) return '卡片';
+    if (el.tagName === 'LI' || /item/i.test(cls)) return '列表项';
+    return '分组';
+  }
+  function groupKind(el) {
+    if (GROUP_TAGS[el.tagName]) return true;
+    if ((el.tagName === 'A' || el.tagName === 'BUTTON') && el.children.length >= 2) return true;
+    if (GROUP_CLASS.test(String(el.getAttribute('class') || ''))) return true;
+    if (el.children.length >= 1 && el.parentElement) { const sig = signature(el); if ([...el.parentElement.children].filter(c => signature(c) === sig).length >= 2) return true; }
+    return false;
+  }
+
+  async function analyze({ width, wait: waitMs = 250, limit = LIMIT }) {
+    const page = window.__vwPage; const root = page.root, web = page.mode === 'web';
     try { await Promise.race([document.fonts.ready, wait(4000)]); } catch {}
     await wait(waitMs);
     const clue = clues(root);
     finishAll(root);
     await frames(2);
     if (page.mode === 'element') { const r = root.getBoundingClientRect(); scrollTo(scrollX + r.left, scrollY + r.top); await frames(1); }
+    if (web) { scrollTo(0, 0); await frames(1); }
     const box = pageBox(), scale = box.width > 0 ? width / box.width : 1, boxArea = box.width * box.height;
     const items = [], rest = []; let uid = 0;
     const mark = el => { if (!el.dataset.vwImp) el.dataset.vwImp = String(++uid); return el.dataset.vwImp; };
@@ -174,7 +246,9 @@ export function install() {
     const owns = page.mode === 'fallback' ? centered : hits;
     const clipToBox = r => { const left = Math.max(r.left, box.left), top = Math.max(r.top, box.top), right = Math.min(r.right, box.left + box.width), bottom = Math.min(r.bottom, box.top + box.height); return { left, top, width: right - left, height: bottom - top, right, bottom }; };
     const elScale = (el, r) => (el.offsetWidth > 0 ? r.width / el.offsetWidth : 1) || 1;
-    const push = item => { items.push(item); };
+    // 每个元素记下原网页位置 origin；网页还记下所在的分组（由外到内的分组编号）
+    let current = null; const groups = {};
+    const push = item => { const o = current?.el ? originOf(current.el, item.kind === 'text' ? item.text : null) : undefined; if (o) item.origin = o; if (web) item.groups = current?.groups || []; items.push(item); };
 
     // 背景：页面根、body、html 的背景色取第一个不透明的；背景图（url / 解析不了的渐变）成为铺满的锁定图片或截图
     const bgOwners = [...new Set([document.documentElement, document.body, root])];
@@ -182,6 +256,7 @@ export function install() {
     for (const el of [...bgOwners].reverse()) { const c = color(cs(el).backgroundColor); if (c && c.a > 0) { background = hex(c); break; } }
     const full = { x: 0, y: 0, width: round(box.width * scale), height: round(box.height * scale) };
     for (const el of bgOwners) {
+      current = { el, groups: [] };
       const s = cs(el); if (!s.backgroundImage || s.backgroundImage === 'none') continue;
       const layers = splitTop(s.backgroundImage);
       const urls = layers.map(urlOf);
@@ -307,9 +382,16 @@ export function install() {
       if (tf.kind === 'zero') return;
       const hidden = s.visibility !== 'visible', r = el.getBoundingClientRect(), sized = r.width >= 0.5 && r.height >= 0.5;
       const shown = !hidden && sized && (s.display !== 'contents');
-      if (items.length >= LIMIT) { if (shown && hits(r)) rest.push(el); return; }
+      if (items.length >= limit) { if (shown && hits(r)) rest.push(el); return; }
       const blend = el !== root && s.mixBlendMode && s.mixBlendMode !== 'normal' && BLENDS.has(s.mixBlendMode) ? s.mixBlendMode : null;
-      const acc2 = { angle: acc.angle + (tf.angle || 0), scale: acc.scale * (tf.scale || 1), blend: blend || acc.blend };
+      const acc2 = { angle: acc.angle + (tf.angle || 0), scale: acc.scale * (tf.scale || 1), blend: blend || acc.blend, groups: acc.groups };
+      // 网页：组件容器成为分组（最多嵌套 4 层）；容器自己的背景 / 边框形状是分组里的第一个（最底层）
+      if (web && el !== root && acc.groups.length < 4 && groupKind(el)) {
+        const gid = mark(el);
+        if (!groups[gid]) { const t = short(el.textContent, 10); groups[gid] = { name: groupLabel(el) + (t ? ` · ${t}` : ''), origin: originOf(el, null) }; }
+        acc2.groups = [...acc.groups, gid];
+      }
+      current = { el, groups: acc2.groups };
       const cover = el !== root && r.width * r.height >= boxArea * 0.9 ? { locked: true } : {};
       const reason = el === root ? null : needsShot(el, s, tf);
       if (reason) { if (shown && owns(r)) push({ kind: 'shot', own: false, opaque: SHOT_TAGS.has(el.tagName), mark: mark(el), ...toBox(r), clip: raw(r), reason, name: `[截图] ${reason.split(' ')[0]}`, ...cover, ...(acc2.blend ? { effects: { blend: acc2.blend } } : {}) }); return; }
@@ -362,14 +444,15 @@ export function install() {
       }
       for (const c of el.children) if (!consumedBy.has(c)) await walk(c, op, acc2);
     }
-    await walk(root, 1, { angle: 0, scale: elScale(root, root.getBoundingClientRect()), blend: null });
+    await walk(root, 1, { angle: 0, scale: elScale(root, root.getBoundingClientRect()), blend: null, groups: [] });
+    current = null;
     let limited = null;
     if (rest.length) {
       let u = null; for (const el of rest) { const r = el.getBoundingClientRect(); u = u ? { left: Math.min(u.left, r.left), top: Math.min(u.top, r.top), right: Math.max(u.right, r.right), bottom: Math.max(u.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; }
       const c = clipToBox({ ...u, width: u.right - u.left, height: u.bottom - u.top });
       if (c.width > 0 && c.height > 0) { items.push({ kind: 'shot', own: false, marks: rest.map(mark), ...toBox(c), clip: raw(c), reason: '超出元素上限的剩余部分', name: '[截图] 剩余部分' }); limited = rest.length; }
     }
-    return { items, background, bgGradient, clue, limited, box: { width: box.width, height: box.height }, scale, fonts: fontInfo(), doc: { width: Math.max(document.documentElement.scrollWidth, innerWidth), height: Math.max(document.documentElement.scrollHeight, innerHeight) } };
+    return { items, background, bgGradient, clue, limited, box: { width: box.width, height: box.height }, scale, fonts: fontInfo(), doc: { width: Math.max(document.documentElement.scrollWidth, innerWidth), height: Math.max(document.documentElement.scrollHeight, innerHeight) }, ...(web ? { groups, title: short(document.title, 40) } : {}) };
   }
 
   // ---------- 截图时只显示目标 ----------
