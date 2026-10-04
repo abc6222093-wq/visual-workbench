@@ -88,10 +88,10 @@ function mergeIdArray(base, local, remote, path, ctx) {
     let value;
     if (l && r) value = mergeValue(b, l, r, p, ctx);
     else if (l) value = !b ? l : deepEqual(l, b) ? undefined : conflict(ctx, p, l, undefined); // agent 删除
-    else if (r) value = !b ? r : deepEqual(r, b) ? undefined : conflict(ctx, p, undefined, r); // エイ 删除
+    else if (r) value = !b ? r : deepEqual(r, b) ? undefined : conflict(ctx, p, undefined, r); // 用户删除
     if (value !== undefined) merged.set(id, value);
   }
-  // 顺序：エイ 没调过顺序就用 agent 的顺序，否则用 エイ 的；另一方独有的项按它在自己那边的前一个兄弟插入
+  // 顺序：用户没调过顺序就用 agent 的顺序，否则用用户的；另一方独有的项按它在自己那边的前一个兄弟插入
   const localKept = sameRelativeOrder(base, local);
   const primary = localKept ? remote : local;
   const secondary = localKept ? local : remote;
@@ -117,7 +117,7 @@ const PROP_NAMES = {
 };
 const COLLECTION_NAMES = { steps: '动效', assets: '素材', fonts: '字体' };
 
-// 生成给 エイ 看的冲突位置描述
+// 生成给用户看的冲突位置描述
 function conflictLabel(conflict, trees) {
   const { path } = conflict;
   const parts = path[0] === 'pages' ? [] : ['项目'];
@@ -158,7 +158,7 @@ function conflictLabel(conflict, trees) {
 
 /**
  * 三方合并项目。
- * base：上次与磁盘一致时的项目；local：エイ 界面里的项目；remote：磁盘上的项目。
+ * base：上次与磁盘一致时的项目；local：用户界面里的项目；remote：磁盘上的项目。
  * 不修改入参，返回 { merged, conflicts }。
  */
 export function mergeProjects(base, local, remote, { prefer = 'local' } = {}) {
@@ -176,7 +176,7 @@ export function mergeProjects(base, local, remote, { prefer = 'local' } = {}) {
   return { merged, conflicts };
 }
 
-// 冲突位置去重（保持首次出现顺序），用于提示 エイ
+// 冲突位置去重（保持首次出现顺序），用于提示 用户
 export function summarizeConflicts(conflicts) {
   return [...new Set(conflicts.map(item => item.label))];
 }
@@ -188,7 +188,7 @@ const withoutUpdatedAt = project => {
 };
 
 /**
- * 同步控制器：收到「磁盘变了」后，在 エイ 不忙的时候取回磁盘版本、三方合并、交给界面应用。
+ * 同步控制器：收到「磁盘变了」后，在用户不忙的时候取回磁盘版本、三方合并、交给界面应用。
  */
 export function createSyncController({
   isBusy,
@@ -230,7 +230,7 @@ export function createSyncController({
 
   async function attempt() {
     if (disposed || running || !pending) return;
-    if (isBusy()) { later(); return; } // エイ 正忙：不取数据，稍后再看
+    if (isBusy()) { later(); return; } // 用户正忙：不取数据，稍后再看
     running = true;
     const seen = requested;
     let retry = false;
@@ -247,7 +247,7 @@ export function createSyncController({
       }
       failures = 0;
       if (disposed) return;
-      if (isBusy()) { retry = true; return; } // 等待期间 エイ 开始拖动/输入了：整个重来
+      if (isBusy()) { retry = true; return; } // 等待期间用户开始拖动/输入了：整个重来
       const { project, base, revision } = getLocal();
       if (remote.revision !== revision) {
         const { merged, conflicts } = mergeProjects(base, project, remote.project);

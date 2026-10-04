@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pointerAngle, normalizeAngle, rotateFromPointer } from '../web/rotate-tool.js';
+import * as rotateTool from '../web/rotate-tool.js';
+const { pointerAngle, normalizeAngle, rotateFromPointer } = rotateTool;
 import { createHistory } from '../web/editor.js';
 
 test('rotation handle math: up is 0°, clockwise positive, normalized', () => {
@@ -31,4 +32,17 @@ test('history amend merges continuous typing into the latest undo step', () => {
   assert.deepEqual(h.undo(), { text: '' });
   assert.equal(h.canUndo, false);
   assert.deepEqual(h.redo(), { text: 'abc' });
+});
+
+test('rotate handle moves to a visible side when the element touches artboard edges', () => {
+  const { rotateHandlePlacement } = rotateTool;
+  const board = { left: 0, top: 0, right: 1000, bottom: 600 }, need = 40, size = 22, gap = 18;
+  const at = (l, t, r, b) => rotateHandlePlacement({ box: { left: l, top: t, right: r, bottom: b }, board, need, size, gap });
+  assert.equal(at(100, 100, 300, 200).side, 'bottom');
+  assert.equal(at(100, 100, 300, 590).side, 'top');          // 贴底
+  assert.equal(at(100, 10, 300, 590).side, 'right');         // 上下都贴边
+  assert.equal(at(700, 10, 990, 590).side, 'left');          // 上下右都贴边
+  assert.equal(at(10, 10, 990, 590).side, 'inside');         // 四面贴边：放元素内部
+  assert.equal(rotateHandlePlacement({ box: { left: 0, top: 0, right: 10, bottom: 10 }, board: null, need, size, gap }).side, 'bottom');
+  for (const side of ['bottom', 'top', 'right', 'left', 'inside']) assert.ok(Object.keys(at(0, 0, 0, 0).style).length === 5, side);
 });

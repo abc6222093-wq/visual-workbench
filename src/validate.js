@@ -131,6 +131,11 @@ export function validateProjectData(data, opts = {}) {
     if (el.type === 'image' && typeof el.tint === 'string' && isJpegAsset(assetById.get(el.asset), opts.projectDir)) {
       errors.push({ code: ERROR_CODES.TINT_NEEDS_ALPHA, path: `${path}/tint`, message: `图片元素 ${el.id} 设了重新着色（tint），但素材 ${assetById.get(el.asset).file} 是 JPEG，没有透明部分，整块会变成纯色。请换成单色的 SVG 或透明底 PNG，或去掉 tint` });
     }
+    // 裁切不能超出源图（schema 只能约束单个数，两数之和由这里检查）；错误码 CROP_RANGE
+    const crop = el.type === 'image' ? el.crop : null;
+    if (crop && typeof crop === 'object' && (crop.x + crop.width > 1 + 1e-9 || crop.y + crop.height > 1 + 1e-9)) {
+      errors.push({ code: 'CROP_RANGE', path: `${path}/crop`, message: `图片元素 ${el.id} 的裁切超出了源图：x+width、y+height 都不能大于 1` });
+    }
     if (el.type === 'image' && !assetIds.has(el.asset)) {
       errors.push({ code: ERROR_CODES.UNKNOWN_ASSET_REF, path: `${path}/asset`, message: `图片元素 ${el.id} 引用了不存在的素材：${el.asset}` });
     }

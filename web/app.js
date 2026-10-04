@@ -13,7 +13,14 @@ import { reconcileDocument } from "./outline-document.js";
 import { pickCanvasElement } from "./editor-hit-test.js";
 // 第 9 轮：画布上就地编辑文字、旋转把手、总览选择
 import { startTextEdit, isEditingTextNode } from "./text-edit.js";
-import { rotateFromPointer } from "./rotate-tool.js";
+import { rotateFromPointer, rotateHandlePlacement } from "./rotate-tool.js";
+// 第 10 轮：文字框高度由内容决定
+import { measureTextNode, createTextMeasurer, fitTextHeights } from "./text-metrics.js";
+// 第 10 轮：画布上裁切图片、替换图片
+import { startCrop, isCropping } from "./crop-tool.js";
+import { pickImage } from "./image-picker.js";
+// 第 10 轮：旧 HTML 导入
+import { openImportDialog } from "./import-html.js";
 import { mountHomeSelection } from "./home-selection.js";
 import { renderPage, patchPage, updateElementNode } from "./render.js";
 import { patchPageItems } from "./page-items.js";
@@ -38,7 +45,7 @@ import {
   resizeBounds,
   referenceText,
 } from "./editor.js";
-// 实时连接（第 3 轮）：合并エイ 和 agent 的修改
+// 实时连接（第 3 轮）：合并用户和 agent 的修改
 import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
 import { icon } from "./ui/icons.js";
@@ -149,6 +156,7 @@ const TYPE_ICON = { text: "type", image: "image", shape: "shapes", group: "group
 function shell(active, body) {
   document.documentElement.classList.add("glass-mode");
   S.textEdit?.finish();
+  finishCrop();
   S.homeSel?.dispose();
   S.homeSel = null;
   stopPreview(); // 换画面时，正在播的动效预览一起结束
@@ -159,7 +167,7 @@ function shell(active, body) {
     `<button class="ed-ibtn ${active === a ? "is-on" : ""}" data-action="${a}" title="${title}" aria-label="${title}" ${active === a ? 'aria-current="page"' : ""}>${icon(name, 18)}</button>`;
   disposeStepView();
   const focus = active === "editor" && S.focus ? " is-focus" : "";
-  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="エイ">E</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="用户">用</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
 }
 // 总览页、素材库的顶部：左边页面名直接放在背景上，右边一个白色圆钮
 function head(name, count, action) {
@@ -249,6 +257,7 @@ function refreshThumbnails() {
 async function home() {
   await flush();
   S.view = "home";
+  disposeTextMeasurer();
   S.outlineView?.dispose();
   S.outlineView = null;
   S.project = null;
@@ -266,11 +275,12 @@ async function home() {
     `<div class="hm-cell" data-project-id="${esc(item.id)}"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item.project.artboard)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : esc(item.project.artboard.preset)}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[ ["project-rename","重命名"],["project-duplicate","复制项目"],["project-delete","删除项目"] ].map(([action,label])=>`<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
   shell(
     "home",
-    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
+    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="g-btn" data-action="import-html">导入旧 HTML</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
   );
   list.forEach((x, i) => $(`[data-thumb="${i}"]`).append(thumb(x.project, x.project.pages[0])));
   // 总览的选择习惯与画布、页面区一致：Shift/Cmd 加选、拖框、点空白与 Esc 取消、右键菜单
-  S.homeSel = mountHomeSelection($(".hm-scroll"), {
+  const scroll = app.querySelector(".hm-scroll"); // 只认自己画的总览，不碰页面上别的同名节点
+  if (scroll) S.homeSel = mountHomeSelection(scroll, {
     onOpen: (id) => open(id).catch((e) => notice(e.message)),
     onAction: (action, ids) => homeAction(action, ids),
   });
@@ -351,6 +361,10 @@ async function open(id, data) {
 
   S.focus = false;
   S.view = "editor";
+  // 文字框高度校正尽量赶在第一次画出编辑器之前（最多等 2.5 秒，字体慢时在后台继续），打开后画面不再跳一次
+  const correction = correctTextHeights(S.project.id).catch((e) => notice(e.message));
+  await Promise.race([correction, pause(2500)]);
+  if (S.project?.id !== id || S.view !== "editor") return;
   renderEditor();
   connectEvents(S.project.id);
   if(data.syncConflicts?.length) modal(`<h2>发现疑似同步冲突副本</h2><p class="g-sheet__note">这些文件可能是网盘留下的另一份修改，请先核对；工作台不会自动删除或合并。</p><ul>${data.syncConflicts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul><div class="g-sheet__actions">${gbtn("close","知道了")}</div>`);
@@ -371,7 +385,7 @@ function property() {
   if (!e) return "";
   const field = (k, label, v = e[k], type = "number") =>
     `<label class="g-field"><span>${label}</span><input data-prop="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
-  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${paragraphFields(e)}${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${fitField(e)}${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}${e.shape === "rect" ? field("cornerRadius", "圆角", e.cornerRadius ?? 0) : ""}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
+  return `<div class="ed-selected"><span class="ed-selected__icon">${icon(TYPE_ICON[e.type], 16)}</span><div><strong>${S.selected.length > 1 ? `${S.selected.length} 个元素` : esc(e.name || e.type)}</strong><small>${esc(e.type)} · ${esc(e.id)}</small></div></div><section class="ed-section"><h3 class="ed-heading">位置与大小</h3><div class="ed-pair">${field("x", "X")}${field("y", "Y")}${field("width", "宽度")}${e.type === "text" ? `<label class="g-field" title="文字框高度由内容决定"><span>高度</span><input data-prop="height" type="number" value="${esc(e.height)}" readonly></label>` : field("height", "高度")}${field("rotation", "旋转")}</div></section>${e.type === "text" ? `<section class="ed-section"><h3 class="ed-heading">文字</h3><label class="g-area">内容<textarea data-prop="text" rows="3">${esc(e.text)}</textarea></label><div class="ed-pair">${field("fontSize", "字号")}${field("fontWeight", "字重")}${field("color", "颜色", e.color, "color")}<label class="g-field"><span>字体</span><select data-prop="font"><option value="">系统默认</option>${S.project.fonts.map((f) => `<option value="${f.id}" ${e.font === f.id ? "selected" : ""}>${esc(f.family)}</option>`).join("")}</select></label></div></section>${paragraphFields(e)}${textStyleFields(e, field)}` : ""}${e.type === "image" ? `<section class="ed-section"><h3 class="ed-heading">图片</h3><div class="ed-pair">${fitField(e)}${field("tint", "颜色", hex6(e.tint, "#000000"), "color")}${tbtn("clear-style", "原色", "undo", "", `data-clear="tint" ${e.tint ? "" : "disabled"}`)}</div><div class="ed-actions">${tbtn("crop-image", "裁切", "maximize")}${tbtn("replace-image", "替换图片", "imagePlus")}</div></section>` : ""}${e.type === "shape" ? `<section class="ed-section"><h3 class="ed-heading">形状</h3><div class="ed-pair">${field("fill", "填充", typeof e.fill === "string" ? e.fill : "#d9d3ef", "color")}${e.shape === "rect" ? field("cornerRadius", "圆角", e.cornerRadius ?? 0) : ""}</div></section>` : ""}<section class="ed-section"><h3 class="ed-heading">排列</h3><div class="ed-pair">${field("zIndex", "层级")}</div><div class="ed-actions">${tbtn("duplicate", "复制", "copy")}${tbtn("delete", "删除", "trash", "ed-tbtn--danger")}</div></section>`;
 }
 // 段落：对齐、行高、字距（格式里一直有，第 9 轮补上属性栏入口）
 function choice(prop, label, value, options) {
@@ -410,7 +424,7 @@ function setAgent(state) {
   refreshAgentChip();
 }
 // ---------- 实时连接 ----------
-// エイ 正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
+// 用户正忙（拖动、输入框里有没提交的字、弹窗开着、正在保存、在放映）时不打断她，等她忙完再合并
 function isBusy() {
   if(nudgePending)return true;
   if (S.view !== "editor" || !S.project) return true;
@@ -426,11 +440,67 @@ function keepSelection() {
   S.selected = S.selected.filter((id) => findElement(page(), id));
   for (const id of [...S.checked]) if (!S.project.pages.some((p) => p.id === id)) S.checked.delete(id);
 }
-// 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留エイ 的并提示
+// 合并结果落到界面：agent 的修改进撤销记录（撤销一步就回到她原来的样子）；两边改了同一处时保留用户的并提示
 function reconcileLinkedPages() {
   let changed = false;
   for (const p of S.project.pages) if (p.outline?.mode === 'document') changed = reconcileDocument(S.project,p).changed || changed;
   return changed;
+}
+// ---------- 文字框自动长高 ----------
+// 宽度由用户决定，高度按内容测量后写回元素 height（进撤销、保存、同步）；渲染和导出只读 height。
+const fontsSig = (project) => JSON.stringify((project?.fonts || []).map((f) => [f.id, f.file, f.weight, f.style]));
+function fitPageTexts(pages = [page()]) {
+  const measure = S.textMeasurer?.measure;
+  return measure && S.project ? fitTextHeights(S.project, measure, { pages }) : [];
+}
+async function mountTextMeasurer() {
+  S.textMeasurer?.dispose();
+  const measurer = createTextMeasurer(S.project, { assetBase: base(), resolveAsset: assetSrc });
+  measurer.sig = fontsSig(S.project);
+  S.textMeasurer = measurer;
+  await measurer.ready;
+  return measurer;
+}
+function disposeTextMeasurer() { S.textMeasurer?.dispose(); S.textMeasurer = null; }
+// 打开项目：文字框高度和内容不一致（旧项目）时先自动存版，再按新规则校正一次
+// 尽量在编辑器画出来之前做完（open 里限时等待），字体慢时剩下的部分在后台继续
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function correctTextHeights(projectId) {
+  const measurer = await mountTextMeasurer();
+  const current = () => S.project?.id === projectId && S.textMeasurer === measurer && S.view === "editor";
+  if (!current()) return;
+  // 字体可能还在加载（慢机器上尤其）：等字体就绪，再连量两次结果一致才算数；用户正在拖动 / 打字 / 裁切时稍后再来
+  await document.fonts.ready;
+  for (let attempt = 0; attempt < 40 && current() && (S.dragging || S.textEdit || S.crop || nudgePending || S.preview); attempt++) await pause(500);
+  if (!current()) return;
+  const first = fitTextHeights(clone(S.project), measurer.measure);
+  if (!first.length) return;
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  await document.fonts.ready;
+  if (!current()) return;
+  const second = fitTextHeights(clone(S.project), measurer.measure);
+  if (JSON.stringify(first) !== JSON.stringify(second)) return; // 两次结果不同：字体还没稳定，这次不校正
+  await flush();
+  await api(`${path()}/versions`, "POST", { note: "文字框自动长高校正前自动存版" });
+  if (!current()) return;
+  const applied = fitTextHeights(S.project, measurer.measure);
+  if (!applied.length) return;
+  S.history.commit(S.project);
+  S.dirty++;
+  schedule();
+  updateEditor();
+  notice(`已按内容校正 ${applied.length} 个文字框的高度（退回前的内容已自动存了一版）`);
+  await flush(); // 赶在第一次画出编辑器之前存好，之后的第一下操作不会撞上这次保存
+}
+// 字体表变了（agent 加了字体）要重建测量器，然后再校正一遍
+function refitAfterFontChange() {
+  if (!S.project || S.textMeasurer?.sig === fontsSig(S.project)) return;
+  const id = S.project.id;
+  mountTextMeasurer().then(() => {
+    if (S.project?.id !== id) return;
+    if (!fitPageTexts(S.project.pages).length) return;
+    S.history.commit(S.project); S.dirty++; schedule(); updateEditor();
+  }).catch((e) => notice(e.message));
 }
 function applySync({ project, base, revision, remoteChanged, needsSave, conflicts }) {
   const before = { base: S.base, local: clone(S.project), remote: clone(base) };
@@ -441,8 +511,10 @@ function applySync({ project, base, revision, remoteChanged, needsSave, conflict
   if (remoteChanged) {
     S.project = clone(project);
     reconciled = reconcileLinkedPages();
+    if (fitPageTexts(S.project.pages).length) reconciled = true; // agent 改了文字：高度按内容重算，作为本地修改保存
     S.history.commit(S.project);
     keepSelection();
+    refitAfterFontChange();
   }
   if (needsSave || reconciled) {
     S.dirty++;
@@ -462,7 +534,7 @@ function makeSync() {
     apply: applySync,
   });
 }
-// agent 只换了素材 / 动效代码文件内容（项目文件没变）：等エイ 不忙时重画，图片地址带上时间戳重新加载
+// agent 只换了素材 / 动效代码文件内容（项目文件没变）：等用户不忙时重画，图片地址带上时间戳重新加载
 function refreshFiles(files) {
   const stamp = Date.now();
   for (const file of files) if (file !== "project.json") S.stale.set(file, stamp);
@@ -681,6 +753,7 @@ function refreshLayout() {
   syncGlass(app);
 }
 function renderBoard() {
+  finishCrop();
   stopPreview();
   disposeStepView();
   clampStepView();
@@ -702,6 +775,7 @@ const boardOptions = () => ({ assetBase: base(), resolveAsset: assetSrc, interac
 // 画板增量刷新：静止画面在同一个 #artboard 上原地更新（换页也是）；
 // 步骤视图（动效会任意改 DOM）例外：照旧在隐藏层准备好新快照再一次替换；刚离开步骤视图的画板被动效改过，重画一次
 function refreshBoard() {
+  finishCrop();
   const board = $("#artboard");
   if (!board) return renderBoard();
   if (S.stepView) return refreshBoardSnapshot();
@@ -752,7 +826,7 @@ function bindBoardPointer(holder) {
   holder.addEventListener('pointerdown', e => {
     if(e.button!==0){e.stopPropagation();return;}
     const editing = e.target.closest?.('[data-element-id]');
-    if (editing && isEditingTextNode(editing)) return; // 正在编辑的文字：交给浏览器放光标、拖选文字
+    if (editing && (isEditingTextNode(editing) || isCropping(editing))) return; // 正在编辑的文字 / 裁切中：交给文字编辑或裁切工具
     if (S.preview) { e.preventDefault();e.stopPropagation();return; }
     const board = holder.querySelector('#artboard'); if (!board) return;
     const rotate = [...board.querySelectorAll('[data-rotate]')].find(h => { const b = h.getBoundingClientRect(); return e.clientX >= b.left - 3 && e.clientX <= b.right + 3 && e.clientY >= b.top - 3 && e.clientY <= b.bottom + 3; });
@@ -981,6 +1055,11 @@ function selectCanvas(id, event, resize) {
         }
         if (target.type === "group") resizeGroup(target, old, bounds.width, bounds.height);
         Object.assign(target, bounds);
+        if (target.type === "text") { // 文字框只改宽度，高度按内容量
+          paintDragged(target);
+          const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`);
+          if (node) target.height = measureTextNode(node);
+        } else if (target.type === "group") fitPageTexts();
       } else {
         target.x = Math.round(old.x + localX);
         target.y = Math.round(old.y + localY);
@@ -1017,8 +1096,10 @@ function markRotateHandle(n, on) {
     n.append(handle);
   }
   const size = 22 / S.scale, gap = 18 / S.scale, board = $("#artboard")?.getBoundingClientRect(), box = n.getBoundingClientRect();
-  const above = board && box.bottom + (gap + size) * S.scale > board.bottom && box.top - (gap + size) * S.scale > board.top;
-  Object.assign(handle.style, { width: `${size}px`, height: `${size}px`, top: above ? "auto" : `calc(100% + ${gap}px)`, bottom: above ? `calc(100% + ${gap}px)` : "auto" });
+  // 贴着画板边时换到看得见的一侧（上下都贴边放左右，四面贴边放元素内部），始终能点到
+  const placed = rotateHandlePlacement({ box, board, need: (gap + size) * S.scale, size, gap });
+  handle.dataset.side = placed.side;
+  Object.assign(handle.style, { width: `${size}px`, height: `${size}px` }, placed.style);
 }
 function startRotate(id, event) {
   finishNudge();
@@ -1071,6 +1152,8 @@ function editText(id, { point = null, selectAll = false } = {}) {
     const target = findElement(page(), id)?.element;
     if (!target || target.text === text) return;
     target.text = text;
+    const height = measureTextNode(node, text); // 边打边长
+    if (height !== target.height) { target.height = height; node.style.height = `${height}px`; }
     reconcileLinkedPages();
     if (recorded) S.history.amend(S.project);
     else { S.history.commit(S.project); recorded = true; }
@@ -1098,12 +1181,13 @@ function markSelection() {
   document.querySelectorAll("#artboard [data-element-id]").forEach((n) => {
     const on = S.selected.includes(n.dataset.elementId);
     if (n.parentElement?.id === "artboard") n.toggleAttribute("data-vw-locked", !!findElement(page(), n.dataset.elementId)?.element.locked); // 悬停描边跳过锁定元素
-    if (isEditingTextNode(n)) return; // 正在就地编辑：不往可编辑区里加把手
+    if (isEditingTextNode(n) || isCropping(n)) return; // 正在就地编辑 / 裁切：不往节点里加把手
     markRotateHandle(n, on && single === n.dataset.elementId && editable(page(), single));
     n.style.outline = on ? "2px solid #38bdf8" : "";
     const handles = n.querySelectorAll(":scope > [data-resize]");
     if (on && !handles.length) {
-      for (const edge of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+      const isText = findElement(page(), n.dataset.elementId)?.element.type === "text";
+      for (const edge of isText ? ["nw", "ne", "e", "se", "sw", "w"] : ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) { // 文字框高度由内容决定，不给上下把手
         const h = document.createElement("span");
         h.className = "resize-handle";
         h.dataset.resize = n.dataset.elementId;
@@ -1116,6 +1200,7 @@ function markSelection() {
 function changed({ boardOnly = false } = {}) {
   S.typingField = null;
   for (const p of S.project.pages) if (p.outline?.mode === 'document') reconcileDocument(S.project, p);
+  fitPageTexts();
   S.history.commit(S.project);
   S.dirty++;
   schedule();
@@ -1154,7 +1239,7 @@ async function flush() {
       else saveStatus(SAVE_TEXT.ok);
     } catch (e) {
       if (e.status === 409) {
-        // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（エイ 的修改保留，agent 的修改并进来）
+        // 磁盘上的项目被 agent 改过：不弹「二选一」，交给合并（用户的修改保留，agent 的修改并进来）
         e.message = "agent 刚改过这个项目，正在合并，请稍后再试";
         setText($("#save-status"), SAVE_TEXT.busy);
         setTimeout(() => S.sync?.notify(), 0);
@@ -1172,7 +1257,7 @@ async function flush() {
   if (S.saved < S.dirty) return flush();
 }
 
-// 两边改了同一处：已经保留エイ 的修改，这里告诉她是哪些地方，并让她可以改用 agent 的
+// 两边改了同一处：已经保留用户的修改，这里告诉她是哪些地方，并让她可以改用 agent 的
 function conflictDialog() {
   const labels = S.lastConflict?.labels || [];
   modal(
@@ -1320,10 +1405,63 @@ function imageAt(x, y) {
   }
   return null;
 }
+// ---------- 画布上裁切图片 ----------
+// 双击图片 / 右键「裁切」/ 属性栏「裁切」进入：覆盖层由 crop-tool 画，这里只负责预览和提交（一次裁切 = 一条撤销记录）
+function finishCrop() { const session = S.crop; if (session?.active) session.finish(); }
+function cropImage(id) {
+  finishNudge();
+  if (S.preview || S.view !== "editor" || S.stepView) return false;
+  const element = findElement(page(), id)?.element;
+  if (!element || element.type !== "image" || !editable(page(), id)) return false;
+  const node = $(`#artboard [data-element-id="${CSS.escape(id)}"]`);
+  if (!node || isCropping(node)) return false;
+  S.textEdit?.finish();
+  finishCrop();
+  const asset = S.project.assets.find((a) => a.id === element.asset);
+  S.selected = [id];
+  markSelection();
+  node.querySelectorAll(":scope > [data-resize], :scope > [data-rotate]").forEach((h) => h.remove());
+  node.classList.add("is-cropping");
+  const session = startCrop(node, element, {
+    image: asset ? { width: asset.width, height: asset.height } : null,
+    scale: S.scale,
+    onPreview: (patch) => { const current = findElement(page(), id)?.element; if (current) updateElementNode(node, { ...current, ...patch }); },
+    onCommit: (patch) => {
+      node.classList.remove("is-cropping");
+      if (S.crop === session) S.crop = null;
+      const current = findElement(page(), id)?.element;
+      if (patch && current) { Object.assign(current, patch); clearDocumentDraft(current); changed(); }
+      else if (S.view === "editor" && S.project) updateEditor();
+    },
+  });
+  S.crop = session;
+  return true;
+}
+// 换了宽高比不同的图：以原裁切中心、按元素框的比例重算一个裁切，图不变形；比例相同就原样保留
+function fitCropToImage(crop, frame, image) {
+  if (!crop || !image?.width || !image?.height || !frame.width || !frame.height) return crop ?? null;
+  const want = frame.width / frame.height, ratio = (crop.width * image.width) / (crop.height * image.height);
+  if (Math.abs(want - ratio) < 1e-3) return crop;
+  let width = 1, height = (image.width / image.height) / want;
+  if (height > 1) { height = 1; width = want * (image.height / image.width); }
+  const cx = crop.x + crop.width / 2, cy = crop.y + crop.height / 2;
+  const r4 = (v) => Math.round(v * 1e4) / 1e4;
+  return { x: r4(Math.min(1 - width, Math.max(0, cx - width / 2))), y: r4(Math.min(1 - height, Math.max(0, cy - height / 2))), width: r4(width), height: r4(height) };
+}
+async function replaceImageDialog(id) {
+  const element = findElement(page(), id)?.element;
+  if (!element || element.type !== "image") return;
+  const choice = await pickImage({ modal, closeModal, api, projectAssets: S.project.assets, assetBase: base() });
+  if (!choice) return;
+  if (choice.kind === "asset") replaceImage(id, choice.id);
+  else if (choice.kind === "library") await addAsset({ libraryFile: choice.file, width: choice.width, height: choice.height }, undefined, id);
+  else if (choice.kind === "upload") await upload([choice.file], false, undefined, id);
+}
 function replaceImage(id, assetId) {
   const target = findElement(page(), id)?.element;
-  if (!target || target.type !== "image" || !S.project.assets.some((a) => a.id === assetId)) return false;
-  if (target.asset !== assetId) { target.asset = assetId; clearDocumentDraft(target); }
+  const asset = S.project.assets.find((a) => a.id === assetId);
+  if (!target || target.type !== "image" || !asset) return false;
+  if (target.asset !== assetId) { target.asset = assetId; target.crop = fitCropToImage(target.crop, target, asset); clearDocumentDraft(target); }
   S.selected = [id];
   changed();
   notice("图片已替换，位置和大小不变");
@@ -1356,6 +1494,7 @@ async function upload(files, toLibrary = false, coords, replaceId = null) {
 async function library() {
   await flush();
   S.view = "library";
+  disposeTextMeasurer();
   S.project = null;
   S.focus = false;
   disconnectEvents();
@@ -1379,7 +1518,7 @@ async function versions() {
   await flush();
   const list = await api(`${path()}/versions`);
   modal(
-    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "エイ", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}${ibtn("version-delete", "trash", "删除这个版本", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
+    `<h2>版本列表</h2><div class="g-sheet__list">${list.length ? list.map((v) => `<div class="g-row g-row--tall g-row--static"><span class="g-row__icon">${icon("history", 15)}</span><span class="g-row__text"><strong>${esc(v.note || "未命名版本")}</strong><small>${esc(versionTime(v))} · ${{ user: "用户", system: "自动" }[v.by] || "agent"}</small></span>${tbtn("restore", "退回", "undo", "", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}${ibtn("version-delete", "trash", "删除这个版本", `data-id="${esc(v.id)}" data-note="${esc(v.note || "未命名版本")}"`)}</div>`).join("") : '<p class="g-sheet__empty">还没有手动保存的版本</p>'}</div><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("version", "存一版", { icon: "bookmark", cls: "g-btn--prism" })}</div>`,
   );
 }
 function versionTime(v) {
@@ -1682,6 +1821,9 @@ app.addEventListener("click", async (e) => {
       case "new":
         newDialog();
         break;
+      case "import-html":
+        openImportDialog({ api, modal, closeModal, notice, onCreated: () => { if (S.view === "home") home().catch(() => {}); }, onDone: (projectId) => open(projectId).catch((err) => notice(err.message)) });
+        break;
       case "open":
         await open(id);
         break;
@@ -1708,6 +1850,7 @@ app.addEventListener("click", async (e) => {
         refreshInspector();
         break;
       case "undo":
+        finishCrop();
         if (S.history.canUndo) {
           S.typingField = null;
           S.project = S.history.undo();
@@ -1719,6 +1862,7 @@ app.addEventListener("click", async (e) => {
         }
         break;
       case "redo":
+        finishCrop();
         if (S.history.canRedo) {
           S.typingField = null;
           S.project = S.history.redo();
@@ -1738,6 +1882,12 @@ app.addEventListener("click", async (e) => {
         });
         S.pageId = S.project.pages.at(-1).id;
         changed();
+        break;
+      case "crop-image":
+        if (S.selected.length === 1) cropImage(S.selected[0]);
+        break;
+      case "replace-image":
+        if (S.selected.length === 1) await replaceImageDialog(S.selected[0]);
         break;
       case "add-text":
         addElement("text");
@@ -1873,6 +2023,7 @@ app.addEventListener("click", async (e) => {
         await api("/api/reveal", "POST", { path: b.dataset.path });
         break;
       case "play":
+        finishCrop();
         stopPreview();
         resetStepView();
         await flush();
@@ -1989,6 +2140,7 @@ function updateProp(input) {
     if (key === "cornerRadius") value = Math.max(0, value);
   }
   if (key === "font") value = value || null;
+  if (key === "height" && findElement(page(), S.selected[0])?.element.type === "text") return; // 文字框高度由内容决定
   let different = false;
   mutateElements(page(), rootSelection(page(), S.selected), (e) => {
     if (STYLE_TYPE[root]) {
@@ -2041,11 +2193,12 @@ app.addEventListener("input", (event) => {
   });
   if(!different)return;
   // 同一次在文本框里连续打字合并成一条撤销记录
-  reconcileLinkedPages();if(S.typingField===input)S.history.amend(S.project);else{S.history.commit(S.project);S.typingField=input;}S.dirty++;schedule();
+  reconcileLinkedPages();fitPageTexts();if(S.typingField===input)S.history.amend(S.project);else{S.history.commit(S.project);S.typingField=input;}S.dirty++;schedule();
   patchDocumentCanvas(before);refreshHistoryButtons();if(S.tab==="layers")refreshInspector();else S.outlineView?.refresh(); // 图层名跟着字变，正在输入的框不动
 });
 app.addEventListener("change", (e) => {
   if (e.target.matches("[data-step-view]")) {
+    finishCrop();
     S.stepView = Number(e.target.value) || 0;
     renderBoard();
     S.outlineView?.refresh();
@@ -2122,6 +2275,7 @@ window.addEventListener("resize", () => {
 // 换页：同一个 #artboard 上原地更新成新页（根节点不换），左右面板只更新内容
 function switchPage(id, { clearChecked = false } = {}) {
   finishNudge();
+  finishCrop();
   S.pageId = id;
   S.selected = [];
   if (clearChecked) S.checked.clear();
@@ -2170,6 +2324,8 @@ function pageAction(name,{ids=[...S.checked],targetId=S.pageId,position='after'}
 function elementAction(action) {
   finishNudge();const ids=rootSelection(page(),S.selected);
   if(action==='edit-text'){editText(S.selected[0],{selectAll:true});return;}
+  if(action==='crop-image'){cropImage(S.selected[0]);return;}
+  if(action==='replace-image'){replaceImageDialog(S.selected[0]).catch(e=>notice(e.message));return;}
   if(action==='copy-elements'){S.elementClipboard=copyElements(S.project,page(),ids);notice('元素已复制，可粘贴到本项目的其他页');return;}
   if(action==='paste-elements')S.selected=pasteElements(S.project,page(),S.elementClipboard,S.elementClipboard?.pageId===S.pageId?24:0);
   else if(action==='duplicate-elements')S.selected=pasteElements(S.project,page(),copyElements(S.project,page(),ids));
@@ -2188,7 +2344,10 @@ app.addEventListener('dblclick',e=>{
   const board=$('#artboard');if(!board)return;
   const deep=pickCanvasElement({board,page:page(),selected:[],screen:!!S.stepView,event:e});
   const hit=pickElement(board,e);
-  const id=deep.id&&findElement(page(),deep.id)?.element.type==='text'?deep.id:hit.id;
+  const deepType=deep.id&&findElement(page(),deep.id)?.element.type;
+  const id=deepType==='text'||deepType==='image'?deep.id:hit.id;
+  const type=id&&findElement(page(),id)?.element.type;
+  if(type==='image'){if(cropImage(id))e.preventDefault();return;}
   if(id&&editText(id,{point:{clientX:e.clientX,clientY:e.clientY}}))e.preventDefault();
 });
 app.addEventListener('contextmenu',e=>{
@@ -2202,8 +2361,10 @@ app.addEventListener('contextmenu',e=>{
   const selected=S.selected.map(id=>findElement(page(),id)?.element).filter(Boolean),locked=selected.some(el=>el.locked);
   const canPaste=S.elementClipboard?.projectId===S.project.id;
   const editableText=selected.length===1&&selected[0].type==='text'&&!locked&&editable(page(),selected[0].id);
+  const editableImage=selected.length===1&&selected[0].type==='image'&&!locked&&editable(page(),selected[0].id);
   const items=id?[
     ...(editableText?[{action:'edit-text',label:'编辑文字'},{separator:true}]:[]),
+    ...(editableImage?[{action:'crop-image',label:'裁切',disabled:!!S.stepView},{action:'replace-image',label:'替换图片'},{separator:true}]:[]),
     {action:'copy-elements',label:'复制'},{action:'paste-elements',label:'粘贴',disabled:!canPaste},{action:'duplicate-elements',label:'创建副本',disabled:locked},
     {action:'delete-elements',label:'删除',disabled:locked},{separator:true},{action:locked?'unlock-elements':'lock-elements',label:locked?'解锁':'锁定'},
     {action:'group-elements',label:'编组',disabled:locked||selected.length<2||!selected.every(el=>findElement(page(),el.id).items===findElement(page(),selected[0].id).items)},
@@ -2262,7 +2423,7 @@ function confirmAction(message,description="") {
   return new Promise(resolve=>{modal(`<h2>${esc(message)}</h2><p class="g-sheet__note">${esc(description)}</p><div class="g-sheet__actions"><button class="g-btn" data-confirm-no>取消</button><button class="g-btn g-btn--prism" data-confirm-yes>确认</button></div>`);const root=$('#modal-root');S.confirmResolve=resolve;const finish=value=>{S.confirmResolve=null;closeModal();resolve(value);};root.querySelector('[data-confirm-no]').onclick=()=>finish(false);root.querySelector('[data-confirm-yes]').onclick=()=>finish(true);root.onclick=e=>{if(e.target===root)finish(false);};});
 }
 const projectManagement=createProjectManagement({api,confirm:confirmAction,modal,closeModal,notice,refresh:home,onOpen:open,onDeleted:async()=>{}});
-const workbenchClose=createWorkbenchClose({api,flush:async()=>{finishNudge();await flush();},confirm:confirmAction,notice,renderClosed(){S.pageViewsDispose?.();S.outlineView?.dispose();disconnectEvents();disposeStepView();S.project=null;S.view='closed';shell('home','<section class="hm-panel"><h1>工作台已关闭，可以关掉这个窗口了</h1></section>');}});
+const workbenchClose=createWorkbenchClose({api,flush:async()=>{finishNudge();await flush();},confirm:confirmAction,notice,renderClosed(){disposeTextMeasurer();S.pageViewsDispose?.();S.outlineView?.dispose();disconnectEvents();disposeStepView();S.project=null;S.view='closed';shell('home','<section class="hm-panel"><h1>工作台已关闭，可以关掉这个窗口了</h1></section>');}});
 
 const runtimeSettings = mountRuntimeSettings({api,app,modal,closeModal,notice,glass:openModalGlass,closeGlass:closeModalGlass});
 runtimeSettings.ready().then(home).catch((e) => {
@@ -2471,7 +2632,7 @@ async function mountEditorOutline() {
     mutate: (fn,{kind}={})=>{
       const before = clone(page()), result=fn(S.project,page());
       if (JSON.stringify(before)===JSON.stringify(page())) return result;
-      S.history.commit(S.project);S.dirty++;schedule();refreshHistoryButtons();
+      fitPageTexts();S.history.commit(S.project);S.dirty++;schedule();refreshHistoryButtons();
       if (kind!=='metadata' || JSON.stringify(before.elements)!==JSON.stringify(page().elements)) patchDocumentCanvas(before);
       const switcher=$('.ed-stepview');if(switcher)switcher.outerHTML=stepSwitcher(page());
       S.outlineView?.refresh(); return result;

@@ -231,6 +231,6 @@ html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
 #artboard [data-element-id].is-text-editing { outline: 2px solid #38bdf8; }
 #artboard [data-element-id].is-text-editing:focus-within { cursor: text; }
 /* 旋转把手：尺寸由脚本按画板缩放补偿 */
-.rotate-handle { position: absolute; left: 50%; transform: translateX(-50%); box-sizing: border-box; border-radius: 50%; background: #fff; color: #5b5470; display: grid; place-items: center; cursor: grab; box-shadow: 0 0 0 1.5px rgba(120, 110, 145, 0.55), 0 2px 6px rgba(20, 20, 30, 0.35); z-index: 1; }
+.rotate-handle { position: absolute; box-sizing: border-box; border-radius: 50%; background: #fff; color: #5b5470; display: grid; place-items: center; cursor: grab; box-shadow: 0 0 0 1.5px rgba(120, 110, 145, 0.55), 0 2px 6px rgba(20, 20, 30, 0.35); z-index: 1; }
 .rotate-handle svg { width: 62%; height: 62%; pointer-events: none; }
 .rotate-handle:active { cursor: grabbing; }

@@ -114,11 +114,11 @@ test('实时连接：agent 新增素材和动效代码文件，界面也收到�
   assert.equal(second.external, true);
 });
 
-test('工作台自己保存（エイ 的修改）不算 agent：推送标记为非外部，agent 状态保持空闲', async (t) => {
+test('工作台自己保存（用户的修改）不算 agent：推送标记为非外部，agent 状态保持空闲', async (t) => {
   const { request, listen } = await fixture(t);
   const made = await request('/api/projects', 'POST', { id: 'mine', name: 'Mine' });
   const stream = await listen('mine');
-  const saved = await request('/api/projects/mine', 'PUT', { project: { ...made.body.project, name: 'エイ 改的' }, revision: made.body.revision });
+  const saved = await request('/api/projects/mine', 'PUT', { project: { ...made.body.project, name: '用户改的' }, revision: made.body.revision });
   assert.equal(saved.status, 200);
   const event = await stream.next((e) => e.event === 'changed');
   assert.equal(event.external, false);
@@ -147,7 +147,7 @@ test('版本退回：内容回到那一版，并自动多出一份「退回前�
   const original = readFileSync(join(target, 'project.json'));
   const loaded = await request('/api/projects/rollback');
   const edited = structuredClone(loaded.body.project);
-  edited.pages[0].elements[1].text = 'エイ 后来改的标题';
+  edited.pages[0].elements[1].text = '用户后来改的标题';
   const saved = await request('/api/projects/rollback', 'PUT', { project: edited, revision: loaded.body.revision });
   assert.equal(saved.status, 200);
   const restored = await request(`/api/projects/rollback/versions/${first.body.id}/restore`, 'POST', {});
@@ -161,7 +161,7 @@ test('版本退回：内容回到那一版，并自动多出一份「退回前�
   assert.match(backup.note, /^退回前/);
   assert.equal(backup.by, 'system');
   const kept = JSON.parse(readFileSync(join(dir, 'projects/rollback/versions', backup.id, 'project.json'), 'utf8'));
-  assert.equal(kept.pages[0].elements[1].text, 'エイ 后来改的标题');
+  assert.equal(kept.pages[0].elements[1].text, '用户后来改的标题');
   assert.equal((await request('/api/projects/rollback/versions/20200101-000000/restore', 'POST', {})).status, 404);
   assert.equal((await request('/api/projects/rollback/versions/..%2F..%2Fx/restore', 'POST', {})).status, 400);
 });

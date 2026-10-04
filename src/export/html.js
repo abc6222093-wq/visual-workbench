@@ -39,9 +39,12 @@ function allElements(project) { return project.pages.flatMap(page => [...walk(pa
 /** 所有页面动效代码拼在一起：用来判断代码里提到的素材，以及给字体子集兜底 */
 function motionText(project) { return project.pages.map(page => page.motion?.source || '').join('\n'); }
 
-/** 图片在画板上需要的最大缩放比例（相对原图像素）；fill 按两个方向里更大的算，保持比例 */
-function neededScale(element, width, height) {
+/** 图片在画板上需要的最大缩放比例（相对原图像素）；fill 按两个方向里更大的算，保持比例。
+ *  裁切过的（crop）：源图被放大到 元素尺寸 / crop 比例，按两个方向里更大的算，放大后不糊 */
+export function neededScale(element, width, height) {
   if (!width || !height) return 1;
+  const crop = element.crop;
+  if (crop && crop.width > 0 && crop.height > 0) return Math.max((element.width || 0) / (crop.width * width), (element.height || 0) / (crop.height * height));
   const sx = (element.width || 0) / width;
   const sy = (element.height || 0) / height;
   return element.fit === 'contain' ? Math.min(sx, sy) : Math.max(sx, sy);

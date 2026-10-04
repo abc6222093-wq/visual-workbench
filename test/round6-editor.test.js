@@ -92,19 +92,20 @@ test('inspector collapse enlarges canvas, persists refresh, and survives focus m
   assert.equal(await page.locator('[data-action="toggle-inspector"]').getAttribute('aria-expanded'),'false');
   assert.equal(await page.locator('.ed-crumb').getAttribute('title'),await page.locator('.ed-crumb').textContent());
 });
+// 第 10 轮起文字框高度由内容决定、没有上下把手，这里改用图片元素验证全部八个把手
 test('all eight canvas handles resize in place with edge axis constraints',async t=>{
   const {page,file}=await browserEditor(t);
   for(const edge of ['nw','n','ne','e','se','s','sw','w']) {
-    await page.locator('[data-action="select"][data-id="el_title1"]').click();
-    assert.equal(await page.locator('[data-resize="el_title1"]').count(),8);
-    const old=JSON.parse(readFileSync(file,'utf8')).pages[0].elements.find(e=>e.id==='el_title1');
-    const handle=await page.locator(`[data-resize="el_title1"][data-handle="${edge}"]`).boundingBox();
-    await page.evaluate(()=>window.dragOriginal=document.querySelector('#artboard [data-element-id="el_title1"]'));
+    await page.locator('[data-action="select"][data-id="el_logo1"]').click();
+    assert.equal(await page.locator('[data-resize="el_logo1"]').count(),8);
+    const old=JSON.parse(readFileSync(file,'utf8')).pages[0].elements.find(e=>e.id==='el_logo1');
+    const handle=await page.locator(`[data-resize="el_logo1"][data-handle="${edge}"]`).boundingBox();
+    await page.evaluate(()=>window.dragOriginal=document.querySelector('#artboard [data-element-id="el_logo1"]'));
     await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
     await page.mouse.move(handle.x+handle.width/2+12,handle.y+handle.height/2+10);
-    assert.equal(await page.evaluate(()=>window.dragOriginal===document.querySelector('#artboard [data-element-id="el_title1"]')),true);
+    assert.equal(await page.evaluate(()=>window.dragOriginal===document.querySelector('#artboard [data-element-id="el_logo1"]')),true);
     await Promise.all([page.waitForResponse(r=>r.request().method()==='PUT'&&r.ok()),page.mouse.up()]);
-    const next=JSON.parse(readFileSync(file,'utf8')).pages[0].elements.find(e=>e.id==='el_title1');
+    const next=JSON.parse(readFileSync(file,'utf8')).pages[0].elements.find(e=>e.id==='el_logo1');
     if(edge==='n'||edge==='s') assert.equal(next.width,old.width);else assert.notEqual(next.width,old.width);
     if(edge==='e'||edge==='w') assert.equal(next.height,old.height);else assert.notEqual(next.height,old.height);
   }

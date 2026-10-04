@@ -115,13 +115,35 @@ function applyTextStyle(node, element) {
 
 // 图片元素节点 → 图片地址（导出版里是很长的 data: 地址，不放进 DOM 属性）
 const imageSources = new WeakMap();
+export function imageSourceOfNode(node) { return imageSources.get(node); }
 const MASK_SIZE = { cover: 'cover', contain: 'contain', fill: '100% 100%' };
+
+// 裁切（crop，源图比例 0–1）→ 内层图片的几何：源图被放大到 W×H，平移到裁切块与元素框重合；
+// 框外部分用 clip-path 剪掉（不在元素节点上用 overflow:hidden，免得剪掉挂在节点上的缩放把手）。
+export function normalizeCrop(crop) {
+  if (!crop || typeof crop !== 'object') return null;
+  const n = key => Number(crop[key]);
+  if (![n('x'), n('y'), n('width'), n('height')].every(Number.isFinite) || !(n('width') > 0) || !(n('height') > 0)) return null;
+  return { x: n('x'), y: n('y'), width: n('width'), height: n('height') };
+}
+export function cropGeometry(element, crop = normalizeCrop(element.crop)) {
+  if (!crop) return null;
+  const w = Number(element.width) || 0, h = Number(element.height) || 0;
+  const W = w / crop.width, H = h / crop.height, left = -crop.x * W, top = -crop.y * H;
+  return { left, top, width: W, height: H, inset: [-top, W - w + left, H - h + top, -left] };
+}
+function cropStyle(geometry) {
+  const { left, top, width, height, inset } = geometry;
+  return `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;max-width:none;max-height:none;display:block;clip-path:inset(${inset.map(v => `${Math.max(0, v)}px`).join(' ')})`;
+}
 
 // 图片内容：普通图片用 <img>；设了 tint（重新着色）时画成纯色块，用图片的透明度当遮罩，
 // 只适合单色的矢量标志（SVG）或透明底的单色 PNG / WebP。遮罩挂在内层，不影响元素自己的 effects.mask。
+// 有 crop 时忽略 fit：内层按 cropGeometry 绝对定位；没有 crop 时保持原写法（旧项目画面不变）。
 function imageContent(node, element, src) {
   const tint = typeof element.tint === 'string' && element.tint ? element.tint : null;
   const fit = element.fit || 'cover';
+  const geometry = cropGeometry(element);
   let child = node.firstElementChild;
   if (tint) {
     if (!child || !child.dataset.vwTint) {
@@ -132,11 +154,11 @@ function imageContent(node, element, src) {
     }
     const url = `url(${JSON.stringify(src)})`;
     child.setAttribute('aria-label', element.name || '');
-    child.style.cssText = 'width:100%;height:100%;display:block';
+    child.style.cssText = geometry ? cropStyle(geometry) : 'width:100%;height:100%;display:block';
     child.style.backgroundColor = tint;
     for (const prefix of ['', '-webkit-']) {
       child.style.setProperty(`${prefix}mask-image`, url);
-      child.style.setProperty(`${prefix}mask-size`, MASK_SIZE[fit] || 'cover');
+      child.style.setProperty(`${prefix}mask-size`, geometry ? '100% 100%' : MASK_SIZE[fit] || 'cover');
       child.style.setProperty(`${prefix}mask-position`, 'center');
       child.style.setProperty(`${prefix}mask-repeat`, 'no-repeat');
     }
@@ -150,7 +172,7 @@ function imageContent(node, element, src) {
     node.replaceChildren(child);
   }
   child.alt = element.name || '';
-  child.style.cssText = `width:100%;height:100%;display:block;object-fit:${fit}`;
+  child.style.cssText = geometry ? cropStyle(geometry) : `width:100%;height:100%;display:block;object-fit:${fit}`;
 }
 
 // Keep persistent appearance below the outer node whose transform motion modules control.

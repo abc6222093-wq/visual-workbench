@@ -60,11 +60,12 @@ test('round9 text edit: Enter inserts newline characters and line-end deletion j
  await page.keyboard.press('Enter');await page.keyboard.type('c');await page.keyboard.press('Enter');await page.keyboard.press('Enter');await page.keyboard.type('d');
  assert.equal(await text(),'ab\nc\n\nd');
  await page.keyboard.press('Backspace');assert.equal(await text(),'ab\nc\n\n');await page.keyboard.type('e');assert.equal(await text(),'ab\nc\n\ne');
- for(let i=0;i<3;i++)await page.keyboard.press('ArrowUp');await page.keyboard.press('End');await page.keyboard.press('Delete');assert.equal(await text(),'abc\n\ne');
+ for(let i=0;i<3;i++)await page.keyboard.press('ArrowUp');await page.keyboard.press(browser.vwEngine==='webkit'?'Meta+ArrowRight':'End');/* macOS WebKit 的 End 不移动光标 */await page.keyboard.press('Delete');assert.equal(await text(),'abc\n\ne');
  await page.keyboard.press('Escape');const s=await structure(page);assert.deepEqual(s.texts,['abc\n\ne']);assert.equal(s.first,3);assert.deepEqual(errors,[]);
 });
 
 test('round9 text edit: Japanese and Chinese IME composition does not report or end editing until committed',async t=>{
+ if(browser.vwEngine!=='chromium'){t.skip('输入法组合事件靠 CDP 发送，只有 Chromium 支持');return;}
  const {page,errors,log,text,active}=await fixture(t,{text:'言葉：'});const client=await page.context().newCDPSession(page);
  const inputs=async()=>(await log()).inputs.length;
  for(const step of ['に','にほ','にほん','日本']){await client.send('Input.imeSetComposition',{text:step,selectionStart:step.length,selectionEnd:step.length});assert.equal(await inputs(),0);}

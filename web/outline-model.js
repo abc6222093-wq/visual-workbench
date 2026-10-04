@@ -271,7 +271,7 @@ export function copyBrief(
     ...project.pages.filter(p => pageIds.includes(p.id)).map(p =>
       `第 ${project.pages.indexOf(p) + 1} 页（${p.id}） · ${p.name} · ${p.outline ? `${p.outline.screens} 屏` : mode === 'fill' ? '尚无大纲，请按文档填写' : '尚无大纲，请保留此页并说明'}`),
     "大纲是右侧实时联动文稿：每段对应独立文字元素。保留 elementId；联动页修改文字时同时更新元素 text 和行 text，排版完成清除 documentDraft。纯装饰文字标 decorative:true。",
-    "按大纲里的层级、强调、图片说明和备注排版；保留エイ 调整的位置、大小、颜色、字体、层级和其他页面。N 屏写 motion.steps = N−1，第 1 屏是初始化后、step(0) 前。",
+    "按大纲里的层级、强调、图片说明和备注排版；保留用户调整的位置、大小、颜色、字体、层级和其他页面。N 屏写 motion.steps = N−1，第 1 屏是初始化后、step(0) 前。",
     "排好后为每条文字和图片写 elementId；更新条目 baseline 及 outline.baseline（screens、rows、images）的已落实快照，供后续联动与识别尚未落实的排版要求。",
     "完成后运行 npm run validate -- <项目路径> 与 npm run check-motion -- <项目路径>，两者通过再交付。",
   ];
@@ -279,7 +279,7 @@ export function copyBrief(
     lines.splice(lines.length - 3, 2,
       "按文档的分页或主题填入以上页面；页数不够就在最后一个指定页后新建，不改其他页面。判断 title/subtitle/english/body/note 层级，把正文空行分为独立段；强调记 UTF-16 范围，图片要求写 images[].caption，这页要求写 notes。",
       "只填不排：新段创建 documentDraft:true 的独立草稿文字并保持 rows[].elementId 对应；已有段只同步文字，不移动、缩放或改样式，不写或修改 motion，不把尚未排版的内容标成已排版快照。保留原文，不擅自删减；不明确的分页或要求写进备注。",
-      "文档内容或本机文档路径：\n【エイ 在这里粘贴文档，或填写文档的完整路径】");
+      "文档内容或本机文档路径：\n【用户在这里粘贴文档，或填写文档的完整路径】");
   }
   return lines.join("\n");
 }
