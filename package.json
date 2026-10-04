@@ -15,7 +15,8 @@
     "save-version": "node src/cli/save-version.js",
     "copy-pages": "node src/cli/copy-pages.js",
     "check-motion": "node src/cli/check-motion.js",
-    "export": "node src/cli/export.js"
+    "export": "node src/cli/export.js",
+    "export-changes": "node src/cli/export-changes.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",
