@@ -32,6 +32,10 @@ test('Windows command uses current Node, exact file arguments and preserves fail
 test('CI gives every test to both macOS and Ubuntu and limits Windows to the explicit suite', () => {
   const workflow = readFileSync(join(repo, '.github/workflows/test.yml'), 'utf8');
   assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/);
+  // 第 9 轮仓库公开后恢复：推送和 PR 都自动运行，保留手动触发。
+  assert.match(workflow, /^on:\n(?:\s+.*\n)*?\s+push:/m);
+  assert.match(workflow, /^on:\n(?:\s+.*\n)*?\s+pull_request:/m);
+  assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /if: runner\.os != 'Windows'\s+run: npm test/);
   assert.match(workflow, /if: runner\.os == 'Windows'\s+run: node scripts\/test-windows\.js/);
   const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));

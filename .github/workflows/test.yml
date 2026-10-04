@@ -1,6 +1,9 @@
 name: test
 
+# 仓库已公开：公开仓库的 Actions 不占付费额度，推送和 PR 自动运行。
 on:
+  push:
+  pull_request:
   workflow_dispatch:
 
 jobs:
