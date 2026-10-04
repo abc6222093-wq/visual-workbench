@@ -52,7 +52,7 @@
 
 ## 网页项目（第 11 轮）
 - 格式要点（详见 `docs/format.md`「第 11 轮：网页项目」）：项目写 `kind: "web"`，`artboard` 固定 `{ "preset": "web-desktop", "width": 1440, "height": 900 }`（只当默认窗口）。每页必填 `device`（`"desktop"` 电脑端，窗口 1440×900；`"mobile"` 手机端，窗口 390×844）和 `size: { width, height }`：`size.width` 等于设备宽度，`size.height` 是整页内容长度，可以远大于窗口。同一个网页可以分别有电脑端、手机端两页，元素各自独立。常量与取尺寸的函数在 `web/project-kinds.js`（`WEB_DEVICES`、`pageSize`、`pageViewport`）。
-- agent 排网页时：每页写好 `device` 和 `size`；导航栏、页眉页脚、区块、卡片、按钮、列表项这类组件用分组（`group`），容器的底色 / 边框写成分组最底层的形状；**不写 `origin`**，除非这个元素是导入来的（`origin` 只表示「原网页里对应哪个节点」）。`variantOf` 由工作台「复制为变体…」写，agent 一般不手写；要写时值必须是存在的原件 `id`。改完照旧 `npm run validate`（会查 `WEB_PAGE_DEVICE`、`WEB_PAGE_SIZE`、`VARIANT_REF`）。
+- agent 排网页时：每页写好 `device` 和 `size`；导航栏、页眉页脚、区块、卡片、按钮、列表项这类组件用分组（`group`），容器的底色 / 边框写成分组最底层的形状；**不写 `origin`**，除非这个元素是导入来的（`origin` 只表示「原网页里对应哪个节点」）。`variantOf` 由工作台「复制为变体…」写，agent 一般不手写；要写时值必须是存在的原件 `id`。「复制为变体 / 并排对比 / 选定这一份」全部由工作台完成：选定后其余变体会被删掉，所以交接包里一般不会再有未选定的变体；清单末尾若仍有「变体」一节，说明用户还没选，先问她要哪份。改完照旧 `npm run validate`（会查 `WEB_PAGE_DEVICE`、`WEB_PAGE_SIZE`、`VARIANT_REF`）。
 - 导入的网页项目里，`import/baseline.json` 是导入那一刻的项目，改动清单靠它算「改前」。agent 不改它，也不改 `import/` 里的其他文件。
 - 改动清单（交接包）：导出弹窗「交接包」或 `npm run export-changes -- <项目>`，生成到 `exports/<项目>/handoff-<时间>/`：`改动清单.md`（大白话 + 精确数值，按页按元素列出原网页定位、挪了多少、整体缩放多少、尺寸、字号、颜色、文字、增删）、`changes.json`、`compare/`（每页改前 / 改后 / 并排对比图）、`复制给agent.txt`。接口是 `POST /api/projects/:id/handoff`。
 - **agent 拿到改动清单后怎么改网站**（改的是网站代码，不是项目文件）：
