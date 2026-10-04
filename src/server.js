@@ -17,6 +17,7 @@ import { copyPages } from './copy-pages.js';
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief } from './brief.js';
+import { exportHandoff, defaultHandoffDir } from './export/changes.js';
 import { cleanupTrash, listTrash, deleteProject, restoreProject, purgeProject, duplicateProject } from './project-management.js';
 import { createImportJobs, IMPORT_MAX_BYTES } from './import-html/jobs.js';
 
@@ -214,6 +215,12 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         }
       }
       if(parts[3]==='brief'&&parts.length===4&&req.method==='GET') return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project:readProject(dir).project})});
+      // 第 11 轮：交接包（改动清单 + 改前改后对比图 + 复制给 agent 的文字）；改前基准是 import/baseline.json
+      if(parts[3]==='handoff'&&parts.length===4&&req.method==='POST') {
+        const b=await checkedBody(req); const outDir=defaultHandoffDir(dataDir,id);
+        try { return json(res,200,await exportHandoff({projectDir:dir,outDir,images:b.images!==false})); }
+        catch(e) { if(e.code==='NO_BASELINE') throw fail(409,e.message); throw fail(500,`交接包生成失败：${e.message}`); }
+      }
       if(parts[3]==='master'&&parts.length===4&&req.method==='PUT') { const b=await checkedBody(req); if(typeof b.master!=='boolean') throw fail(400,'Invalid master flag'); setMaster(dataDir,id,b.master); return json(res,200,{id,master:b.master}); }
       if(parts[3]==='versions'&&parts.length===6&&parts[5]==='restore'&&req.method==='POST') { // 退回到某个版本：先自动存一版当前状态
         const vid=parts[4]; if(!VERSION_ID.test(vid)) throw fail(400,'Invalid version id'); if(!existsSync(join(dir,'versions',vid,'project.json'))) throw fail(404,'Version not found');

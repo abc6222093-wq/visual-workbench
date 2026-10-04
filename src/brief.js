@@ -56,7 +56,15 @@ export function agentBrief({ repoDir, dataDir, projectDir, project }) {
   }
 
   const importDir = join(projectDir, 'import');
-  if (existsSync(importDir) && statSync(importDir).isDirectory()) {
+  if (existsSync(importDir) && statSync(importDir).isDirectory() && p.kind === 'web') {
+    lines.push(
+      '',
+      '这是导入的网页项目（第 11 轮）：',
+      '- 每个网页有电脑端、手机端两页（page.device / page.size，整页高度 = 内容长度）；组件是分组，元素的 origin.selector 指向原网页里的对应元素',
+      `- ${join(importDir, 'baseline.json')} 是导入那一刻的项目（改动清单的「改前」基准，不要修改）；网址来源的快照在 import/pages/，来源记录在 import/source.json；跳过的网址见项目 description`,
+      '- 用户改完后会用「导出 → 交接包」生成改动清单（改动清单.md / changes.json / 对比图），由写前端的 agent 照着改真正的网站；不要把改动回写进原网页文件',
+    );
+  } else if (existsSync(importDir) && statSync(importDir).isDirectory()) {
     lines.push(
       '',
       '这是从旧 HTML 导入的项目：',
