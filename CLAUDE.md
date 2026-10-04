@@ -6,8 +6,9 @@
 - `src/`：本地服务（`server.js`）、校验、存版与回收（`version.js`）、实时监听（`watch.js`）、系列母版（`master.js`）、导出（`export/`）、找浏览器（`browser.js`）、命令行脚本（`cli/`）
 - `web/`：工作台界面（编辑器、放映、动效运行与检查）；`web/vendor/` 是本地第三方库
 - `schema/project.schema.json`：项目格式的机器定义（格式 v2）
-- `docs/format.md`：项目格式的文字说明（以最新版为准）
-- `examples/sample-deck/`：示例项目，照着写
+- `docs/format.md`：项目格式的文字说明（以最新版为准）；`docs/import-html.md`：导入旧 HTML / 网页的规则；`docs/desktop.md`：桌面应用的说明
+- `examples/sample-deck/`：示例项目，照着写；`examples/sample-web/`：网页项目示例（同一首页的电脑端、手机端两页）
+- `desktop/`：桌面应用（Electron 壳，只负责启动仓库里的服务并开窗口，见 `docs/desktop.md`）
 - `test/`：测试（`npm test`）
 - 数据目录（以工作台的设置为准，复制给 agent 的文字里会写明，不要假设固定路径）：
   - `projects/<项目编号>/`：`project.json`、`assets/`、`fonts/`、`versions/`，从母版新建的还有 `series.json`，agent 也可以放动效用的附属文件
@@ -24,6 +25,7 @@
 | 动效检查（真浏览器逐页跑） | `npm run check-motion -- <项目或导出的 .html>` |
 | 复制页面到新项目 | `npm run copy-pages -- <源项目> <页码> --to <新编号>` |
 | 导出 | `npm run export -- <项目> [--html \| --images \| --pdf \| --all]` |
+| 导出交接包（网页项目的改动清单） | `npm run export-changes -- <项目> [--out <目录>] [--no-images]` |
 
 动效检查和导出图片 / PDF 要用浏览器：自动找当前系统安装的 Chrome、Edge，再找 Playwright 自带 Chromium / WebKit；都没有时会给中文提示，照提示装 Chrome 或运行 `npx playwright install chromium`。
 
@@ -42,9 +44,24 @@
 - 文字框**高度由内容决定**：agent 排版只定 `x`、`y`、`width` 和字体属性，`height` 写估计值即可，工作台会按内容重算并写回；不要靠拉高文字框留白。用户改字、改字号、拉宽拉窄、就地打字时高度都即时跟着变。
 - 图片裁切写在元素的 `crop`（源图比例 0–1 的矩形，见 `docs/format.md` §6.3），元素框仍是画板上看到的框，动效拿到的 `base` 不受影响。用户在工作台双击图片裁切，裁过的 `crop` 和框不要改；agent 一般不手写裁切，需要时按与框相同的宽高比写。替换图片保留位置、大小和裁切（比例不同时工作台按框比例重算裁切）。
 
-## 旧 HTML 导入的项目（第 10 轮）
-- 项目文件夹里有 `import/` 的，是从旧 HTML 导入的：原文件在 `import/` 里只读参考；每页 `notes` 是「迁移说明」，写着这页原来的动画、被截成图片的块、缺失的字体和分页方式。导入时**不搬旧动画**。
+## 导入的项目（旧 HTML / 网页）
+- 项目文件夹里有 `import/` 的，是导入的项目。规则细节见 `docs/import-html.md`。所有导入都会把导入那一刻的 `project.json` 复制成 `import/baseline.json`（改前基准），**不要改 `import/` 里的任何文件**。
+- **旧 HTML 导入（第 10 轮，课件）**：原文件在 `import/` 里只读参考；每页 `notes` 是「迁移说明」，写着这页原来的动画、被截成图片的块、缺失的字体和分页方式。导入时**不搬旧动画**。
 - 用户用「复制给 agent」要求「按原 HTML 重写动效」时：读该页 `notes` 和 `import/` 里的原文件，按原来的动画意图用格式 v2 的 `motion` 重写（用 `ctx.animate` / `ctx.timer`，不要把旧代码搬进来）；「[截图]」开头的图片元素是整块截图，能用文字 / 形状 / 原素材重做的就重做并把截图删掉，做不到的保留；缺失的字体从公共素材库或用户提供的字体文件补进 `fonts/`。改完照旧校验、动效检查、存版。
+- **导入的网页（第 11 轮，`kind: "web"`）**：「复制给 agent」的开场白会写明：每个网页有电脑端、手机端两页（`page.device` / `page.size`，整页高度 = 内容长度）；组件是分组，元素的 `origin.selector` 指向原网页里的对应元素；`import/baseline.json` 是改动清单的「改前」基准，不要修改；网址来源的快照在 `import/pages/`、来源记录在 `import/source.json`，跳过的网址（例如需要登录的）列在项目 `description` 和第 1 页 `notes` 里；用户改完后用「导出 → 交接包」生成改动清单，由写前端的 agent 照着改真正的网站，**不要把改动回写进原网页文件**。
+
+## 网页项目（第 11 轮）
+- 格式要点（详见 `docs/format.md`「第 11 轮：网页项目」）：项目写 `kind: "web"`，`artboard` 固定 `{ "preset": "web-desktop", "width": 1440, "height": 900 }`（只当默认窗口）。每页必填 `device`（`"desktop"` 电脑端，窗口 1440×900；`"mobile"` 手机端，窗口 390×844）和 `size: { width, height }`：`size.width` 等于设备宽度，`size.height` 是整页内容长度，可以远大于窗口。同一个网页可以分别有电脑端、手机端两页，元素各自独立。常量与取尺寸的函数在 `web/project-kinds.js`（`WEB_DEVICES`、`pageSize`、`pageViewport`）。
+- agent 排网页时：每页写好 `device` 和 `size`；导航栏、页眉页脚、区块、卡片、按钮、列表项这类组件用分组（`group`），容器的底色 / 边框写成分组最底层的形状；**不写 `origin`**，除非这个元素是导入来的（`origin` 只表示「原网页里对应哪个节点」）。`variantOf` 由工作台「复制为变体…」写，agent 一般不手写；要写时值必须是存在的原件 `id`。改完照旧 `npm run validate`（会查 `WEB_PAGE_DEVICE`、`WEB_PAGE_SIZE`、`VARIANT_REF`）。
+- 导入的网页项目里，`import/baseline.json` 是导入那一刻的项目，改动清单靠它算「改前」。agent 不改它，也不改 `import/` 里的其他文件。
+- 改动清单（交接包）：导出弹窗「交接包」或 `npm run export-changes -- <项目>`，生成到 `exports/<项目>/handoff-<时间>/`：`改动清单.md`（大白话 + 精确数值，按页按元素列出原网页定位、挪了多少、整体缩放多少、尺寸、字号、颜色、文字、增删）、`changes.json`、`compare/`（每页改前 / 改后 / 并排对比图）、`复制给agent.txt`。接口是 `POST /api/projects/:id/handoff`。
+- **agent 拿到改动清单后怎么改网站**（改的是网站代码，不是项目文件）：
+  1. 读 `改动清单.md`（需要精确值时读 `changes.json`），先看 `compare/` 里的并排对比图，弄清每处改了什么。
+  2. 只改清单列出的元素和属性；用每个元素的 `origin.selector`（原网页的 CSS 选择器）在网站代码里定位。
+  3. 位置、尺寸按清单给的百分比（相对页宽）换算到网站实际的布局（响应式写法照原网站的方式改），颜色、字号、字距、描边等按清单给的精确值写。电脑端、手机端分别列出的，分别对应各自的断点。
+  4. 新增的元素按清单补上，删除的去掉；清单末尾「变体」一节是用户多试的几版，用户没说用哪一份时先问她，不要自己挑。
+  5. 改完把网站在对应窗口宽度下的样子和 `compare/` 里的「改后」对照检查。
+  6. 清单没列出的内容一律不碰；不改工作台项目里 `import/` 的任何文件。
 
 ## 外观写成属性，不要写进动效代码
 - 文字的描边、投影用文字元素的属性：`stroke: { color, width }`、`shadow: { color, x, y, blur }`（不要的写 `null`）。编辑器、放映、导出都会显示，用户也能在属性栏里调。不要在 `motion.source` 里用 `webkitTextStroke`、`textShadow` 之类去画，那样只在放映时才出现。
@@ -114,10 +131,12 @@
 - 编辑后只做增量刷新：数据变了调用 `updateEditor()`（或其中的 `refreshBoard()` / `refreshInspector()` / `refreshPageViews()`）；画板用 `render.js` 的 `patchPage` 原地协调，页面项用 `page-items.js` 的 `patchPageItems`。`renderEditor()` 只用于打开项目、从放映返回这类换画面；不要为一次编辑重建整个编辑器或重新创建图片节点。`test/round9-smooth.test.js` 会检查重建次数、节点身份和图片请求。
 - 保存要安静：`#save-status` 给读屏和测试读，看得见的保存标签只在保存超过 1.5 秒或失败时变化；自己写盘的监听事件（`external:false`）不触发同步或刷新。
 - 选择习惯三处统一（画布、页面区、项目总览）：点空白取消、拖框多选、Shift 加选、Esc 逐层取消。
+- 画布交互规则（第 11 轮）：已选中的文字框再单击一次，在点到处出光标进入编辑；未选中的双击直接编辑并选中点到的词；编辑中可拖选、Shift+方向键扩选、双击选词、三击选段，Ctrl+A 只全选本框，文字框固定不动，Esc 或点空白退出后才能拖。选中分组后按下并拖动 = 整组移动，按下不拖松开 = 进入分组选中子元素，Esc 逐层退回。拖角默认等比：文字框四角连字号、字距、描边、投影一起缩放，左右边只改宽度；分组 / 多选拖角整体等比缩放（字号、描边、圆角、间距一起变），也可输入「整体缩放 %」。画布上方快捷工具条在 `web/quick-toolbar.js`，控件用 `data-qprop`（属性）/ `data-qaction`（动作）标记；缩略图在 `web/thumbnails.js`（ResizeObserver 按宿主与页面尺寸重算并居中，宿主量到 0 时等它有尺寸再量）。网页项目的画布是固定比例的设备窗口 + 滚轮上下滚动整页，拖到窗口边缘自动滚动。
 
 ## 测试与本机配置隔离
 - 测试只使用临时数据目录和临时用户主目录：配置测试传入 `home`，服务端夹具使用 `test/helpers/isolated-server.js`（`configHome` 注入临时目录）。不得读写真实 `~/.visual-workbench/config.json`，也不能靠覆盖真实配置让测试通过。临时目录结束后清理。
 - 仓库已公开（第 9 轮），GitHub Actions 在推送和 PR 时自动运行，不占付费额度：macOS、Ubuntu 跑全部测试；Windows 通过 `node scripts/test-windows.js` 跑系统与真实浏览器导出测试，清单用 `--list` 查看。公开仓库里不得出现密钥、令牌、真实项目内容。Windows 没有建符号链接权限时只省略链接部分并说明，其余断言继续。
+- 桌面应用的测试（`test/round11-desktop-*.test.js`）只测 `desktop/lib/` 里的纯逻辑，不依赖 electron，`npm test` 不需要装它；真窗口自测是 `desktop/` 里的 `npm run smoke`，由 `.github/workflows/desktop.yml` 在 macOS、Windows 上跑。本机 Windows 没有符号链接权限时，四个链接用例按上一条规则只跳过链接部分。
 
 ## 改完必须做
 - `npm run validate -- <项目>` 和 `npm run check-motion -- <项目>` 都通过，才算完成；动效检查会实际运行每页的模块、步骤及换页。
