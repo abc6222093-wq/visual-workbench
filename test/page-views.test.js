@@ -14,7 +14,10 @@ test('mounted views route multi-selection, grid exit, clipboard and batch drop t
   const target={closest:()=>row,matches:()=>false};
   const event={target,stopPropagation(){},preventDefault(){},ctrlKey:true};
   handlers.get('click')(event);assert.deepEqual(ctx.selectedPageIds,['page_first','page_second']);assert.equal(calls.some(c=>c[0]==='open'),false);
+  // 第 9 轮 D3：网格里有选中页时，Esc 先取消选择；没有选中时再按 Esc 才回到原视图
+  handlers.get('keydown')({...event,key:'Escape'});assert.deepEqual(calls.at(-1),['selection',[]]);assert.equal(calls.some(c=>c[0]==='view'),false);
   handlers.get('keydown')({...event,key:'Escape'});assert.deepEqual(calls.at(-1),['view','timeline']);
+  ctx.selectedPageIds=['page_first','page_second'];
   handlers.get('keydown')({...event,key:'c'});assert.equal(calls.at(-1)[0],'copy-pages');assert.deepEqual(calls.at(-1)[1].ids,['page_first','page_second']);
   handlers.get('drop')({...event,clientY:80,altKey:true,dataTransfer:{getData:()=>JSON.stringify(['page_first'])}});assert.equal(calls.at(-1)[0],'move-pages');assert.equal(calls.at(-1)[1].position,'after');
   dispose();
