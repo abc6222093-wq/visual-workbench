@@ -32,3 +32,8 @@ test('ungroup flipped and rotated group preserves child center and composited op
  const page={elements:[{id:'group',type:'group',x:100,y:100,width:100,height:100,rotation:90,flipX:true,opacity:.5,zIndex:1,children:[{...el('child',0,0),width:20,height:20,opacity:.4}]}]};ungroupElements(page,['group']);const child=page.elements[0];assert.equal(child.x,180);assert.equal(child.y,180);assert.equal(child.rotation,90);assert.equal(child.flipX,true);assert.equal(child.opacity,.2);
 });
 test('typing guard includes native inputs, outline and rich documents',()=>{for(const name of ['input','textarea','select','[contenteditable]','[data-outline-document]'])assert.equal(isTypingTarget({closest:query=>query.includes(name)?{}:null}),true);assert.equal(isTypingTarget({closest:()=>null}),false);});
+test('grouping and ungrouping remain valid project format with integer layers',async()=>{
+ const {validateProjectData}=await import('../src/validate.js');const now='2026-10-01T12:00:00.000Z';
+ const project={format:'visual-workbench/project',formatVersion:2,id:'model-demo',name:'模型',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:500,height:500},fonts:[],assets:[],pages:[{id:'page_model',name:'一页',background:'#fff',elements:[el('el_first'),el('el_second',80)]}]};
+ const page=project.pages[0],ids=groupElements(page,['el_second','el_first']);assert.match(ids[0],/^el_/);assert.equal(validateProjectData(project).ok,true);assert.deepEqual(page.elements[0].children.map(e=>e.id),['el_first','el_second']);ungroupElements(page,ids);assert.equal(validateProjectData(project).ok,true);assert.ok(page.elements.every(e=>Number.isInteger(e.zIndex)));
+});

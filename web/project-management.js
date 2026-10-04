@@ -3,7 +3,7 @@ export function createProjectManagement({api,confirm,notice=()=>{},refresh=async
   const path=id=>'/api/projects/'+encodeURIComponent(id);
   const report=async task=>{try{return await task();}catch(e){notice(e.message);return null;}};
   async function rename(project){
-    const host=modal(`<h2>重命名项目</h2><form class="project-management-form"><label>项目名称<input name="name" required maxlength="500" value="${esc(project.name)}"></label><div class="g-sheet__actions"><button type="button" class="g-btn" data-cancel>取消</button><button class="g-btn g-btn--prism" type="submit">保存名称</button></div></form>`);
+    const host=modal(`<h2>重命名项目</h2><form class="project-management-form"><label>项目名称<input name="name" required maxlength="200" value="${esc(project.name)}"></label><div class="g-sheet__actions"><button type="button" class="g-btn" data-cancel>取消</button><button class="g-btn g-btn--prism" type="submit">保存名称</button></div></form>`);
     const el=host?.querySelector?host:document.querySelector('.project-management-form')?.parentElement;
     const form=el?.querySelector('.project-management-form');if(!form)return;
     form.querySelector('[data-cancel]').onclick=closeModal;

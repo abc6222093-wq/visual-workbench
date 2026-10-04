@@ -537,6 +537,7 @@ function renderBoard() {
   // 按下时自己挑要操作的元素（捕获阶段，先于各元素自己的处理）：
   // 锁定的元素（例如盖满整页的纸纹）点不中、也不挡住下面的元素；已选中的元素优先，被别的元素盖住也能接着拖、拉把手。
   bindBoardPointer(holder, board);
+  well.onpointerdown=e=>{if(e.button===0&&!e.target.closest("#artboard-holder")){if(S.preview)return;startMarquee(board,e);}};
   markSelection();
   if (S.stepView) startStepView(board);
 }
@@ -544,7 +545,7 @@ function bindBoardPointer(holder, board) {
   holder._pickController?.abort();
   const controller = new AbortController(); holder._pickController = controller;
   holder.addEventListener('pointerdown', e => {
-    if(e.button!==0)return;
+    if(e.button!==0){e.stopPropagation();return;}
     if (S.preview) { e.preventDefault();e.stopPropagation();return; }
     const {id,resize}=pickElement(board,e);e.stopPropagation();
     if(id)selectCanvas(id,e,resize);else startMarquee(board,e);
@@ -635,6 +636,7 @@ function setFocus(on) {
 function pickElement(board, e) {
   const hit = pickCanvasElement({ board, page: page(), selected: S.selected, screen: !!S.stepView, event: e });
   if (!hit.id || hit.resize) return hit;
+  if(e.button===2 && S.selected.includes(hit.id))return hit;
   const found = findElement(page(), hit.id);
   const selectedGroup = S.selected.length === 1 && findElement(page(),S.selected[0])?.element.type === 'group' ? S.selected[0] : null;
   if (selectedGroup) {
@@ -1663,7 +1665,7 @@ window.addEventListener("keydown", e => {
     if([' ','ArrowRight'].includes(e.key)){e.preventDefault();advancePlay();}
     else if(e.key==='ArrowLeft'){e.preventDefault();nextPage(-1);}return;
   }
-  if(S.view!=='editor'||S.preview||$('#modal-root')?.childElementCount)return;
+  if(S.view!=='editor'||S.preview||$('#modal-root')?.childElementCount||$('.g-context-menu'))return;
   // Page-view key handlers own their focused surface and stop propagation.
   const mod=e.metaKey||e.ctrlKey,key=e.key.toLowerCase();
   try {
@@ -1728,7 +1730,7 @@ app.addEventListener('contextmenu',e=>{
   e.preventDefault();finishNudge();
   const board=$('#artboard');const hit=pickElement(board,e);
   // Locked elements still offer Unlock from their visible node.
-  const native=e.target.closest('[data-element-id]');const id=hit.id||native?.dataset.elementId;
+  const native=e.target.closest('[data-element-id]'),nativeFound=native&&findElement(page(),native.dataset.elementId);const id=hit.id||nativeFound?.ancestors.find(e=>e.locked)?.id||native?.dataset.elementId;
   if(id && !S.selected.includes(id))S.selected=[id];
   if(!id)S.selected=[];refreshSelection();
   const selected=S.selected.map(id=>findElement(page(),id)?.element).filter(Boolean),locked=selected.some(el=>el.locked);
@@ -1774,7 +1776,7 @@ function mountAppearance(){
   const elements=rootSelection(page(),S.selected).map(id=>findElement(page(),id)?.element).filter(Boolean);
   if(!elements.length)return;
   host.append(appearanceControls(elements,{
-    change(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);paintDragged(e);}},
+    change(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);const node=$(`#artboard [data-element-id="${CSS.escape(e.id)}"]`),transform=node?.style.transform;paintDragged(e);if(S.stepView&&node)node.style.transform=transform;}},
     commit(patch){for(const e of elements){Object.assign(e,patch);clearDocumentDraft(e);}changed({boardOnly:true});}
   }));
   if(elements.length<2)return;
@@ -1886,7 +1888,8 @@ function patchDocumentCanvas(before) {
       continue;
     }
     if (element.type === 'text' && old?.text !== element.text) {
-      node.replaceChildren(document.createTextNode(element.text));
+      const content=node.querySelector(':scope > [data-vw-flip]')||node;
+      content.replaceChildren(document.createTextNode(element.text));
     }
     if (old && ['fontSize','fontWeight','height','width','x','y'].some(k=>old[k]!==element[k])) {
       for (const key of ['fontSize','height','width']) node.style[key]=`${element[key]}px`;

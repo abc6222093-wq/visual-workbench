@@ -7,7 +7,7 @@ async function editor(t){
  const dir=mkdtempSync(join(tmpdir(),'vw-round8-editor-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  mkdirSync(join(dir,'projects/demo'),{recursive:true});const file=join(dir,'projects/demo/project.json');
- const project={format:'visual-workbench/project',formatVersion:2,id:'demo',name:'编辑操作验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1000,height:700},assets:[],fonts:[],pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[text('el_first',80,80),text('el_second',300,80),text('el_third',500,240),{...text('el_locked',700,80),locked:true},{id:'group_first',type:'group',x:100,y:400,width:300,height:100,zIndex:2,children:[text('el_child',0,0),{...text('el_childtwo',160,0),zIndex:2}]}]},{id:'page_second',name:'第二页',background:'#ffffff',elements:[]},{id:'page_third',name:'第三页',background:'#ffffff',elements:[]}]};
+ const project={format:'visual-workbench/project',formatVersion:2,id:'demo',name:'编辑操作验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1000,height:700},assets:[],fonts:[],pages:[{id:'page_first',name:'第一页',background:'#ffffff',elements:[text('el_first',80,80),text('el_second',300,80),text('el_third',500,240),{...text('el_locked',700,80),locked:true},{id:'el_group_first',type:'group',x:100,y:400,width:300,height:100,zIndex:2,children:[text('el_child',0,0),{...text('el_childtwo',160,0),zIndex:2}]}]},{id:'page_second',name:'第二页',background:'#ffffff',elements:[]},{id:'page_third',name:'第三页',background:'#ffffff',elements:[]}]};
  writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1600,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));const requests=[];page.on('request',r=>{if(r.method()==='PUT'&&r.url().endsWith('/api/projects/demo'))requests.push(r);});
  const url=`http://127.0.0.1:${server.address().port}`;await page.goto(url);await page.locator('[data-action="open"][data-id="demo"]').click();await page.waitForSelector('#artboard');return {page,file,errors,requests,server,dir,url};
 }
@@ -22,9 +22,9 @@ test('round8 elements: marquee, whole groups, drill in, Escape, clipboard and ba
  await gesture(page,{x:board.x+40*scale,y:board.y+40*scale},{x:board.x+450*scale,y:board.y+180*scale});
  assert.equal(await page.locator('[data-resize="el_first"]').count(),8);assert.equal(await page.locator('[data-resize="el_second"]').count(),8);assert.equal(await page.locator('[data-resize="el_locked"]').count(),0);
  await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize]').count(),0);
- const child=await center(page,'el_child');await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="group_first"]').count(),8);
+ const child=await center(page,'el_child');await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="el_group_first"]').count(),8);
  await page.mouse.click(child.x,child.y);assert.equal(await page.locator('[data-resize="el_child"]').count(),8);
- await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize="group_first"]').count(),8);await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize]').count(),0);
+ await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize="el_group_first"]').count(),8);await page.keyboard.press('Escape');assert.equal(await page.locator('[data-resize]').count(),0);
  await select(page,'el_first');const before=disk(file).pages[0].elements[0];const count=requests.length;
  await saved(page,async()=>{for(let i=0;i<4;i++)await page.keyboard.press('ArrowRight');await page.keyboard.press('Shift+ArrowDown');});
  assert.equal(requests.length-count,1);assert.equal(disk(file).pages[0].elements[0].x,before.x+4);assert.equal(disk(file).pages[0].elements[0].y,before.y+10);
@@ -49,7 +49,7 @@ test('round8 pages: list multiselect, batch clipboard, grid exit, timeline persi
 
 test('round8 canvas context grouping, appearance, alignment and typing guard share history',async t=>{
  const {page,file,errors}=await editor(t);await select(page,'el_first');await page.locator('[data-action="select"][data-id="el_second"]').click({modifiers:['Shift']});
- const point=await center(page,'el_first');await page.mouse.click(point.x,point.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'编组',exact:true}).click());const g=disk(file).pages[0].elements.find(e=>e.type==='group'&&e.id!=='group_first');assert.equal(g.children.length,2);
+ const point=await center(page,'el_first');await page.mouse.click(point.x,point.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'编组',exact:true}).click());const g=disk(file).pages[0].elements.find(e=>e.type==='group'&&e.id!=='el_group_first');assert.equal(g.children.length,2);
  await saved(page,()=>page.getByRole('button',{name:'水平翻转',exact:true}).click());assert.equal(disk(file).pages[0].elements.find(e=>e.id===g.id).flipX,true);assert.equal(await page.locator(`[data-resize="${g.id}"]`).count(),8);
  const slider=page.getByRole('slider',{name:'不透明度'});await saved(page,()=>slider.evaluate(n=>{n.value='.35';n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}));}));assert.equal(disk(file).pages[0].elements.find(e=>e.id===g.id).opacity,.35);
  const groupPoint=await center(page,g.id);await page.mouse.click(groupPoint.x,groupPoint.y,{button:'right'});await saved(page,()=>page.getByRole('menuitem',{name:'取消编组'}).click());assert.equal(disk(file).pages[0].elements.some(e=>e.id===g.id),false);

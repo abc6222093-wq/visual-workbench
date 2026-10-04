@@ -43,9 +43,9 @@ export function nudgeElements(page, ids, dx, dy) {
 export function groupElements(page, ids) {
   const roots = rootSelection(page, ids).map(id => findElement(page,id)).filter(f => f && editable(page,f.element.id));
   if (roots.length < 2 || roots.some(f => f.items !== roots[0].items)) throw Error('请选择同一层里的至少两个未锁定元素');
-  const children = roots.map(f => f.element), x=Math.min(...children.map(e=>e.x)), y=Math.min(...children.map(e=>e.y));
+  const children = roots.slice().sort((a,b)=>a.index-b.index).map(f => f.element), x=Math.min(...children.map(e=>e.x)), y=Math.min(...children.map(e=>e.y));
   const width=Math.max(...children.map(e=>e.x+e.width))-x, height=Math.max(...children.map(e=>e.y+e.height))-y;
-  const group={id:uid('group'),type:'group',name:'分组',x,y,width:Math.max(1,width),height:Math.max(1,height),zIndex:Math.max(...children.map(e=>e.zIndex||0)),children};
+  const group={id:uid('el'),type:'group',name:'分组',x,y,width:Math.max(1,width),height:Math.max(1,height),zIndex:Math.max(...children.map(e=>e.zIndex||0)),children};
   const selected=new Set(children), list=roots[0].items;
   const insert=Math.min(...roots.map(f=>f.index));
   children.forEach(e=>{e.x-=x;e.y-=y;});
@@ -58,13 +58,14 @@ export function ungroupElements(page, ids) {
     const f=findElement(page,id), g=f?.element;
     if(g?.type!=='group'||!editable(page,id))continue;
     const a=(g.rotation||0)*Math.PI/180, cos=Math.cos(a),sin=Math.sin(a);
-    const children=g.children.map(child=>{
+    const children=g.children.slice().sort((a,b)=>(a.zIndex||0)-(b.zIndex||0)).map(child=>{
       const e=clone(child), cx=e.x+e.width/2-g.width/2,cy=e.y+e.height/2-g.height/2;
       const fx=g.flipX?-cx:cx,fy=g.flipY?-cy:cy;
       e.x=g.x+g.width/2+fx*cos-fy*sin-e.width/2;e.y=g.y+g.height/2+fx*sin+fy*cos-e.height/2;
       e.rotation=(g.rotation||0)+((!!g.flipX!==!!g.flipY)?-(e.rotation||0):(e.rotation||0));
+      e.rotation=((e.rotation+180)%360+360)%360-180;
       if(g.flipX)e.flipX=!e.flipX;if(g.flipY)e.flipY=!e.flipY;
-      e.opacity=(g.opacity??1)*(e.opacity??1);e.zIndex=(g.zIndex||0)+(e.zIndex||0)/1000;
+      e.opacity=(g.opacity??1)*(e.opacity??1);e.zIndex=g.zIndex||0;
       return e;
     });
     f.items.splice(f.index,1,...children);result.push(...children.map(e=>e.id));

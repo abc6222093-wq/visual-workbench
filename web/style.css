@@ -219,5 +219,5 @@ button:disabled {
 .hm-project-actions .g-btn {font-size:11px;padding:6px 8px}
 .ed-motion-status {flex:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .ed-motion-detail {flex-basis:100%;min-width:0;overflow-wrap:anywhere}
-.ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
+html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
 .ed-tools {flex-wrap:wrap;justify-content:flex-end;min-width:0}
