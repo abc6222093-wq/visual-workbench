@@ -120,8 +120,8 @@ test('round8 group child resize uses page snap guides and keeps its opposite rot
 test('round8 motion warning stays on one line at narrow width and legacy formats show plain Chinese',async t=>{
  const {page,file}=await editor(t,{motionFailure:true});const before=readFileSync(file,'utf8');await page.setViewportSize({width:1000,height:850});
  const chip=page.locator('.ed-motion-status');await chip.filter({hasText:'动效检查未通过'}).waitFor();
- const size=await chip.evaluate(n=>{const css=getComputedStyle(n);return {height:n.getBoundingClientRect().height,line:parseFloat(css.lineHeight),whiteSpace:css.whiteSpace};});
- assert.equal(size.whiteSpace,'nowrap');assert.ok(size.height<size.line*2);assert.match(await chip.getAttribute('title'),/motion warning fixture/);
+ const size=await chip.evaluate(n=>{const range=document.createRange();range.selectNodeContents(n);return {lines:range.getClientRects().length,whiteSpace:getComputedStyle(n).whiteSpace};});
+ assert.equal(size.whiteSpace,'nowrap');assert.equal(size.lines,1);assert.match(await chip.getAttribute('title'),/motion warning fixture/);
  await page.evaluate(async()=>{const {mountMotionStatus}=await import('/motion-status.js');mountMotionStatus({formatVersion:1},'',document.querySelector('.ed-toolbar'));});
  const old=page.locator('.ed-motion-status').last();assert.equal(await old.textContent(),'这是旧格式的项目，暂时检查不了动效');assert.equal(await old.evaluate(n=>getComputedStyle(n).whiteSpace),'nowrap');assert.equal(readFileSync(file,'utf8'),before);
 });
