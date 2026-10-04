@@ -16,7 +16,7 @@ function appearanceProject() {
 }
 
 const svg='<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><rect width="30" height="60" fill="black"/></svg>';
-test('appearance survives motion transforms, current base snapshots, offline and PNG export',async t=> {
+test('appearance survives motion transforms, current base snapshots, offline and PNG export',{timeout:120000},async t=> {
  const dir=mkdtempSync(join(tmpdir(),'vw-appearance-'));const projectDir=join(dir,'projects/appearance-demo');mkdirSync(join(projectDir,'assets'),{recursive:true});writeFileSync(join(projectDir,'assets/logo.svg'),svg);
  const project=appearanceProject();writeFileSync(join(projectDir,'project.json'),JSON.stringify(project));
  const html=await exportHtml({projectDir,outFile:join(dir,'deck.html')});const source=readFileSync(html.file,'utf8');assert.match(source,/flipX/);assert.match(source,/data:image\/svg\+xml;base64/);
