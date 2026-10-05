@@ -1,3 +1,5 @@
+// 动效检查（第 12 轮）：起一个只读静态服务（工作台界面代码挂在 /，项目目录挂在 /project/，页面文件 /project/pages/x.html），
+// 在后台真浏览器里打开 /motion-check.html，逐页调 checkMotion（web/motion-check.js）。每页用独立浏览器并设总时限，卡死的页面会被强制结束。
 import { readFileSync } from 'node:fs';
 import { resolve, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +41,7 @@ catch (error) { console.error(`无法读取项目：${error.message}`); process.
 const validation = validateProjectData(project, { projectDir });
 if (!validation.ok) { for (const error of validation.errors) console.error(`${error.path}: ${error.message}`); process.exit(1); }
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../web');
-const mime = { '.js': 'text/javascript', '.html': 'text/html', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
+const mime = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4' };
 const server = http.createServer((request, response) => {
   try {
     const path = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
@@ -49,8 +51,9 @@ const server = http.createServer((request, response) => {
     const target = resolve(root, '.' + (isProject ? path.slice('/project'.length) : path));
     if (!target.startsWith(root + sep) && target !== root) throw new Error('Invalid path');
     const bytes = readFileSync(target);
-    response.writeHead(200, { 'Content-Type': mime[target.slice(target.lastIndexOf('.'))] || 'application/octet-stream' }); response.end(bytes);
-  } catch { response.writeHead(404); response.end('Not found'); }
+    // 页面在 null 源的 sandbox iframe 里：字体、模块脚本要 CORS 才能加载
+    response.writeHead(200, { 'Content-Type': mime[target.slice(target.lastIndexOf('.')).toLowerCase()] || 'application/octet-stream', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); response.end(bytes);
+  } catch { response.writeHead(404, { 'Access-Control-Allow-Origin': '*' }); response.end('Not found'); }
 });
 let failures = 0, successes = 0, announced = false, noBrowser = null;
 try {
@@ -58,7 +61,7 @@ try {
   const origin = `http://127.0.0.1:${server.address().port}`;
   for (const item of project.pages) {
     const pageId = item.id;
-    const total = opts.totalTimeout || Math.max(10000, 2 * ((item.motion?.steps || 0) + 4) * opts.timeout);
+    const total = opts.totalTimeout || Math.max(15000, 3 * ((item.motion?.steps || 0) + 4) * opts.timeout);
     let browser, browserServer, timer, timedOut = false;
     const errors = [];
     try {
@@ -78,7 +81,7 @@ try {
         })(),
         new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new Error(`总时限 ${total} ms 已到`)); }, total); })
       ]).finally(() => clearTimeout(timer));
-      for (const row of result.results) { console.log(`${row.ok ? '✓' : '✗'} ${row.page} [${row.variant}]${row.ok ? '' : `: ${row.error}`}`); if (row.ok) successes++; else failures++; }
+      for (const row of result.results) { console.log(`${row.ok ? '✓' : '✗'} ${row.page} [${row.phase}]${row.ok ? '' : `: ${row.error}`}`); if (row.ok) successes++; else failures++; }
       for (const error of errors) { console.error(`✗ ${pageId} 浏览器错误: ${error}`); failures++; }
     } catch (error) {
       if (error.code === 'NO_BROWSER') { noBrowser = error; break; }

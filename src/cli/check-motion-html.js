@@ -1,4 +1,5 @@
-// 检查导出的放映版单文件：用 file:// 直接打开，调用文件里内嵌的 vwCheckMotion()（与工作台同一套检查逻辑）。
+// 检查导出的放映版单文件：用 file:// 直接打开，调用文件里内嵌的 window.vwCheckMotion({ pageId, timeout })（与工作台同一套检查逻辑，
+// 导出端用 web/motion-check.js 的 checkMotion 实现，返回 { ok, results: [{ page, phase, ok, error? }] }；文件就绪时设 window.vwReady = true）。
 // 每页用独立浏览器并设总时限，卡死的页面会被强制结束；除 file: / data: / blob: 外的请求一律拦下，确认离线可用。
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -40,7 +41,7 @@ export async function checkExportedHtml({ input, timeout, totalTimeout }) {
         })(),
         new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(new Error(`总时限 ${total} ms 已到`)); }, total); })
       ]).finally(() => clearTimeout(timer));
-      for (const row of result.results) { console.log(`${row.ok ? '✓' : '✗'} ${row.page} [${row.variant}]${row.ok ? '' : `: ${row.error}`}`); if (row.ok) successes++; else failures++; }
+      for (const row of result.results) { console.log(`${row.ok ? '✓' : '✗'} ${row.page} [${row.phase || row.variant || ''}]${row.ok ? '' : `: ${row.error}`}`); if (row.ok) successes++; else failures++; }
       for (const error of errors) { console.error(`✗ ${pageId} 浏览器错误: ${error}`); failures++; }
     } catch (error) {
       if (error.code === 'NO_BROWSER') { noBrowser = error; break; }

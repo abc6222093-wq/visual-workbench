@@ -1,105 +1,121 @@
-import { loadMotion, finishAnimations } from './motion-runtime.js';
+// 放映控制（第 12 轮）：当前页一个 play 模式的 iframe + 预加载下一页（隐藏）；点击 / 右键 / 方向键推进，上一页用 fast:true 重建（停在最后一步）。
+// 每页的步数来自 project.json 的 motion.steps。放映页 player.html、导出放映版都可以用它。
+//
+// createPlayback({ project, container, pageId?, startAtEnd?, assetBase?, loadHtml?, frameOptions?, onChange?, onError?, onEnd?, onExit? })
+//   container：放 iframe 的元素（会设成 position:relative，尺寸 = 当前页 frameSize）；缩放由调用方做（onChange 里有 size）。
+//   loadHtml(page) → Promise<string>|string：可选，自己提供页面文件文本（导出的单文件用）；不给时按 assetBase 取。
+//   frameOptions：原样传给 createPageFrame（例如 runtimeText、assetUrls、baseHref、timeout）。
+//   onChange({ index, pageId, nextStep, total, size, count })：换页或走了一步；onError({ pageId, phase, message })；onEnd()：最后一页最后一步后再推进；onExit()：按 Esc。
+// 返回 { ready, next(), prev(), goTo(indexOrPageId, { atEnd }), handleKey(key), getState(), destroy() }
+import { createPageFrame, frameSize } from './page-frame.js';
 
-// startAtEnd：初始化后立刻无动画地跑完全部步骤，直接停在本页最后一步的画面（后退到上一页时用，像 PowerPoint）。
-// 快进期间页面保持 visibility:hidden，避免闪一下初始画面；之后的下一次点击直接去下一页。
-export function createPlayback(project, page, { root, onRender, onComplete, onError, assetBase, startAtEnd = false } = {}) {
-  let controller = new AbortController();
-  let runtime;
-  const staticRoot = root?.cloneNode?.(true);
-  let nextStep = 0;
-  let playing = false;
-  let destroyed = false;
-  const steps = page.motion?.steps || 0;
-  const report = error => { if (!controller.signal.aborted) onError?.(error); };
-  const init = async (toEnd = false) => {
-    const activeController = controller;
-    const hide = toEnd && root?.style;
-    const visibility = hide ? root.style.visibility : '';
-    if (hide) root.style.visibility = 'hidden';
-    try {
-      const loaded = await loadMotion(project, page, root, activeController.signal, assetBase, { fast: toEnd });
-      if (activeController.signal.aborted) { loaded.cleanup(); await loaded.handlers.dispose?.(); return; }
-      runtime = loaded;
-      if (toEnd) await fastForward(activeController.signal);
-      if (activeController.signal.aborted) return;
-      onRender?.(getState());
-    } catch (error) { if (!activeController.signal.aborted) onError?.(error); throw error; }
-    finally { if (hide) root.style.visibility = visibility; }
-  };
-  // 快进：按顺序跑完 step(0..steps-1)，每步后把 root 里的有限动画（Web Animations 和 anime.js 的）直接跳到结尾。
-  // 某一步出错只报告，不让 ready 失败：页面照常显示，下一次点击去下一页。
-  async function fastForward(signal) {
-    const finishAll = () => { finishAnimations(root); runtime.finish?.(); };
-    finishAll();
-    try {
-      for (let index = 0; index < steps; index++) {
-        if (signal.aborted) return;
-        runtime.setStep(index);
-        await runtime.handlers.step(index);
-        finishAll();
-      }
-    } catch (error) {
-      if (!signal.aborted) onError?.(error);
-    } finally {
-      runtime.setFast(false);
-    }
-    if (signal.aborted) return;
-    nextStep = steps;
-    if (steps > 0) onComplete?.();
+const LEAVE_TIMEOUT = 3000;
+const within = (promise, ms) => Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(null), ms))]);
+
+export function createPlayback({ project, container, pageId, startAtEnd = false, assetBase, loadHtml, frameOptions = {}, onChange, onError, onEnd, onExit } = {}) {
+  const pages = project.pages || [];
+  let index = Math.max(0, pages.findIndex(p => p.id === pageId));
+  let current = null;   // { frame, index, nextStep, total }
+  let preload = null;   // { frame, index }
+  let busy = false, destroyed = false;
+  container.style.position = container.style.position || 'relative';
+
+  const hideFrame = iframe => { iframe.style.position = 'absolute'; iframe.style.left = '0'; iframe.style.top = '0'; iframe.style.visibility = 'hidden'; iframe.setAttribute('aria-hidden', 'true'); iframe.tabIndex = -1; };
+  const showFrame = iframe => { iframe.style.visibility = ''; iframe.removeAttribute('aria-hidden'); iframe.tabIndex = 0; };
+
+  async function makeFrame(i, { fast = false } = {}) {
+    const page = pages[i];
+    const html = loadHtml ? await loadHtml(page) : undefined;
+    let frame;
+    frame = createPageFrame({
+      ...frameOptions, project, page, mode: 'play', container, html, edits: page.edits || [], fast, assetBase,
+      onMessage: msg => onFrameMessage(frame, msg),
+      onError: msg => onError?.({ pageId: page.id, phase: msg.phase, message: msg.message, stack: msg.stack })
+    });
+    hideFrame(frame.iframe);
+    return frame;
   }
-  let ready = init(startAtEnd);
-  ready.catch(() => {});
-  function getState() { return { nextStep, totalSteps: steps }; }
+  function onFrameMessage(frame, msg) {
+    if (!current || frame !== current.frame || destroyed) return;
+    if (msg.vw === 'nav') { if (msg.dir < 0) prev(); else next(); }
+    else if (msg.vw === 'key') handleKey(msg.key);
+  }
+  function state() {
+    const page = pages[index];
+    return { index, pageId: page?.id, nextStep: current?.nextStep ?? 0, total: current?.total ?? (page?.motion?.steps || 0), size: frameSize(project, page), count: pages.length };
+  }
+  const changed = () => onChange?.(state());
+  function sizeContainer() {
+    const size = frameSize(project, pages[index]);
+    container.style.width = `${size.width}px`;
+    container.style.height = `${size.height}px`;
+  }
+
+  async function show(i, { atEnd = false } = {}) {
+    let frame;
+    if (!atEnd && preload && preload.index === i) { frame = preload.frame; preload = null; }
+    else frame = await makeFrame(i, { fast: atEnd });
+    const ready = await frame.ready;
+    if (destroyed) { frame.destroy(); return; }
+    const old = current;
+    index = i;
+    current = { frame, index: i, nextStep: ready?.nextStep ?? 0, total: ready?.steps ?? (pages[i].motion?.steps || 0) };
+    sizeContainer();
+    showFrame(frame.iframe);
+    try { frame.iframe.focus({ preventScroll: true }); } catch { /* 忽略 */ }
+    old?.frame.destroy();
+    if (preload && preload.index !== i + 1) { preload.frame.destroy(); preload = null; }
+    if (!preload && i + 1 < pages.length) preload = { index: i + 1, frame: await makeFrame(i + 1) };
+    changed();
+  }
+  async function guard(fn) {
+    if (busy || destroyed) return false;
+    busy = true;
+    try { await fn(); return true; } finally { busy = false; }
+  }
+  async function leaveTo(i, direction, atEnd) {
+    if (current) await within(current.frame.leave(direction), LEAVE_TIMEOUT);
+    await show(i, { atEnd });
+  }
   function next() {
-    if (destroyed || playing || nextStep >= steps) return false;
-    playing = true;
-    const index = nextStep;
-    const signal = controller.signal;
-    ready.then(async () => {
-      if (signal.aborted) return;
-      runtime.setStep(index);
-      await runtime.handlers.step(index);
-      if (signal.aborted) return;
-      nextStep++;
-      onRender?.(getState());
-      if (nextStep === steps) onComplete?.();
-    }).catch(report).finally(() => { if (!signal.aborted) playing = false; });
-    return true;
+    return guard(async () => {
+      if (current && current.nextStep < current.total) {
+        const done = await current.frame.step();
+        if (done && current) { current.nextStep = done.nextStep; current.total = done.total; }
+        changed();
+        return;
+      }
+      if (index + 1 >= pages.length) { onEnd?.(); return; }
+      await leaveTo(index + 1, 1, false);
+    });
   }
-  async function transition(to, direction = 1) {
-    await ready;
-    if (controller.signal.aborted) return;
-    if (typeof runtime.handlers.transition === 'function') await runtime.handlers.transition({ from: root, to, direction });
+  function prev() {
+    return guard(async () => {
+      if (index <= 0) return;
+      await leaveTo(index - 1, -1, true);
+    });
+  }
+  function goTo(target, { atEnd = false } = {}) {
+    const i = typeof target === 'number' ? target : pages.findIndex(p => p.id === target);
+    if (i < 0 || i >= pages.length) return Promise.resolve(false);
+    return guard(() => leaveTo(i, i < index ? -1 : 1, atEnd));
+  }
+  // 方向键 / 空格 / 回车翻页；网页页面的上下键、空格、翻页键留给页面滚动
+  function handleKey(key) {
+    const web = frameSize(project, pages[index]).kind === 'web';
+    if (key === 'Escape') { onExit?.(); return true; }
+    if (['ArrowRight', 'Enter'].includes(key) || (!web && [' ', 'ArrowDown', 'PageDown', 'Spacebar'].includes(key))) { next(); return true; }
+    if (['ArrowLeft', 'Backspace'].includes(key) || (!web && ['ArrowUp', 'PageUp'].includes(key))) { prev(); return true; }
+    if (key === 'Home') { goTo(0); return true; }
+    if (key === 'End') { goTo(pages.length - 1, { atEnd: true }); return true; }
+    return false;
   }
   function destroy() {
-    if (destroyed) return Promise.resolve();
     destroyed = true;
-    controller.abort();
-    let disposal = Promise.resolve();
-    if (runtime) {
-      runtime.cleanup();
-      try { disposal = Promise.resolve(runtime.handlers.dispose?.()); }
-      catch (error) { disposal = Promise.reject(error); }
-    }
-    playing = false;
-    return disposal.catch(error => { onError?.(error); });
+    current?.frame.destroy(); preload?.frame.destroy();
+    current = null; preload = null;
   }
-  async function reset() {
-    await destroy();
-    await ready.catch(() => {});
-    if (root && staticRoot) {
-      for (const attr of [...root.attributes]) root.removeAttribute(attr.name);
-      for (const attr of staticRoot.attributes) root.setAttribute(attr.name, attr.value);
-      root.replaceChildren(...[...staticRoot.childNodes].map(node => node.cloneNode(true)));
-    }
-    controller = new AbortController();
-    runtime = undefined;
-    nextStep = 0;
-    playing = false;
-    destroyed = false;
-    ready = init();
-    ready.catch(() => {});
-    return ready;
-  }
-  return { get ready() { return ready; }, start() { return false; }, next, transition, reset, destroy, getState, isPlaying() { return playing; } };
+  busy = true;
+  const ready = show(index, { atEnd: startAtEnd }).finally(() => { busy = false; });
+  return { ready, next, prev, goTo, handleKey, getState: state, destroy, isBusy: () => busy, get current() { return current?.frame || null; } };
 }

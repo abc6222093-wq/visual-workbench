@@ -1,7 +1,8 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>动效检查</title><body><script type="module">
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>动效检查</title>
+<!-- 动效检查的宿主页：src/cli/check-motion.js 在后台浏览器打开它，再 import('/motion-check.js') 调 checkMotion -->
+<body><script src="/page-runtime.js"></script><script type="module">
 import { checkMotion } from './motion-check.js';
 addEventListener('message', async event => {
-  // Safari 里沙箱 iframe 收到的 event.source 不等于 parent，所以按同源 + 消息类型判断
   if (event.origin !== location.origin || !event.data || event.data.type !== 'check-motion') return;
   const id = event.data.id;
   try { parent.postMessage({ type: 'check-motion-result', id, result: await checkMotion(event.data.project, event.data.options || {}) }, location.origin); }

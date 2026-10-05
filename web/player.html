@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>放映</title>
+<!-- 独立放映页（第 12 轮）：/player.html?project=<项目编号>[&page=<页面编号>]。全屏黑底，按窗口缩放；与编辑器彻底隔离 -->
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color: #fff; font: 14px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+#viewport { position: fixed; inset: 0; overflow: hidden; }
+#stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #000; }
+#hint { position: fixed; right: 16px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font-size: 13px; opacity: 0; transition: opacity .4s; pointer-events: none; }
+#hint.show { opacity: 1; }
+#message { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: rgba(255,255,255,.8); }
+#message[hidden] { display: none; }
+#error { position: fixed; left: 16px; bottom: 14px; max-width: 60vw; padding: 8px 12px; border-radius: 10px; background: rgba(180,40,40,.85); font-size: 13px; }
+#error[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div id="viewport"><div id="stage"></div></div>
+<div id="message">正在准备放映…</div>
+<div id="hint" aria-live="polite"></div>
+<div id="error" hidden></div>
+<script type="module" src="./player.js"></script>
+</body>
+</html>

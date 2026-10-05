@@ -1,83 +1,58 @@
-import { renderPage } from './render.js';
-import { createPlayback } from './playback.js';
+// 动效检查（第 12 轮）：在真浏览器里按 play 模式逐页跑页面里的 vw.motion。
+// 每页三轮：① 正常放映：init → 每一步 → leave(前进)；② 快进进入（后退到这页时的样子）：fast 启动 → leave(后退)；③ 有步骤时：init 后直接 toEnd 快进。
+// 收集页面运行时回报的 error 消息（页面脚本报错、未处理的 Promise 拒绝、console.error、步骤出错、steps 与 step 不符）。
+//
+// checkMotion(project, { assetBase = '/data/projects/<id>', timeout = 5000, mount = document.body, pageId, loadHtml, frameOptions })
+//   → { ok, results: [{ page, phase, ok, error? }] }
+//   loadHtml(page)：可选，自己提供页面文件文本（导出的单文件用）；frameOptions 原样传给 createPageFrame（runtimeText、assetUrls、baseHref…）。
+import { createPageFrame } from './page-frame.js';
 
-const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-function variant(project) {
-  const changed = structuredClone(project);
-  function shift(elements) {
-    for (const element of elements || []) {
-      element.x = Math.max(0, (element.x || 0) + 37);
-      element.y = Math.max(0, (element.y || 0) + 23);
-      element.width = Math.max(1, (element.width || 1) + 13);
-      element.height = Math.max(1, (element.height || 1) + 7);
-      element.zIndex = (element.zIndex || 0) + 1;
-      if (typeof element.opacity === 'number') element.opacity = Math.max(0.1, element.opacity - 0.1);
-      if (element.type === 'text') { element.fontSize = (element.fontSize || 16) + 2; element.color = '#37a4c5'; }
-      if (element.type === 'shape' && typeof element.fill === 'string') element.fill = '#37a4c5';
-      shift(element.children);
-    }
-  }
-  for (const page of changed.pages) shift(page.elements);
-  return changed;
-}
 function bounded(promise, label, timeout) {
   let timer;
-  return Promise.race([Promise.resolve(promise), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} 超过 ${timeout} ms`)), timeout); })]).finally(() => clearTimeout(timer));
+  return Promise.race([Promise.resolve(promise), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}超过 ${timeout} ms 仍未完成`)), timeout); })]).finally(() => clearTimeout(timer));
 }
-async function runPage(project, page, { assetBase, timeout, mount }) {
-  const root = renderPage(project, page, { assetBase });
-  mount.append(root);
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const describe = msg => `${msg.phase ? `[${msg.phase}] ` : ''}${msg.message}${msg.stack && !String(msg.stack).includes(msg.message) ? `\n${msg.stack}` : ''}`;
+
+async function scenario(project, page, kind, { assetBase, timeout, mount, loadHtml, frameOptions }) {
   const errors = [];
-  const onWindowError = event => errors.push(event.error || new Error(event.message));
-  const onRejection = event => { errors.push(event.reason || new Error('未处理的 Promise 拒绝')); event.preventDefault(); };
-  const oldConsoleError = console.error;
-  console.error = (...args) => { errors.push(new Error(args.map(String).join(' '))); oldConsoleError.apply(console, args); };
-  addEventListener('error', onWindowError);
-  addEventListener('unhandledrejection', onRejection);
-  const playback = createPlayback(project, page, { root, assetBase, onError: error => errors.push(error) });
-  const limit = (promise, label) => bounded(promise, label, timeout);
+  const html = loadHtml ? await loadHtml(page) : undefined;
+  const frame = createPageFrame({ ...frameOptions, project, page, mode: 'play', container: mount, html, edits: page.edits || [], fast: kind === 'fast', assetBase, timeout, onError: msg => errors.push(msg) });
+  // iframe 必须在视口里可见：Chromium 对视口外 / 隐藏的跨源 iframe 会暂停 rAF 和动画，按真实时长跑的步骤会卡住
+  frame.iframe.style.position = 'fixed'; frame.iframe.style.left = '0'; frame.iframe.style.top = '0'; frame.iframe.style.zIndex = '1';
+  const check = () => { if (errors.length) throw new Error(describe(errors[0])); };
   try {
-    await limit(playback.ready, '初始化');
-    for (let index = 0; index < (page.motion?.steps || 0); index++) {
-      if (!playback.next()) throw new Error(`第 ${index + 1} 步未开始`);
-      await limit((async () => { while (playback.isPlaying()) { if (errors.length) throw errors[0]; await pause(10); } })(), `第 ${index + 1} 步`);
-      await pause(0);
-      if (errors.length) throw errors[0];
-      if (playback.getState().nextStep !== index + 1) throw new Error(`第 ${index + 1} 步没有完成`);
+    const ready = await bounded(frame.ready, '初始化', timeout + 2000);
+    if (ready?.failed) throw new Error(ready.error);
+    await pause(0); check();
+    const total = ready.steps;
+    if (kind === 'play') {
+      for (let index = 0; index < total; index++) {
+        const done = await bounded(frame.step(), `第 ${index + 1} 步`, timeout);
+        await pause(0); check();
+        if (!done || done.nextStep !== index + 1) throw new Error(`第 ${index + 1} 步没有完成`);
+      }
+      await bounded(frame.leave(1), '离开本页（前进）', timeout); await pause(0); check();
+    } else if (kind === 'fast') {
+      if (ready.nextStep !== total) throw new Error(`快进后停在第 ${ready.nextStep} 步，应为 ${total}`);
+      await bounded(frame.leave(-1), '离开本页（后退）', timeout); await pause(0); check();
+    } else {
+      const done = await bounded(frame.toEnd(), '快进到最后一步', timeout);
+      await pause(0); check();
+      if (!done || done.nextStep !== total) throw new Error('快进没有走完全部步骤');
     }
-    const index = project.pages.indexOf(page);
-    for (const direction of [1, -1]) {
-      const toPage = project.pages[index + direction] || page;
-      const to = renderPage(project, toPage, { assetBase });
-      mount.append(to);
-      try { await limit(playback.transition(to, direction), `换页 ${direction > 0 ? '向后' : '向前'}`);
-      await pause(0);
-      if (errors.length) throw errors[0]; } finally { to.remove(); }
-    }
-  } finally {
-    try { await limit(playback.destroy(), '清理'); } finally {
-      removeEventListener('error', onWindowError);
-      removeEventListener('unhandledrejection', onRejection);
-      console.error = oldConsoleError;
-      root.remove();
-    }
-    if (errors.length) throw errors[0];
-  }
+  } finally { frame.destroy(); }
 }
-// Safari 的 error.stack 只有调用位置、不含错误信息，所以先写信息再接 stack
-function describe(error) {
-  if (!error || typeof error !== 'object') return String(error);
-  const head = `${error.name || 'Error'}: ${error.message}`;
-  const stack = String(error.stack || '');
-  return stack.includes(error.message) ? stack : stack ? `${head}\n${stack}` : head;
-}
-export async function checkMotion(project, { assetBase = `/data/projects/${encodeURIComponent(project.id)}`, timeout = 5000, mount = document.body, pageId } = {}) {
+
+export async function checkMotion(project, { assetBase = `/data/projects/${encodeURIComponent(project.id)}`, timeout = 5000, mount = document.body, pageId, loadHtml, frameOptions = {} } = {}) {
   const results = [];
-  for (const [label, candidate] of [['原项目', project], ['移动与尺寸变体', variant(project)]]) {
-    for (const page of candidate.pages) {
-      if (pageId && page.id !== pageId) continue;
-      try { await runPage(candidate, page, { assetBase, timeout, mount }); results.push({ page: page.id, variant: label, ok: true }); }
-      catch (error) { results.push({ page: page.id, variant: label, ok: false, error: describe(error) }); }
+  for (const page of project.pages || []) {
+    if (pageId && page.id !== pageId) continue;
+    const kinds = [['play', '放映'], ['fast', '快进后退']];
+    if ((page.motion?.steps || 0) > 0) kinds.push(['toEnd', '中途快进']);
+    for (const [kind, phase] of kinds) {
+      try { await scenario(project, page, kind, { assetBase, timeout, mount, loadHtml, frameOptions }); results.push({ page: page.id, phase, ok: true }); }
+      catch (error) { results.push({ page: page.id, phase, ok: false, error: String(error?.message || error) }); }
     }
   }
   return { ok: results.every(result => result.ok), results };
