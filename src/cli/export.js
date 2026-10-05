@@ -42,7 +42,10 @@ try {
   for (const kind of EXPORT_KINDS.filter(k => args.kinds.has(k))) {
     console.log(`正在导出${KIND_LABEL[kind]}：${project.name}`);
     try {
-      const result = await exportProject({ projectDir, kind, outDir });
+      // 进度行：例如「正在导出第 1 / 3 页」；同一句不重复打印
+      let last = '';
+      const onProgress = ({ label }) => { if (label && label !== last) { last = label; console.log(`  ${label}`); } };
+      const result = await exportProject({ projectDir, kind, outDir, onProgress });
       for (const file of result.files) console.log(`  ${shown(file.path)}  ${formatBytes(file.bytes)}`);
       if (result.breakdown) console.log(`  组成：${describeBreakdown(result.breakdown)}`);
       for (const item of result.items || []) {

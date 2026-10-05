@@ -68,17 +68,32 @@ const withTimeout = (promise, ms) => Promise.race([promise, new Promise(ok => se
  * 逐页渲染并截图。onShot(index, page, buffer) 处理每张截图。
  * timeout：每个阶段（初始化、每一步、等动画）的上限；每页总上限按步数推算，至少 20 秒。
  */
-export async function captureProject({ projectDir, type = 'png', quality, timeout = 5000, onShot, variants = [null], pageIds = null }) {
+const cancelledError = () => Object.assign(new Error('已取消导出'), { cancelled: true });
+
+/**
+ * onProgress({ current, total, label })：每截完一页报一次（交接包每页有几种画面时，按「页 × 画面」计数）。
+ * signal（AbortSignal）：取消时立刻关掉后台浏览器，抛出 error.cancelled = true 的错误。
+ */
+export async function captureProject({ projectDir, type = 'png', quality, timeout = 5000, onShot, variants = [null], pageIds = null, onProgress, signal }) {
+  if (signal?.aborted) throw cancelledError();
   projectDir = resolve(projectDir);
   const project = readProject(projectDir);
   // variants：每页按几种「项目副本」各截一张（交接包用：改前 = 修改单清空，改后 = 原样）；null 表示原样
   const variantProjects = variants.map(change => (change ? change(structuredClone(project)) : project));
   const { server, origin } = await startServer(projectDir);
   let browser, browserServer, killed = false;
+  const chosen = project.pages.filter(item => !pageIds || pageIds.includes(item.id));
+  const shotTotal = chosen.length * variantProjects.length;
+  let done = 0;
+  // 取消：立刻结束后台浏览器进程，正在进行的截图会马上出错，下面统一换成「已取消」
+  const onAbort = () => { if (browserServer && !killed) { killed = true; browserServer.kill().catch(() => {}); } };
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
     ({ server: browserServer, browser } = await launchBrowserServer());
+    if (signal?.aborted) { onAbort(); throw cancelledError(); }
     for (const [index, item] of project.pages.entries()) for (const [variant, shown] of variantProjects.entries()) {
       if (pageIds && !pageIds.includes(item.id)) continue;
+      if (signal?.aborted) throw cancelledError();
       const label = `第 ${index + 1} 页（${item.id}${item.name ? ` · ${item.name}` : ''}）`;
       // 第 11 轮：每页按自己的尺寸设视口和截图范围（网页长页把视口设成整页高度，一次截完整页）
       const { width, height } = pageSize(project, item);
@@ -106,8 +121,12 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
         work.catch(() => {});
         const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`${label}导出超时：${Math.round(total / 1000)} 秒内没能播完动效（动效可能卡住或死循环），已停止导出`), { vwTimeout: true })), total); });
         const shot = await Promise.race([work, deadline]);
+        if (signal?.aborted) throw cancelledError();
         await onShot(index, item, shot.buffer, project.pages.length, { variant, width: shot.width, height: shot.height });
+        done++;
+        try { onProgress?.({ current: done, total: shotTotal, label: `正在导出第 ${chosen.indexOf(item) + 1} / ${chosen.length} 页` }); } catch { /* 忽略 */ }
       } catch (error) {
+        if (signal?.aborted) throw cancelledError();
         if (error.vwTimeout) { killed = true; await browserServer.kill().catch(() => {}); }
         else if (!String(error.message).startsWith(`${label}`)) error.message = `${label}导出失败：${error.message}`;
         throw error;
@@ -117,6 +136,7 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
       }
     }
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     if (browser && !killed) await withTimeout(browser.close().catch(() => {}), 3000);
     if (browserServer) await withTimeout(browserServer.close().catch(() => {}), 3000);
     await new Promise(ok => server.close(ok));
@@ -128,7 +148,7 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
  * 每页导出一张图片，尺寸 = 页面尺寸（课件页 = 画板；网页页 = 页面 size），文件名 `<两位序号>-<页面名>.png`。
  * format：'png'（默认）或 'jpeg'。返回 { files: [{ path, bytes }] }。
  */
-export async function exportImages({ projectDir, outDir, format = 'png', timeout } = {}) {
+export async function exportImages({ projectDir, outDir, format = 'png', timeout, onProgress, signal } = {}) {
   if (!projectDir || !outDir) throw new Error('exportImages 需要 projectDir 和 outDir');
   const type = format === 'jpg' || format === 'jpeg' ? 'jpeg' : format === 'png' ? 'png' : null;
   if (!type) throw new Error(`不支持的图片格式：${format}（只能是 png 或 jpeg）`);
@@ -137,7 +157,7 @@ export async function exportImages({ projectDir, outDir, format = 'png', timeout
   const files = [];
   const ext = type === 'jpeg' ? 'jpg' : 'png';
   await captureProject({
-    projectDir, type, quality: 90, timeout,
+    projectDir, type, quality: 90, timeout, onProgress, signal,
     onShot(index, page, buffer, count) {
       // 序号至少两位；超过 99 页时按页数加宽，保证文件按名字排序就是页序
       const nn = String(index + 1).padStart(Math.max(2, String(count).length), '0');
@@ -150,12 +170,14 @@ export async function exportImages({ projectDir, outDir, format = 'png', timeout
 }
 
 /** 整个项目导出成一份 PDF：每页一个 PDF 页面，尺寸按该页尺寸换算（1 px = 0.75 pt；网页长页就是一张长 PDF 页），画面是动效播完后的最后一帧。返回 { file, bytes }。 */
-export async function exportPdf({ projectDir, outFile, timeout } = {}) {
+export async function exportPdf({ projectDir, outFile, timeout, onProgress, signal } = {}) {
   if (!projectDir || !outFile) throw new Error('exportPdf 需要 projectDir 和 outFile');
   outFile = resolve(outFile);
   const shots = [];
-  await captureProject({ projectDir, type: 'jpeg', quality: 90, timeout, onShot(index, page, jpeg, count, { width, height }) { shots[index] = { jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX }; } });
+  await captureProject({ projectDir, type: 'jpeg', quality: 90, timeout, onProgress, signal, onShot(index, page, jpeg, count, { width, height }) { shots[index] = { jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX }; } });
+  if (signal?.aborted) throw cancelledError();
   const pdf = buildPdf(shots);
+  try { onProgress?.({ current: shots.length, total: shots.length, label: '正在写入文件' }); } catch { /* 忽略 */ }
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(outFile, pdf);
   return { file: outFile, bytes: pdf.length };

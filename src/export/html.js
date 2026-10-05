@@ -167,7 +167,9 @@ function pageChars(html, page) {
  * 导出放映版单文件。
  * @returns {Promise<{file:string, bytes:number, breakdown:object, items:object[], skipped:string[], warnings:string[]}>}
  */
-export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT }) {
+export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT, onProgress = () => {}, signal } = {}) {
+  const cancelled = () => { if (signal?.aborted) throw Object.assign(new Error('已取消导出'), { cancelled: true }); };
+  cancelled();
   projectDir = resolve(projectDir);
   webRoot = resolve(webRoot);
   let project;
@@ -190,13 +192,17 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
   const pages = {};
   let charText = BASIC_ASCII;
   let pageBytes = 0;
-  for (const page of project.pages) {
+  // 进度：每页一格，再加「打包资源」「写入文件」两格
+  const total = project.pages.length + 2;
+  for (const [index, page] of project.pages.entries()) {
+    cancelled();
     const file = join(projectDir, page.file);
     let html;
     try { html = readFileSync(file, 'utf8'); } catch (error) { throw new Error(`读不到页面文件 ${page.file}：${error.message}`); }
     pages[page.id] = inliner.page(page.file, html);
     pageBytes += Buffer.byteLength(pages[page.id]);
     charText += pageChars(html, page);
+    onProgress({ current: index + 1, total, label: `正在导出第 ${index + 1} / ${project.pages.length} 页` });
   }
   // 用户贴进来的图（修改单 addImage）也要带上
   const assetById = new Map((project.assets || []).map(asset => [asset.id, asset]));
@@ -211,7 +217,9 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
   let imageBytes = 0, fontBytes = 0, libraryBytes = 0;
   const licenseNotes = [];
   const chars = [...new Set(charText)].join('');
+  onProgress({ current: project.pages.length, total, label: '正在打包资源（图片、字体、库）' });
   for (const key of Object.keys(sources).sort()) {
+    cancelled();
     if (key.startsWith('vendor:')) {
       const path = key.slice('vendor:'.length);
       const buffer = readFileSync(inliner.vendorFile(path));
@@ -298,8 +306,11 @@ ${scriptSafe(licenseComment)}${LOADER}
 </body>
 </html>
 `;
+  cancelled();
+  onProgress({ current: project.pages.length + 1, total, label: '正在写入文件' });
   mkdirSync(dirname(resolve(outFile)), { recursive: true });
   writeFileSync(outFile, html);
+  onProgress({ current: total, total, label: '已写入文件' });
   const bytes = Buffer.byteLength(html);
   const breakdown = {
     images: imageBytes,

@@ -1,6 +1,7 @@
-// Safari 内核验证（第 10 轮 7d，第 12 轮更新清单）：用 Playwright 自带的 WebKit 跑编辑画布（隔离 iframe 里的修改）、窄窗口布局这几组浏览器测试。
+// Safari 内核验证（第 10 轮 7d，第 12 轮更新清单）：用 Playwright 自带的 WebKit 跑编辑画布（隔离 iframe 里的修改）、窄窗口布局、
+// 导出的放映版用 file:// 打开（Mac 上双击 .html 默认用 Safari）这几组浏览器测试。
 // 用法：node scripts/test-webkit.js（先 npx playwright install webkit）；--list 只列清单。
-// 不进 npm test：Actions 只装 Chromium，这组在本机按需跑。
+// 不进 npm test：GitHub Actions 在 macOS 上单独跑一个 webkit job（.github/workflows/test.yml），本机按需跑。
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ export const WEBKIT_TEST_FILES = Object.freeze([
   'test/round12-editor-canvas.test.js', // 编辑画布：隔离 iframe、选中工具条改字号、修改单撤销、贴图、文件变化重载
   'test/round12-editor-layout.test.js', // 窄窗口工具条一行、专注模式、折叠栏
   'test/image-tint.test.js',            // SVG 上传安全检查（贴图、素材库走同一条上传）
+  'test/round12-fix-export-real.test.js', // 转换来的 / 旧 HTML 导入的项目导出放映版，file:// 打开：动效、点击、翻页
 ]);
 export function webkitTestArgs() { return ['--test', ...WEBKIT_TEST_FILES]; }
 export function webkitMissingMessage() {

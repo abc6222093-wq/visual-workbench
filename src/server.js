@@ -122,6 +122,49 @@ async function defaultExporter(options) {
   if (typeof mod.exportProject !== 'function') throw fail(500, '导出功能还没准备好：缺少 exportProject');
   return mod.exportProject(options);
 }
+// 导出进度（docs/round12-contract.md 约定 2）：界面先连 SSE 再发 POST，也容忍反过来；导出结束 60 秒后清掉记录
+const PROGRESS_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const PROGRESS_KEEP_MS = 60_000;
+function createExportProgress() {
+  const records = new Map();
+  const key = (id, progressId) => `${id}\n${progressId}`;
+  const get = (id, progressId) => {
+    const k = key(id, progressId);
+    if (!records.has(k)) {
+      const record = { events: [], listeners: new Set(), done: null, running: false, controller: new AbortController(), timer: null };
+      record.expire = () => { clearTimeout(record.timer); record.timer = setTimeout(() => { for (const res of record.listeners) res.end(); records.delete(k); }, PROGRESS_KEEP_MS); record.timer.unref?.(); };
+      records.set(k, record);
+      record.expire(); // 没人用的记录（只连了 SSE 或只发了取消）也会过期
+    }
+    return records.get(k);
+  };
+  const write = (res, event, data) => { if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
+  return {
+    get,
+    progress(record, info) {
+      const data = { current: Number(info?.current) || 0, total: Number(info?.total) || 0, label: String(info?.label || '') };
+      record.events.push(data);
+      if (record.events.length > 500) record.events.splice(0, record.events.length - 500);
+      for (const res of record.listeners) write(res, 'progress', data);
+    },
+    finish(record, data) {
+      record.done = data; record.running = false;
+      for (const res of record.listeners) { write(res, 'done', data); res.end(); }
+      record.listeners.clear();
+      record.expire();
+    },
+    subscribe(record, req, res, streams) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'keep-alive' });
+      res.write(': export progress\n\n');
+      for (const data of record.events) write(res, 'progress', data);
+      if (record.done) { write(res, 'done', record.done); res.end(); return; }
+      record.listeners.add(res); streams.add(res);
+      const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 25000); ping.unref();
+      req.on('close', () => { clearInterval(ping); record.listeners.delete(res); streams.delete(res); });
+    },
+    close() { for (const record of records.values()) { clearTimeout(record.timer); record.controller.abort(); } records.clear(); },
+  };
+}
 // 在访达中显示：只允许 <数据目录>/exports/ 里面的东西（解析真实路径，挡住 ../ 和符号链接逃逸）
 function revealPath(dataDir, input) {
   if (typeof input !== 'string' || !input || input.includes('\0')) throw fail(400, '缺少要显示的路径');
@@ -205,6 +248,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
   const selfWrite = id => (rel, bytes) => watcher.noteSelfWrite(id, rel, bytes);
   // 旧 HTML 导入：后台任务，前端轮询进度
   const imports = createImportJobs({ dataDir, ...importOptions });
+  const exportProgress = createExportProgress();
   // 旧格式项目第一次打开时转换（src/convert-v2.js 先自动存版再转换）；同一项目同时只转一次
   const converting = new Map();
   const convertLegacy = (dir, id) => {
@@ -305,14 +349,38 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         let out; try { out=await deleteVersion({projectDir:dir,versionId:vid}); } catch(e) { throw fail(e.status||400,e.message); } finally { watcher.noteSelfSnapshot(id); }
         return json(res,200,{id:vid,...out});
       }
-      if(parts[3]==='export'&&parts.length===4&&req.method==='POST') { // 导出：放映版 HTML / 每页图片 / PDF
+      if(parts[3]==='export'&&parts.length===4&&req.method==='POST') { // 导出：放映版 HTML / 每页图片 / PDF；带 progressId 时可看进度、可取消
         const b=await checkedBody(req); if(!EXPORT_KINDS.includes(b.kind)) throw fail(400,'导出类型只能是 html（放映版）、images（每页图片）或 pdf');
+        if(b.progressId!==undefined&&(typeof b.progressId!=='string'||!PROGRESS_ID.test(b.progressId))) throw fail(400,'导出进度编号不对');
+        const record=b.progressId?exportProgress.get(id,b.progressId):null;
+        if(record&&(record.running||record.done)) throw fail(409,'这个导出进度编号已经用过了');
         const outDir=exportDir(dataDir,id,b.kind); let out;
-        try { out=await exporter({projectDir:dir,kind:b.kind,outDir,name:exportName(readProject(dir).project,id)}); }
-        catch(e) { rmSync(outDir,{recursive:true,force:true}); throw fail(e.status||500,`导出失败：${e.message}`); }
+        const options={projectDir:dir,kind:b.kind,outDir,name:exportName(readProject(dir).project,id)};
+        if(record) { record.running=true; clearTimeout(record.timer); Object.assign(options,{onProgress:info=>exportProgress.progress(record,info),signal:record.controller.signal}); }
+        const cancelled=()=>{ rmSync(outDir,{recursive:true,force:true}); exportProgress.finish(record,{ok:false,error:'已取消导出',cancelled:true}); return json(res,409,{error:'已取消导出',cancelled:true}); };
+        try { if(record?.controller.signal.aborted) return cancelled(); out=await exporter(options); }
+        catch(e) {
+          if(record&&(e?.cancelled||record.controller.signal.aborted)) return cancelled();
+          rmSync(outDir,{recursive:true,force:true}); const error=fail(e.status||500,`导出失败：${e.message}`);
+          if(record) exportProgress.finish(record,{ok:false,error:error.message,cancelled:false});
+          throw error;
+        }
+        if(record?.controller.signal.aborted) return cancelled(); // 导出器没理会取消、照样做完了：按用户的意思当作取消
         const finalDir=resolve(out?.outDir||outDir);
         const files=(out?.files||[]).map(f=>{ const path=resolve(finalDir,String(f.path)); return {path,bytes:Number(f.bytes)||0,name:path.startsWith(finalDir+sep)?path.slice(finalDir.length+1):basename(path)}; });
+        if(record) exportProgress.finish(record,{ok:true});
         return json(res,201,{kind:b.kind,outDir:finalDir,files});
+      }
+      if(parts[3]==='export'&&parts[4]==='progress'&&parts.length===6&&req.method==='GET') { // 导出进度（Server-Sent Events：progress / done）
+        if(!PROGRESS_ID.test(parts[5])) throw fail(400,'导出进度编号不对');
+        exportProgress.subscribe(exportProgress.get(id,parts[5]),req,res,streams); return;
+      }
+      if(parts[3]==='export'&&parts[4]==='cancel'&&parts.length===6&&req.method==='POST') { // 取消导出（可以早于 POST export 到达）
+        if(!PROGRESS_ID.test(parts[5])) throw fail(400,'导出进度编号不对');
+        for await (const chunk of req) void chunk; assertUsage();
+        const record=exportProgress.get(id,parts[5]);
+        if(record.done) return json(res,200,{cancelled:false,done:record.done});
+        record.controller.abort(); return json(res,200,{cancelled:true});
       }
       if(parts[3]==='versions'&&parts.length===4&&req.method==='GET') return json(res,200,listVersions(dir).map(p=>({id:basename(p),...JSON.parse(readFileSync(join(p,'meta.json'),'utf8'))})).reverse());
       if(parts[3]==='versions'&&parts.length===4&&req.method==='POST') { const b=await checkedBody(req); if(b.note!==undefined&&typeof b.note!=='string') throw fail(400,'Invalid note'); const v=saveVersion({projectDir:dir,note:b.note||'',by:'user'}); return json(res,201,{id:basename(v.versionDir),...v.meta}); }
@@ -333,7 +401,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     throw fail(404,'Not found');
   } catch(e) { if(res.headersSent) return res.end(); json(res,e.status||500,{error:e.message, ...(e.details?{details:e.details}:{})}); } });
   const close=server.close.bind(server);
-  server.close=callback=>{ usage.close(); watcher.close(); imports.close(); for(const stream of streams) stream.end(); streams.clear(); server.closeIdleConnections?.(); return close(callback); };
+  server.close=callback=>{ usage.close(); watcher.close(); imports.close(); exportProgress.close(); for(const stream of streams) stream.end(); streams.clear(); server.closeIdleConnections?.(); return close(callback); };
   return server;
 }
 

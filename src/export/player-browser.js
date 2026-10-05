@@ -54,8 +54,9 @@ function startPlayback() {
       page = state.index + 1;
       size = state.size;
       counter.textContent = `${state.index + 1} / ${state.count}`;
-      // 课件页盖一层透明挡板接住点击和滑动；网页页面让 iframe 自己接（滚轮滚动、点击由运行时回 nav）
-      shield.hidden = size.kind === 'web';
+      // 点击一律先到页面里（页面自己的点击动画能收到；页面没处理的点击由运行时回 nav 推进）。
+      // 只在能触摸的设备上给课件页盖透明挡板，接住手指滑动翻页（iframe 里的触摸事件到不了外层）。
+      shield.hidden = size.kind === 'web' || !touchDevice();
       fit();
     },
     onError(error) { console.error(error.message); say(`动效出错：${error.message}`); },
@@ -68,12 +69,17 @@ const back = () => { if (playback && playback.getState().index === 0) say('已�
 
 const shield = document.createElement('div');
 shield.id = 'vw-shield';
+shield.hidden = true;
 stage.append(shield);
-// 点击 / 轻点推进；手指横向滑动：向左滑前进、向右滑后退
+function touchDevice() {
+  try { return (navigator.maxTouchPoints || 0) > 0 || !!globalThis.matchMedia?.('(any-pointer: coarse)').matches; } catch { return false; }
+}
+// 挡板和页面四周的留白（点不到 iframe 的地方）：点击 / 轻点推进；手指横向滑动：向左滑前进、向右滑后退。
+// 点在 iframe 里的事件到不了这里，由页面运行时处理。
 let down = null;
-shield.addEventListener('pointerdown', event => { if (event.button > 0) return; down = { x: event.clientX, y: event.clientY }; });
-shield.addEventListener('pointercancel', () => { down = null; });
-shield.addEventListener('pointerup', event => {
+stage.addEventListener('pointerdown', event => { if (event.button > 0) return; down = { x: event.clientX, y: event.clientY }; });
+stage.addEventListener('pointercancel', () => { down = null; });
+stage.addEventListener('pointerup', event => {
   if (!down) return;
   const dx = event.clientX - down.x;
   const dy = event.clientY - down.y;
@@ -81,7 +87,7 @@ shield.addEventListener('pointerup', event => {
   if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) advance(); else back(); }
   else if (Math.hypot(dx, dy) < 24) advance();
 });
-shield.addEventListener('contextmenu', event => { event.preventDefault(); advance(); });
+stage.addEventListener('contextmenu', event => { event.preventDefault(); advance(); });
 addEventListener('keydown', event => {
   if (event.metaKey || event.ctrlKey || event.altKey || !playback) return;
   if (event.key === 'f' || event.key === 'F') {
