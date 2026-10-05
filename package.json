@@ -16,7 +16,9 @@
     "copy-pages": "node src/cli/copy-pages.js",
     "check-motion": "node src/cli/check-motion.js",
     "export": "node src/cli/export.js",
-    "export-changes": "node src/cli/export-changes.js"
+    "export-changes": "node src/cli/export-changes.js",
+    "edits": "node src/cli/edits.js",
+    "convert": "node src/cli/convert.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",

@@ -7,17 +7,20 @@ import { fileURLToPath } from 'node:url';
 export const WINDOWS_TEST_FILES = Object.freeze([
   'test/browser.test.js',
   'test/config.test.js',
+  'test/copy-pages.test.js', // v3 page files and resources copied with path rewriting.
   'test/data-dir.test.js',
-  'test/export-images.test.js', // Real browser rendering, PNG pixels and PDF output.
+  'test/round12-export-images.test.js', // Real browser rendering, PNG pixels and PDF output.
   'test/launcher.test.js',
   'test/machine-config.test.js',
   'test/platform.test.js',
   'test/portable-export-name.test.js',
   'test/project-management.test.js', // Cross-platform move/copy/restore and retention.
-  'test/round11-changes-handoff.test.js', // Handoff bundle: change list and real PNG comparison images.
+  'test/round12-handoff.test.js', // Handoff bundle: change list and real PNG comparison images.
   'test/round11-desktop-core.test.js', // Desktop shell logic without electron.
   'test/round11-desktop-icons.test.js',
-  'test/round11-handoff-route.test.js',
+  'test/round12-desktop-menu.test.js', // Edit menu / context menu logic without electron.
+  'test/round12-format.test.js', // v3 schema, page scanning, edits CLI (spawns node).
+  'test/round12-server-pages.test.js', // Page files, CORS, null-origin writes, legacy conversion.
   'test/shutdown.test.js', // Release the session and close pending HTTP writes.
   'test/session.test.js',
   'test/sync-conflicts.test.js',

@@ -1,10 +1,10 @@
-// 用户数据目录的结构：projects/、library/assets/、library/fonts/；每个项目里有 assets/ fonts/ versions/。
+// 用户数据目录的结构：projects/、library/assets/、library/fonts/；每个项目里有 pages/ assets/ fonts/ versions/（格式 v3）。
 // 数据目录在 git 之外，路径由 src/config.js 提供，这里不写死任何位置。
 import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const LAYOUT = { projects: 'projects', libraryAssets: 'library/assets', libraryFonts: 'library/fonts' };
-export const PROJECT_LAYOUT = { file: 'project.json', assets: 'assets', fonts: 'fonts', versions: 'versions' };
+export const PROJECT_LAYOUT = { file: 'project.json', pages: 'pages', assets: 'assets', fonts: 'fonts', versions: 'versions' };
 
 function ensureDir(abs, created, existed, label) {
   if (existsSync(abs)) {
@@ -28,10 +28,10 @@ export function projectDir(dataDir, projectId) {
   return join(dataDir, LAYOUT.projects, projectId);
 }
 
-/** 在项目文件夹里建 assets/ fonts/ versions/（已存在跳过）。 */
+/** 在项目文件夹里建 pages/ assets/ fonts/ versions/（已存在跳过）。 */
 export function initProjectDir(dir) {
   mkdirSync(dir, { recursive: true });
-  for (const rel of [PROJECT_LAYOUT.assets, PROJECT_LAYOUT.fonts, PROJECT_LAYOUT.versions]) {
+  for (const rel of [PROJECT_LAYOUT.pages, PROJECT_LAYOUT.assets, PROJECT_LAYOUT.fonts, PROJECT_LAYOUT.versions]) {
     mkdirSync(join(dir, rel), { recursive: true });
   }
 }

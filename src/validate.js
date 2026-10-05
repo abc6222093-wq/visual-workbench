@@ -1,246 +1,214 @@
-// 项目文件校验：格式（JSON Schema）+ 语义（编号重复、素材与字体引用存在）。动效代码的执行另由 check-motion 检查。
-// 用法见 docs/format.md「校验」一章；命令行入口是 src/cli/validate.js。
-import { readFileSync, existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+// 项目文件校验（格式 v3）：结构（JSON Schema）+ 语义（编号重复、页面文件、页面标记、修改单、资源引用）。
+// 动效的执行另由 check-motion 检查。规则见 docs/format.md §10；命令行入口是 src/cli/validate.js。
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { WEB_DEVICES, projectKind } from '../web/project-kinds.js';
+import { editStatus, describeEdit } from '../web/edits-model.js';
+import { scanMarks, scanResources, resolvePageRef } from '../web/page-marks.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = resolve(HERE, '..', 'schema', 'project.schema.json');
+export const FORMAT_VERSION = 3;
 
 export const ERROR_CODES = Object.freeze({
   INVALID_JSON: 'INVALID_JSON', // 文件不是合法 JSON
+  LEGACY_FORMAT: 'LEGACY_FORMAT', // 旧格式（v2 及更早），要先转换
   SCHEMA: 'SCHEMA', // 不符合 schema/project.schema.json
-  DUPLICATE_ID: 'DUPLICATE_ID', // 页面/元素/素材/字体编号重复
-  MISSING_ASSET_FILE: 'MISSING_ASSET_FILE', // assets[].file 在磁盘上不存在
-  MISSING_FONT_FILE: 'MISSING_FONT_FILE', // fonts[].file 在磁盘上不存在
-  UNKNOWN_ASSET_REF: 'UNKNOWN_ASSET_REF', // 图片元素引用了不存在的素材编号
-  UNKNOWN_FONT_REF: 'UNKNOWN_FONT_REF', // 文字元素引用了不存在的字体编号
-  TINT_NEEDS_ALPHA: 'TINT_NEEDS_ALPHA', // 图片元素设了 tint（重新着色），但素材是没有透明度的 JPEG
+  DUPLICATE_ID: 'DUPLICATE_ID', // 页面 / 素材 / 字体编号重复
+  DUPLICATE_EDIT_ID: 'DUPLICATE_EDIT_ID', // 修改单条目编号重复（全项目）
+  PAGE_FILE_NAME: 'PAGE_FILE_NAME', // pages[].file 不是 pages/<页面编号>.html
+  MISSING_PAGE_FILE: 'MISSING_PAGE_FILE', // 页面文件不存在
+  DUPLICATE_MARK_ID: 'DUPLICATE_MARK_ID', // 页面里 data-vw-id 重复
+  INVALID_MARK_ID: 'INVALID_MARK_ID', // data-vw-id 格式不对
+  INVALID_CAP: 'INVALID_CAP', // data-vw 里有不认识的能力
+  STALE_EDIT: 'STALE_EDIT', // 修改单「对不上」：目标编号不存在，或页面没给这种能力
+  UNKNOWN_ASSET_REF: 'UNKNOWN_ASSET_REF', // 修改单贴图引用了不存在的素材
+  MISSING_PAGE_RESOURCE: 'MISSING_PAGE_RESOURCE', // 页面引用的相对文件不存在（或越出项目文件夹）
+  UNREGISTERED_RESOURCE: 'UNREGISTERED_RESOURCE', // assets/ fonts/ 下被页面引用但没登记
+  MISSING_ASSET_FILE: 'MISSING_ASSET_FILE', // assets[].file 不存在
+  MISSING_FONT_FILE: 'MISSING_FONT_FILE', // fonts[].file 不存在
+  UNSAFE_PATH: 'UNSAFE_PATH', // 登记的文件路径含 .. 段
+  WEB_PAGE_FIELDS: 'WEB_PAGE_FIELDS', // 网页项目页面缺 device / size，或宽度不对；课件页面不该有
 });
 
-/** 素材是不是 JPEG：先看扩展名，给了项目文件夹时再看文件开头（FF D8 FF）。JPEG 没有透明度，不能重新着色。 */
-function isJpegAsset(asset, projectDir) {
-  if (!asset || typeof asset.file !== 'string') return false;
-  if (/\.jpe?g$/i.test(asset.file)) return true;
-  if (!projectDir) return false;
-  const abs = join(projectDir, asset.file);
-  let fd;
-  try {
-    if (!statSync(abs).isFile()) return false;
-    fd = openSync(abs, 'r');
-    const head = Buffer.alloc(3);
-    return readSync(fd, head, 0, 3, 0) === 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
-  } catch { return false; }
-  finally { if (fd !== undefined) closeSync(fd); }
-}
+/**
+ * 页面内容类问题：agent 改页面文件时可能暂时出现，工作台保存修改单 / 整理页面时不因它们拒绝保存
+ * （validateProjectData 的 structural 选项跳过这些检查）。
+ */
+export const CONTENT_CODES = Object.freeze(new Set([
+  'MISSING_PAGE_FILE', 'DUPLICATE_MARK_ID', 'INVALID_MARK_ID', 'INVALID_CAP', 'STALE_EDIT',
+  'MISSING_PAGE_RESOURCE', 'UNREGISTERED_RESOURCE', 'MISSING_ASSET_FILE', 'MISSING_FONT_FILE',
+]));
+
+export const LEGACY_MESSAGE = '旧格式，请先运行 npm run convert 转换';
 
 let compiled = null;
 function schemaValidator() {
   if (!compiled) {
-    const ajv = new Ajv2020({ allErrors: true, strict: true, useDefaults: false });
-    const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8'));
-    compiled = ajv.compile(schema);
+    const ajv = new Ajv2020({ allErrors: true, strict: true, strictTypes: false, useDefaults: false });
+    compiled = ajv.compile(JSON.parse(readFileSync(SCHEMA_PATH, 'utf8')));
   }
   return compiled;
 }
 
-/** 遍历页面里所有元素（含分组里的子元素），回调拿到 (element, jsonPath)。 */
-export function walkElements(elements, visit, basePath = '', key = 'elements') {
-  if (!Array.isArray(elements)) return;
-  elements.forEach((el, i) => {
-    if (!el || typeof el !== 'object') return;
-    const path = `${basePath}/${key}/${i}`;
-    visit(el, path);
-    if (Array.isArray(el.children)) walkElements(el.children, visit, path, 'children');
-  });
+function checkDuplicates(list, kind, code, errors) {
+  const seen = new Map();
+  for (const { id, path } of list) {
+    if (typeof id !== 'string') continue;
+    if (seen.has(id)) errors.push({ code, path, message: `${kind}编号重复：${id}（首次出现在 ${seen.get(id)}）` });
+    else seen.set(id, path);
+  }
 }
 
-function checkDuplicates(list, kind, basePath, errors) {
-  const seen = new Map();
-  list.forEach(({ id, path }) => {
-    if (typeof id !== 'string') return;
-    if (seen.has(id)) {
-      errors.push({
-        code: ERROR_CODES.DUPLICATE_ID,
-        path,
-        message: `${kind}编号重复：${id}（首次出现在 ${seen.get(id)}）`,
-      });
-    } else seen.set(id, path);
-  });
+const isFileAt = abs => { try { return statSync(abs).isFile(); } catch { return false; } };
+const hasDotDot = rel => typeof rel === 'string' && rel.split('/').some(s => s === '..' || s === '.');
+const decodeRef = rel => { try { return decodeURIComponent(rel); } catch { return rel; } };
+
+/** 读页面文件文本；读不到返回 null。 */
+export function readPageHtml(projectDir, page) {
+  if (!projectDir || !page || typeof page.file !== 'string' || hasDotDot(page.file)) return null;
+  const abs = join(projectDir, page.file);
+  if (!isFileAt(abs)) return null;
+  try { return readFileSync(abs, 'utf8'); } catch { return null; }
+}
+
+/** 是不是旧格式（formatVersion 小于 3 的对象）。 */
+export function isLegacyProject(data) {
+  return !!data && typeof data === 'object' && typeof data.formatVersion === 'number' && data.formatVersion < FORMAT_VERSION;
 }
 
 /**
  * 校验已解析的项目数据。
  * @param {object} data project.json 的内容
- * @param {{projectDir?: string}} [opts] 给出 projectDir 时会检查素材、字体文件是否存在
- * @returns {{ok: boolean, errors: Array<{code: string, path: string, message: string}>, info: {pendingAssets: string[]}}}
+ * @param {{projectDir?: string, structural?: boolean}} [opts]
+ *   projectDir：给出时检查页面文件、页面标记、修改单、资源引用和登记文件；
+ *   structural：只查结构（跳过 CONTENT_CODES 里的页面内容类问题），工作台保存时用。
+ * @returns {{ok: boolean, errors: Array<{code: string, path: string, message: string}>, info: object}}
  */
 export function validateProjectData(data, opts = {}) {
   const errors = [];
-  const info = { pendingAssets: [] };
-
+  const info = { staleEdits: [], pages: {} };
+  if (isLegacyProject(data)) {
+    errors.push({ code: ERROR_CODES.LEGACY_FORMAT, path: '/formatVersion', message: LEGACY_MESSAGE });
+    return { ok: false, errors, info };
+  }
   const validate = schemaValidator();
   if (!validate(data)) {
     for (const e of validate.errors) {
-      errors.push({
-        code: ERROR_CODES.SCHEMA,
-        path: e.instancePath || '/',
-        message: `${e.message}${e.params && e.params.additionalProperty ? `：${e.params.additionalProperty}` : ''}`,
-      });
+      if (e.keyword === 'if') continue; // 「if 不成立」是 then 分支错误的重复说明
+      errors.push({ code: ERROR_CODES.SCHEMA, path: e.instancePath || '/', message: `${e.message}${e.params && e.params.additionalProperty ? `：${e.params.additionalProperty}` : ''}` });
     }
   }
-  if (!data || typeof data !== 'object') return { ok: false, errors, info };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false, errors, info };
 
-  const assets = Array.isArray(data.assets) ? data.assets : [];
-  const fonts = Array.isArray(data.fonts) ? data.fonts : [];
-  const pages = Array.isArray(data.pages) ? data.pages : [];
+  const list = v => (Array.isArray(v) ? v : []);
+  const assets = list(data.assets), fonts = list(data.fonts), pages = list(data.pages);
+  const { projectDir } = opts;
+  const content = !!projectDir && !opts.structural;
 
-  // 1. 编号唯一：素材、字体、页面各自一组；元素跨全部页面一组
-  checkDuplicates(assets.map((a, i) => ({ id: a && a.id, path: `/assets/${i}` })), '素材', '/assets', errors);
-  checkDuplicates(fonts.map((f, i) => ({ id: f && f.id, path: `/fonts/${i}` })), '字体', '/fonts', errors);
-  checkDuplicates(pages.map((p, i) => ({ id: p && p.id, path: `/pages/${i}` })), '页面', '/pages', errors);
-  const allElements = [];
-  pages.forEach((page, pi) => {
-    if (!page || typeof page !== 'object') return;
-    walkElements(page.elements, (el, path) => allElements.push({ id: el.id, path: `/pages/${pi}${path}`, el }));
-  });
-  checkDuplicates(allElements, '元素', '', errors);
+  // 1. 编号唯一
+  checkDuplicates(assets.map((a, i) => ({ id: a?.id, path: `/assets/${i}` })), '素材', ERROR_CODES.DUPLICATE_ID, errors);
+  checkDuplicates(fonts.map((f, i) => ({ id: f?.id, path: `/fonts/${i}` })), '字体', ERROR_CODES.DUPLICATE_ID, errors);
+  checkDuplicates(pages.map((p, i) => ({ id: p?.id, path: `/pages/${i}` })), '页面', ERROR_CODES.DUPLICATE_ID, errors);
+  const allEdits = [];
+  pages.forEach((p, pi) => list(p?.edits).forEach((e, ei) => allEdits.push({ id: e?.id, path: `/pages/${pi}/edits/${ei}` })));
+  checkDuplicates(allEdits, '修改单条目', ERROR_CODES.DUPLICATE_EDIT_ID, errors);
 
-  // 2. 素材 / 字体文件存在
-  const assetIds = new Set(assets.map((a) => a && a.id));
-  const fontIds = new Set(fonts.map((f) => f && f.id));
-  if (opts.projectDir) {
-    const fileMissing = (rel) => {
-      if (typeof rel !== 'string') return true;
-      const abs = join(opts.projectDir, rel);
-      return !existsSync(abs) || !statSync(abs).isFile();
-    };
-    assets.forEach((a, i) => {
-      if (a && fileMissing(a.file)) errors.push({ code: ERROR_CODES.MISSING_ASSET_FILE, path: `/assets/${i}/file`, message: `素材文件不存在：${a.file}` });
-    });
-    fonts.forEach((f, i) => {
-      if (f && fileMissing(f.file)) errors.push({ code: ERROR_CODES.MISSING_FONT_FILE, path: `/fonts/${i}/file`, message: `字体文件不存在：${f.file}` });
-    });
+  // 2. 登记的文件
+  assets.forEach((a, i) => { if (hasDotDot(a?.file)) errors.push({ code: ERROR_CODES.UNSAFE_PATH, path: `/assets/${i}/file`, message: `素材路径不能含 . 或 .. 段：${a.file}` }); });
+  fonts.forEach((f, i) => { if (hasDotDot(f?.file)) errors.push({ code: ERROR_CODES.UNSAFE_PATH, path: `/fonts/${i}/file`, message: `字体路径不能含 . 或 .. 段：${f.file}` }); });
+  if (content) {
+    assets.forEach((a, i) => { if (a && typeof a.file === 'string' && !hasDotDot(a.file) && !isFileAt(join(projectDir, a.file))) errors.push({ code: ERROR_CODES.MISSING_ASSET_FILE, path: `/assets/${i}/file`, message: `素材文件不存在：${a.file}` }); });
+    fonts.forEach((f, i) => { if (f && typeof f.file === 'string' && !hasDotDot(f.file) && !isFileAt(join(projectDir, f.file))) errors.push({ code: ERROR_CODES.MISSING_FONT_FILE, path: `/fonts/${i}/file`, message: `字体文件不存在：${f.file}` }); });
   }
-  assets.forEach((a) => { if (a && a.pendingLayout === true) info.pendingAssets.push(a.id); });
+  const assetIds = new Set(assets.map(a => a?.id));
+  const registered = new Set([...assets.map(a => a?.file), ...fonts.map(f => f?.file), ...fonts.map(f => f?.license)].filter(v => typeof v === 'string'));
 
-  // 3. 元素引用的素材 / 字体存在；重新着色的图片必须有透明度
-  const assetById = new Map(assets.filter((a) => a && typeof a.id === 'string').map((a) => [a.id, a]));
-  for (const { el, path } of allElements) {
-    if (el.type === 'image' && typeof el.tint === 'string' && isJpegAsset(assetById.get(el.asset), opts.projectDir)) {
-      errors.push({ code: ERROR_CODES.TINT_NEEDS_ALPHA, path: `${path}/tint`, message: `图片元素 ${el.id} 设了重新着色（tint），但素材 ${assetById.get(el.asset).file} 是 JPEG，没有透明部分，整块会变成纯色。请换成单色的 SVG 或透明底 PNG，或去掉 tint` });
-    }
-    // 裁切不能超出源图（schema 只能约束单个数，两数之和由这里检查）；错误码 CROP_RANGE
-    const crop = el.type === 'image' ? el.crop : null;
-    if (crop && typeof crop === 'object' && (crop.x + crop.width > 1 + 1e-9 || crop.y + crop.height > 1 + 1e-9)) {
-      errors.push({ code: 'CROP_RANGE', path: `${path}/crop`, message: `图片元素 ${el.id} 的裁切超出了源图：x+width、y+height 都不能大于 1` });
-    }
-    if (el.type === 'image' && !assetIds.has(el.asset)) {
-      errors.push({ code: ERROR_CODES.UNKNOWN_ASSET_REF, path: `${path}/asset`, message: `图片元素 ${el.id} 引用了不存在的素材：${el.asset}` });
-    }
-    if (el.type === 'text' && el.font != null && !fontIds.has(el.font)) {
-      errors.push({ code: ERROR_CODES.UNKNOWN_FONT_REF, path: `${path}/font`, message: `文字元素 ${el.id} 引用了不存在的字体：${el.font}` });
-    }
-  }
-
-  // 4. 网页项目（第 11 轮；错误码 WEB_PAGE_DEVICE / WEB_PAGE_SIZE / VARIANT_REF，与 CROP_RANGE 一样直接写字面量）：每页必须有 device 与 size，宽度等于设备宽度；课件项目的页面不带这两项（课件行为完全不变）
+  // 3. 页面
   const kind = projectKind(data);
-  const pageIds = new Set(pages.map((p) => p && p.id));
-  const elementIds = new Set(allElements.map((e) => e.id));
   pages.forEach((page, pi) => {
     if (!page || typeof page !== 'object') return;
+    const base = `/pages/${pi}`;
+    if (typeof page.id === 'string' && typeof page.file === 'string' && page.file !== `pages/${page.id}.html`) {
+      errors.push({ code: ERROR_CODES.PAGE_FILE_NAME, path: `${base}/file`, message: `页面文件应为 pages/${page.id}.html，现在是 ${page.file}` });
+    }
+    // 网页项目字段
     if (kind === 'web') {
       const device = WEB_DEVICES[page.device];
-      if (!device || !page.size) errors.push({ code: 'WEB_PAGE_DEVICE', path: `/pages/${pi}`, message: `网页项目的每一页都要写 device（desktop / mobile）和 size：${page.id}` });
-      else if (page.size.width !== device.width) errors.push({ code: 'WEB_PAGE_SIZE', path: `/pages/${pi}/size/width`, message: `${page.id} 的宽度应等于${device.label}宽度 ${device.width}，现在是 ${page.size.width}` });
+      if (!device || !page.size) errors.push({ code: ERROR_CODES.WEB_PAGE_FIELDS, path: base, message: `网页项目的每一页都要写 device（desktop / mobile）和 size：${page.id}` });
+      else if (page.size.width !== device.width) errors.push({ code: ERROR_CODES.WEB_PAGE_FIELDS, path: `${base}/size/width`, message: `${page.id} 的宽度应等于${device.label}宽度 ${device.width}，现在是 ${page.size.width}` });
     } else if (page.device !== undefined || page.size !== undefined) {
-      errors.push({ code: 'WEB_PAGE_DEVICE', path: `/pages/${pi}`, message: `只有网页项目（kind: "web"）的页面才有 device / size：${page.id}` });
+      errors.push({ code: ERROR_CODES.WEB_PAGE_FIELDS, path: base, message: `只有网页项目（kind: "web"）的页面才有 device / size：${page.id}` });
     }
-    if (page.variantOf !== undefined && (!pageIds.has(page.variantOf) || page.variantOf === page.id)) errors.push({ code: 'VARIANT_REF', path: `/pages/${pi}/variantOf`, message: `${page.id} 的 variantOf 指向不存在的页面：${page.variantOf}` });
-  });
-  for (const { el, path } of allElements) {
-    if (el.variantOf !== undefined && (!elementIds.has(el.variantOf) || el.variantOf === el.id)) errors.push({ code: 'VARIANT_REF', path: `${path}/variantOf`, message: `${el.id} 的 variantOf 指向不存在的元素：${el.variantOf}` });
-  }
-
-  pages.forEach((page, pi) => {
-    const outline = page?.outline;
-    if (!outline || typeof outline !== 'object') return;
-    const list = value => Array.isArray(value) ? value : [];
-    const checkItems = (items, screens, base) => {
-      items = list(items);
-      checkDuplicates(items.map((r, i) => ({ id: r?.id, path: `${base}/${i}` })), '大纲', base, errors);
-      items.forEach((r, i) => {
-        if (!r || typeof r !== 'object') return;
-        const path = `${base}/${i}`;
-        for (const value of [r, r.baseline]) {
-          if (!value || typeof value !== 'object') continue;
-          const visibleOn = Array.isArray(value.visibleOn) ? value.visibleOn : null;
-          if (value.from > screens ||
-              (value.until != null && (value.until <= value.from || value.until > screens + 1)) ||
-              visibleOn?.some(n => n > screens) ||
-              (visibleOn && new Set(visibleOn).size !== visibleOn.length)) {
-            errors.push({ code: 'OUTLINE_RANGE', path, message: '大纲屏幕范围无效' });
-          }
-          const emphasis = list(value.emphasis);
-          const sorted = [...emphasis].sort((a, b) => (a?.start || 0) - (b?.start || 0));
-          if (emphasis.some(e => e && (e.start >= e.end || e.end > value.text?.length)) ||
-              sorted.some((e, index) => index > 0 && e?.start < sorted[index - 1]?.end)) {
-            errors.push({ code: 'OUTLINE_EMPHASIS', path, message: '强调范围重叠或超出文字' });
-          }
-          if (value.asset && !assetIds.has(value.asset)) {
-            errors.push({ code: ERROR_CODES.UNKNOWN_ASSET_REF, path, message: `大纲素材不存在：${value.asset}` });
-          }
-        }
-      });
-    };
-    const mapped = [...list(outline.rows), ...list(outline.images)].filter(r => r?.elementId);
-    checkDuplicates(mapped.map(r => ({ id: r.elementId, path: `/pages/${pi}/outline` })), '大纲映射', '', errors);
-    checkItems(outline.rows, outline.screens, `/pages/${pi}/outline/rows`);
-    checkItems(outline.images, outline.screens, `/pages/${pi}/outline/images`);
-    if (outline.baseline) {
-      checkItems(outline.baseline.rows, outline.baseline.screens, `/pages/${pi}/outline/baseline/rows`);
-      checkItems(outline.baseline.images, outline.baseline.screens, `/pages/${pi}/outline/baseline/images`);
+    const edits = list(page.edits);
+    edits.forEach((e, ei) => {
+      if (e?.kind === 'addImage' && e.after && typeof e.after.asset === 'string' && !assetIds.has(e.after.asset)) {
+        errors.push({ code: ERROR_CODES.UNKNOWN_ASSET_REF, path: `${base}/edits/${ei}/after/asset`, message: `贴进来的图片「${e.target}」引用了不存在的素材：${e.after.asset}` });
+      }
+    });
+    if (!content) return;
+    const html = readPageHtml(projectDir, page);
+    if (html === null) {
+      if (typeof page.file === 'string') errors.push({ code: ERROR_CODES.MISSING_PAGE_FILE, path: `${base}/file`, message: `页面文件不存在：${page.file}` });
+      return;
+    }
+    // 标记
+    const scan = scanMarks(html);
+    for (const id of new Set(scan.duplicates)) errors.push({ code: ERROR_CODES.DUPLICATE_MARK_ID, path: `${base}/file`, message: `${page.file} 里 data-vw-id="${id}" 重复（一页内要唯一）` });
+    for (const id of scan.invalidIds) errors.push({ code: ERROR_CODES.INVALID_MARK_ID, path: `${base}/file`, message: `${page.file} 里 data-vw-id="${id}" 不合法（字母开头，只含字母、数字、-、_）` });
+    for (const { id, cap } of scan.invalidCaps) errors.push({ code: ERROR_CODES.INVALID_CAP, path: `${base}/file`, message: `${page.file} 里「${id}」的 data-vw 有不认识的能力：${cap}（可用 text move resize color background crop）` });
+    info.pages[page.id] = { marks: scan.items.length };
+    // 修改单对得上
+    edits.forEach((e, ei) => {
+      if (!e || typeof e !== 'object') return;
+      if (editStatus(e, scan.marks, edits) === 'stale') {
+        info.staleEdits.push({ pageId: page.id, id: e.id });
+        errors.push({ code: ERROR_CODES.STALE_EDIT, path: `${base}/edits/${ei}`, message: `修改单对不上（页面里没有这个编号，或没给这种能力）：${e.id} ${describeEdit(e)}` });
+      }
+    });
+    // 资源引用
+    const seen = new Set();
+    for (const ref of scanResources(html)) {
+      const rel = resolvePageRef(page.file, ref);
+      if (rel === null) { errors.push({ code: ERROR_CODES.MISSING_PAGE_RESOURCE, path: `${base}/file`, message: `${page.file} 引用的「${ref}」越出了项目文件夹` }); continue; }
+      if (seen.has(rel)) continue;
+      seen.add(rel);
+      const decoded = decodeRef(rel);
+      const exists = isFileAt(join(projectDir, rel)) || isFileAt(join(projectDir, decoded));
+      if (!exists) { errors.push({ code: ERROR_CODES.MISSING_PAGE_RESOURCE, path: `${base}/file`, message: `${page.file} 引用的文件不存在：${ref}（${decoded}）` }); continue; }
+      if (/^(assets|fonts)\//.test(decoded) && !registered.has(decoded) && !registered.has(rel)) {
+        errors.push({ code: ERROR_CODES.UNREGISTERED_RESOURCE, path: `${base}/file`, message: `${page.file} 引用的 ${decoded} 没有登记在 project.json 的 ${decoded.startsWith('fonts/') ? 'fonts' : 'assets'} 里` });
+      }
     }
   });
 
   return { ok: errors.length === 0, errors, info };
 }
 
-/**
- * 校验磁盘上的项目：参数可以是项目文件夹，也可以是 project.json 的路径。
- */
-export function validateProject(target) {
+/** 校验磁盘上的项目：参数可以是项目文件夹，也可以是 project.json 的路径。 */
+export function validateProject(target, opts = {}) {
   const abs = resolve(target);
   const isDir = existsSync(abs) && statSync(abs).isDirectory();
   const file = isDir ? join(abs, 'project.json') : abs;
   const projectDir = dirname(file);
-  if (!existsSync(file)) {
-    return { ok: false, file, projectDir, errors: [{ code: ERROR_CODES.INVALID_JSON, path: '/', message: `找不到项目文件：${file}` }], info: { pendingAssets: [] } };
-  }
+  const empty = { staleEdits: [], pages: {} };
+  if (!existsSync(file)) return { ok: false, file, projectDir, errors: [{ code: ERROR_CODES.INVALID_JSON, path: '/', message: `找不到项目文件：${file}` }], info: empty };
   let data;
-  try {
-    data = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (e) {
-    return { ok: false, file, projectDir, errors: [{ code: ERROR_CODES.INVALID_JSON, path: '/', message: `不是合法 JSON：${e.message}` }], info: { pendingAssets: [] } };
-  }
-  const result = validateProjectData(data, { projectDir });
-  return { file, projectDir, ...result };
+  try { data = JSON.parse(readFileSync(file, 'utf8')); }
+  catch (e) { return { ok: false, file, projectDir, errors: [{ code: ERROR_CODES.INVALID_JSON, path: '/', message: `不是合法 JSON：${e.message}` }], info: empty }; }
+  return { file, projectDir, ...validateProjectData(data, { ...opts, projectDir }) };
 }
 
 /** 把校验结果整理成给人看的多行文字。 */
 export function formatResult(result) {
   const lines = [];
   const name = result.file || '(内存数据)';
-  if (result.ok) {
-    lines.push(`✓ 通过  ${name}`);
-  } else {
+  if (result.ok) lines.push(`✓ 通过  ${name}`);
+  else {
     lines.push(`✗ 未通过  ${name}（${result.errors.length} 个问题）`);
     for (const e of result.errors) lines.push(`  [${e.code}] ${e.path}  ${e.message}`);
-  }
-  if (result.info && result.info.pendingAssets.length) {
-    lines.push(`  待排版素材：${result.info.pendingAssets.join(', ')}`);
   }
   return lines.join('\n');
 }

@@ -13,6 +13,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const core = require('./lib/core.cjs');
+const editMenu = require('./lib/edit-menu.cjs');
 
 const SMOKE = process.argv.includes('--smoke');
 const SMOKE_TIMEOUT_MS = 90_000;
@@ -58,14 +59,17 @@ function showError(message, detail) {
 }
 
 function setMenu() {
-  const isMac = process.platform === 'darwin';
-  const template = [
-    ...(isMac ? [{ label: '视觉工作台', submenu: [{ role: 'about', label: '关于视觉工作台' }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { role: 'quit', label: '关闭工作台' }] }] : []),
-    { label: '编辑', submenu: [{ role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' }, { role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
-    { label: '显示', submenu: [{ role: 'reload', label: '重新载入' }, { role: 'toggleDevTools', label: '开发者工具', accelerator: isMac ? 'Alt+Command+I' : 'F12' }, { type: 'separator' }, { role: 'togglefullscreen', label: '全屏' }] },
-    { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭工作台' }] },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // 编辑菜单用 role：Mac 上 Cmd+X/C/V/A/Z 在所有输入框可用（没有这个菜单，快捷键在 Mac 上不生效）
+  Menu.setApplicationMenu(Menu.buildFromTemplate(editMenu.appMenuTemplate(process.platform === 'darwin')));
+}
+
+/** 右键：可编辑区域弹原生的剪切 / 复制 / 粘贴 / 全选；非编辑区不弹（页面 iframe 里的改字也走这里）。 */
+function attachContextMenu(contents) {
+  contents.on('context-menu', (_event, params) => {
+    const template = editMenu.contextMenuTemplate(params);
+    if (!template) return;
+    Menu.buildFromTemplate(template).popup({ window: win || undefined, frame: params.frame || undefined });
+  });
 }
 
 /** 找仓库；找不到就让用户选文件夹，写进 ~/.visual-workbench/desktop.json。 */
@@ -193,6 +197,7 @@ function createWindow() {
     e.preventDefault();
     if (core.isExternalOpenable(url)) shell.openExternal(url);
   });
+  attachContextMenu(win.webContents);
   win.once('ready-to-show', () => win.show());
   win.on('close', (e) => { if (!closing) { e.preventDefault(); shutdownAndQuit(0); } else e.preventDefault(); });
   win.webContents.once('did-finish-load', () => {

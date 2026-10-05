@@ -8,7 +8,31 @@ import { STATE_FILE } from '../src/data-dir.js';
 import { blankPage, createFromMaster, extractPalette, readMasters, setMaster } from '../src/master.js';
 import { validateProject } from '../src/validate.js';
 
-const SAMPLE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-deck');
+// 格式 v3 的示例项目（测试自己生成，不依赖 examples/）：两页 HTML、一张照片、一个 logo、一份较大的字体
+import { after as afterAll } from 'node:test';
+import { mkdirSync as mkdirSample, writeFileSync as writeSample, mkdtempSync as mkdtempSample, rmSync as rmSample } from 'node:fs';
+import { tmpdir as tmpSample } from 'node:os';
+import { join as joinSample } from 'node:path';
+function writeV3Sample(dir, id = 'sample-deck') {
+  for (const sub of ['pages', 'assets', 'fonts']) mkdirSample(joinSample(dir, sub), { recursive: true });
+  const font = Buffer.alloc(300_000); for (let i = 0; i < font.length; i++) font[i] = (i * 2654435761) >>> 24;
+  writeSample(joinSample(dir, 'fonts/Inter-Variable.ttf'), font);
+  writeSample(joinSample(dir, 'assets/photo-city.png'), Buffer.from('城市照片的内容'.repeat(50)));
+  writeSample(joinSample(dir, 'assets/logo.png'), Buffer.from('logo'));
+  writeSample(joinSample(dir, 'pages/page_cover.html'), '<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:Inter;src:url(../fonts/Inter-Variable.ttf)} body{background:#123456;color:#fafafa}</style></head><body><h1 data-vw-id="title" data-vw="text move color">视觉工作台</h1><img data-vw-id="hero" data-vw="move resize crop" src="../assets/photo-city.png"></body></html>\n');
+  writeSample(joinSample(dir, 'pages/page_two.html'), '<!doctype html><html><body><img data-vw-id="logo" data-vw="move" src="../assets/logo.png"><p data-vw-id="body" data-vw="text">第二页</p></body></html>\n');
+  const now = '2026-10-01T12:00:00.000Z';
+  const project = { format: 'visual-workbench/project', formatVersion: 3, id, name: '示例课件', createdAt: now, updatedAt: now,
+    artboard: { preset: 'slide-16x9', width: 1920, height: 1080 },
+    assets: [{ id: 'asset_photo', kind: 'image', file: 'assets/photo-city.png', name: '城市' }, { id: 'asset_logo', kind: 'image', file: 'assets/logo.png', name: 'logo' }],
+    fonts: [{ id: 'font_inter', family: 'Inter', file: 'fonts/Inter-Variable.ttf', weight: 'variable' }],
+    pages: [{ id: 'page_cover', name: '封面', file: 'pages/page_cover.html', motion: { steps: 1 }, edits: [] }, { id: 'page_two', name: '第二页', file: 'pages/page_two.html', edits: [] }] };
+  writeSample(joinSample(dir, 'project.json'), JSON.stringify(project, null, 2) + '\n');
+  return dir;
+}
+const SAMPLE_ROOT = mkdtempSample(joinSample(tmpSample(), 'vw-sample-'));
+afterAll(() => rmSample(SAMPLE_ROOT, { recursive: true, force: true }));
+const SAMPLE = writeV3Sample(joinSample(SAMPLE_ROOT, 'sample-deck'));
 const COLOR_RE = /^#[0-9a-f]{6}([0-9a-f]{2})?$/;
 
 function withTmp(fn) {
@@ -34,6 +58,17 @@ function snapshot(dir, base = dir, out = new Map()) {
 function makeMaster(tmp) {
   const masterDir = join(tmp, 'projects', 'sample-deck');
   cpSync(SAMPLE, masterDir, { recursive: true });
+  // 母版第 1 页有一条修改单；有一张素材库来的图（页面没引用，也要带走）和一个字体许可证文件
+  const project = JSON.parse(readFileSync(join(masterDir, 'project.json'), 'utf8'));
+  project.pages[0].edits = [{ id: 'ed_master01', target: 'title', kind: 'color', before: { color: '#fafafa' }, after: { color: '#ff0000' } }];
+  writeFileSync(join(masterDir, 'assets/lib.png'), 'library image');
+  writeFileSync(join(masterDir, 'assets/unused.png'), 'not from library');
+  project.assets.push({ id: 'asset_lib', kind: 'image', file: 'assets/lib.png', source: { type: 'library', from: 'lib.png' } }, { id: 'asset_unused', kind: 'image', file: 'assets/unused.png', source: { type: 'upload' } });
+  writeFileSync(join(masterDir, 'fonts/Inter-OFL.txt'), 'OFL');
+  project.fonts[0].license = 'fonts/Inter-OFL.txt';
+  writeFileSync(join(masterDir, 'project.json'), JSON.stringify(project, null, 2));
+  mkdirSync(join(masterDir, 'import'), { recursive: true });
+  writeFileSync(join(masterDir, 'import', 'old.html'), '<p>old</p>');
   mkdirSync(join(masterDir, 'code'), { recursive: true });
   writeFileSync(join(masterDir, 'code', 'intro.js'), 'export const intro = 1;\n');
   mkdirSync(join(masterDir, 'motion', 'a'), { recursive: true });
@@ -98,212 +133,133 @@ test('setMaster：保留状态文件里的未知字段', () => {
   });
 });
 
-test('blankPage：默认白底空白页，可传入背景', () => {
-  assert.deepEqual(blankPage(), { id: 'page_first', name: '第 1 页', background: '#ffffff', elements: [] });
-  assert.equal(blankPage('#000000').background, '#000000');
+test('blankPage：v3 空白页条目，页面文件在 pages/ 下', () => {
+  assert.deepEqual(blankPage(), { id: 'page_first', name: '第 1 页', file: 'pages/page_first.html', edits: [] });
 });
 
 // ---------- 从母版新建 ----------
 
-test('createFromMaster：新项目校验通过，只有一页空白页，背景与画板来自母版', () => {
+test('createFromMaster：新项目校验通过；起始页 = 母版第 1 页的副本（文件、资源、修改单），画板来自母版', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    const master = JSON.parse(readFileSync(join(masterDir, 'project.json'), 'utf8'));
-    const r = create(tmp, masterDir);
-    const v = validateProject(r.destProjectDir);
-    assert.equal(v.ok, true, JSON.stringify(v.errors));
-
-    const p = JSON.parse(readFileSync(join(r.destProjectDir, 'project.json'), 'utf8'));
-    assert.deepEqual(p, r.project);
-    assert.equal(p.id, 'series-two');
-    assert.equal(p.name, '系列第二讲');
-    assert.equal(p.format, master.format);
-    assert.equal(p.formatVersion, master.formatVersion);
-    assert.equal(p.createdAt, '2026-10-02T08:00:00.000Z');
-    assert.equal(p.updatedAt, p.createdAt);
-    assert.deepEqual(p.artboard, master.artboard);
-    assert.equal(p.pages.length, 1);
-    assert.deepEqual(p.pages[0].elements, []);
-    assert.equal(p.pages[0].motion, undefined); // 格式 v2：空白页没有动效
-    assert.deepEqual(p.pages[0].background, master.pages[0].background);
-    for (const d of ['assets', 'fonts', 'versions']) assert.ok(existsSync(join(r.destProjectDir, d)), `${d}/ 应存在`);
+    const { project, destProjectDir } = create(tmp, masterDir);
+    const check = validateProject(destProjectDir);
+    assert.equal(check.ok, true, JSON.stringify(check.errors));
+    assert.equal(project.formatVersion, 3);
+    assert.equal(project.pages.length, 1);
+    assert.equal(project.pages[0].id, 'page_cover');
+    assert.equal(readFileSync(join(destProjectDir, 'pages/page_cover.html'), 'utf8'), readFileSync(join(masterDir, 'pages/page_cover.html'), 'utf8'));
+    assert.equal(project.pages[0].edits[0].after.color, '#ff0000');
+    assert.ok(existsSync(join(destProjectDir, 'assets/photo-city.png')));
+    assert.ok(project.assets.some((a) => a.file === 'assets/photo-city.png'));
+    assert.deepEqual(project.artboard, JSON.parse(readFileSync(join(masterDir, 'project.json'), 'utf8')).artboard);
+    assert.equal(project.id, 'series-two');
+    assert.equal(project.name, '系列第二讲');
   });
 });
 
-test('createFromMaster：带走全部字体登记与文件（含许可证 Inter-OFL.txt）', () => {
+test('createFromMaster：带走全部字体与许可证；只带素材库来的素材和起始页用到的素材', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    const master = JSON.parse(readFileSync(join(masterDir, 'project.json'), 'utf8'));
-    const r = create(tmp, masterDir);
-    assert.deepEqual(r.project.fonts, master.fonts);
-    assert.deepEqual(r.copiedFonts, ['font_inter']);
-    for (const rel of ['fonts/Inter-Variable.ttf', 'fonts/Inter-OFL.txt']) {
-      assert.deepEqual(readFileSync(join(r.destProjectDir, rel)), readFileSync(join(masterDir, rel)), `${rel} 应一致`);
-    }
+    const { project, destProjectDir } = create(tmp, masterDir);
+    assert.deepEqual(project.fonts.map((f) => f.id), ['font_inter']);
+    assert.ok(existsSync(join(destProjectDir, 'fonts/Inter-Variable.ttf')));
+    assert.ok(existsSync(join(destProjectDir, 'fonts/Inter-OFL.txt')));
+    const ids = project.assets.map((a) => a.id).sort();
+    assert.ok(ids.includes('asset_lib'));
+    assert.ok(!ids.includes('asset_unused'));
+    assert.ok(!ids.includes('asset_logo'), '第 2 页的素材不带');
+    assert.equal(existsSync(join(destProjectDir, 'assets/unused.png')), false);
+    for (const a of project.assets) assert.equal(a.pendingLayout, undefined);
   });
 });
 
-test('createFromMaster：只带素材库来的素材，文件存在且 pendingLayout 为 false', () => {
+test('createFromMaster：series.json 记 master、palette、pages，母版各页 HTML 复制到 series/pages/ 做参考', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    const r = create(tmp, masterDir);
-    assert.deepEqual(r.project.assets.map((a) => a.id), ['asset_logo01']);
-    assert.deepEqual(r.copiedAssets, ['asset_logo01']);
-    const a = r.project.assets[0];
-    assert.equal(a.pendingLayout, false);
-    assert.equal(a.source.type, 'library');
-    assert.ok(existsSync(join(r.destProjectDir, a.file)));
-    assert.equal(existsSync(join(r.destProjectDir, 'assets', 'photo-city.png')), false);
-    assert.equal(existsSync(join(r.destProjectDir, 'assets', 'new-photo.png')), false);
+    const { destProjectDir, palette } = create(tmp, masterDir);
+    const series = JSON.parse(readFileSync(join(destProjectDir, 'series.json'), 'utf8'));
+    assert.equal(series.master, 'sample-deck');
+    assert.equal(series.motions, undefined);
+    assert.deepEqual(series.pages, [
+      { pageId: 'page_cover', name: '封面', file: 'series/pages/page_cover.html' },
+      { pageId: 'page_two', name: '第二页', file: 'series/pages/page_two.html' },
+    ]);
+    for (const p of series.pages) assert.equal(readFileSync(join(destProjectDir, p.file), 'utf8'), readFileSync(join(masterDir, 'pages', `${p.pageId}.html`), 'utf8'));
+    assert.deepEqual(series.palette, palette);
+    assert.ok(palette.includes('#123456') && palette.includes('#fafafa'));
+    for (const c of palette) assert.match(c, COLOR_RE);
   });
 });
 
-test('createFromMaster：复制动效代码等附属文件，不复制 versions/ 与隐藏文件', () => {
+test('createFromMaster：复制附属文件，不复制 versions/、import/、隐藏文件，母版的 pages/ 不混进新项目', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    const r = create(tmp, masterDir);
-    assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); // README.md 来自示例项目，也是附属文件
-    for (const rel of r.copiedExtra) {
-      assert.deepEqual(readFileSync(join(r.destProjectDir, rel)), readFileSync(join(masterDir, rel)), `${rel} 应一致`);
-    }
-    assert.deepEqual(readdirSync(join(r.destProjectDir, 'versions')), []);
-    assert.equal(existsSync(join(r.destProjectDir, '.hidden')), false);
+    const { destProjectDir, copiedExtra } = create(tmp, masterDir);
+    assert.deepEqual(copiedExtra, ['code/intro.js', 'motion/a/b.js']);
+    assert.equal(existsSync(join(destProjectDir, 'versions', 'v1')), false);
+    assert.equal(existsSync(join(destProjectDir, 'import')), false);
+    assert.equal(existsSync(join(destProjectDir, '.hidden')), false);
+    assert.deepEqual(readdirSync(join(destProjectDir, 'pages')), ['page_cover.html']);
   });
 });
 
 test('createFromMaster：附属文件里的符号链接被跳过', (t) => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    try { symlinkSync(join(masterDir, 'code', 'intro.js'), join(masterDir, 'code', 'link.js')); symlinkSync(join(masterDir, 'motion'), join(masterDir, 'motion-link')); }
-    catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; t.diagnostic('Windows 未开启开发者模式或管理员权限，无法创建符号链接；本用例只省略链接部分，其余断言照常执行'); const r = create(tmp, masterDir); assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); return; }
-    const r = create(tmp, masterDir);
-    assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); // README.md 来自示例项目，也是附属文件
-    assert.equal(existsSync(join(r.destProjectDir, 'code', 'link.js')), false);
-    assert.equal(existsSync(join(r.destProjectDir, 'motion-link')), false);
+    try { symlinkSync(join(masterDir, 'code', 'intro.js'), join(masterDir, 'code', 'link.js')); }
+    catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; t.diagnostic('Windows 无法创建符号链接，跳过'); return; }
+    const { destProjectDir } = create(tmp, masterDir);
+    assert.equal(existsSync(join(destProjectDir, 'code', 'link.js')), false);
   });
 });
 
-test('createFromMaster：写出 series.json（来源与配色）', () => {
-  withTmp((tmp) => {
-    const masterDir = makeMaster(tmp);
-    const r = create(tmp, masterDir);
-    const raw = readFileSync(join(r.destProjectDir, 'series.json'), 'utf8');
-    assert.ok(raw.endsWith('\n'));
-    const s = JSON.parse(raw);
-    assert.equal(raw, JSON.stringify(s, null, 2) + '\n');
-    assert.equal(s.master, 'sample-deck');
-    assert.equal(s.masterName, '示例课件 · 格式演示');
-    assert.equal(s.createdFromAt, '2026-10-02T08:00:00.000Z');
-    assert.ok(Array.isArray(s.palette) && s.palette.length > 0);
-    for (const c of s.palette) assert.match(c, COLOR_RE);
-    assert.deepEqual(s.palette, r.palette);
-  });
-});
-
-test('createFromMaster：母版自带的 series.json 被新文件覆盖', () => {
-  withTmp((tmp) => {
-    const masterDir = makeMaster(tmp);
-    writeFileSync(join(masterDir, 'series.json'), JSON.stringify({ master: 'old-master' }));
-    const r = create(tmp, masterDir);
-    const s = JSON.parse(readFileSync(join(r.destProjectDir, 'series.json'), 'utf8'));
-    assert.equal(s.master, 'sample-deck');
-  });
-});
-
-test('createFromMaster：母版所有文件逐字节不变', () => {
+test('createFromMaster：母版所有文件逐字节不变；之后改新项目也不影响母版', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
     const before = snapshot(masterDir);
-    create(tmp, masterDir);
+    const { destProjectDir } = create(tmp, masterDir);
+    writeFileSync(join(destProjectDir, 'pages/page_cover.html'), '<p>改了</p>');
+    writeFileSync(join(destProjectDir, 'fonts/Inter-Variable.ttf'), 'changed');
     assert.deepEqual(snapshot(masterDir), before);
   });
 });
 
-test('createFromMaster：之后修改新项目，母版对应文件不变（互不影响）', () => {
-  withTmp((tmp) => {
-    const masterDir = makeMaster(tmp);
-    const before = snapshot(masterDir);
-    const r = create(tmp, masterDir);
-    writeFileSync(join(r.destProjectDir, 'fonts', 'Inter-Variable.ttf'), 'changed');
-    writeFileSync(join(r.destProjectDir, 'code', 'intro.js'), 'changed');
-    writeFileSync(join(r.destProjectDir, 'motion', 'a', 'b.js'), 'changed');
-    writeFileSync(join(r.destProjectDir, 'assets', 'logo.png'), 'changed');
-    assert.deepEqual(snapshot(masterDir), before);
-  });
-});
-
-test('createFromMaster：目标已存在时抛错，不覆盖也不删除', () => {
+test('createFromMaster：目标已存在、编号不合法、名称为空、母版是旧格式时抛错，不留下新目录', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
     const dest = join(tmp, 'projects', 'series-two');
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, 'keep.txt'), 'keep');
     assert.throws(() => create(tmp, masterDir), /已存在/);
-    assert.deepEqual(readdirSync(dest), ['keep.txt']);
-  });
-});
-
-test('createFromMaster：newId 不合法或 newName 为空时抛错，不留下新目录', () => {
-  withTmp((tmp) => {
-    const masterDir = makeMaster(tmp);
-    for (const bad of ['Bad_ID', '-abc', 'a', '']) {
-      const dest = join(tmp, 'projects', 'x-bad');
-      assert.throws(() => create(tmp, masterDir, { newId: bad, destProjectDir: dest }), /编号不合法/);
-      assert.equal(existsSync(dest), false);
-    }
-    for (const name of ['', '   ', undefined]) {
-      assert.throws(() => create(tmp, masterDir, { newName: name }), /名称不能为空/);
-      assert.equal(existsSync(join(tmp, 'projects', 'series-two')), false);
-    }
+    assert.equal(readFileSync(join(dest, 'keep.txt'), 'utf8'), 'keep');
+    rmSync(dest, { recursive: true });
+    assert.throws(() => create(tmp, masterDir, { newId: 'Bad Id' }), /编号不合法/);
+    assert.throws(() => create(tmp, masterDir, { newName: '  ' }), /名称不能为空/);
+    const file = join(masterDir, 'project.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), formatVersion: 2 }));
+    assert.throws(() => create(tmp, masterDir), /旧格式/);
+    assert.equal(existsSync(dest), false);
   });
 });
 
 test('createFromMaster：母版字体文件缺失时抛错并清理新目录', () => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    rmSync(join(masterDir, 'fonts', 'Inter-Variable.ttf'));
+    rmSync(join(masterDir, 'fonts/Inter-Variable.ttf'));
     assert.throws(() => create(tmp, masterDir), /字体文件不存在/);
     assert.equal(existsSync(join(tmp, 'projects', 'series-two')), false);
   });
 });
 
-// ---------- 配色提取 ----------
-
-test('extractPalette：按次数排序、去重、统一小写、含渐变色标', () => {
-  const project = {
-    pages: [
-      {
-        background: '#FFFFFF',
-        elements: [
-          { type: 'text', color: '#111111' },
-          { type: 'text', color: '#111111' },
-          { type: 'shape', fill: '#AA0000', stroke: { color: '#00BB00', width: 1 } },
-          {
-            type: 'group',
-            children: [{ type: 'text', color: '#111111' }, { type: 'shape', fill: null, stroke: null }],
-          },
-        ],
-      },
-      {
-        background: { type: 'linear', angle: 90, stops: [{ offset: 0, color: '#FfFfFf' }, { offset: 1, color: '#123456CC' }] },
-        elements: [
-          { type: 'shape', fill: { type: 'radial', stops: [{ offset: 0, color: '#aa0000' }, { offset: 1, color: '#ABCDEF' }] } },
-          { type: 'image', asset: 'x' },
-        ],
-      },
-    ],
-  };
-  // #111111×3，#ffffff×2，#aa0000×2（首次出现在 #ffffff 之后），其余各 1 次按首次出现顺序
-  assert.deepEqual(extractPalette(project), ['#111111', '#ffffff', '#aa0000', '#00bb00', '#123456cc', '#abcdef']);
-  assert.deepEqual(extractPalette(project, 2), ['#111111', '#ffffff']);
-  assert.deepEqual(extractPalette({ pages: [] }), []);
-});
-
-test('extractPalette：sample-deck 的配色都是合法小写颜色且不重复', () => {
-  const sample = JSON.parse(readFileSync(join(SAMPLE, 'project.json'), 'utf8'));
-  const palette = extractPalette(sample);
-  assert.ok(palette.length > 0 && palette.length <= 12);
-  assert.equal(new Set(palette).size, palette.length);
-  for (const c of palette) assert.match(c, COLOR_RE);
-  assert.equal(palette[0], '#ffffff');
+test('extractPalette：设计卡片颜色 + 页面里的十六进制颜色，按次数排序、去重、统一小写', () => {
+  withTmp((tmp) => {
+    const dir = join(tmp, 'p');
+    mkdirSync(join(dir, 'pages'), { recursive: true });
+    writeFileSync(join(dir, 'pages/page_a.html'), '<style>a{color:#ABC} b{color:#aabbcc} c{background:#112233}</style>');
+    const project = { designCard: { colors: ['#112233'] }, pages: [{ id: 'page_a', file: 'pages/page_a.html' }] };
+    assert.deepEqual(extractPalette(project, 12, dir), ['#112233', '#aabbcc']); // 次数相同按首次出现（卡片在前）
+    assert.deepEqual(extractPalette(project), ['#112233']);
+    assert.deepEqual(extractPalette({}), []);
+  });
 });

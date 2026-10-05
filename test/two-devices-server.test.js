@@ -24,12 +24,12 @@ test('新鲜会话在后端阻挡读写，用户确认已看到的电脑后才�
  assert.equal((await two('/api/session/confirm','POST',{tokens:state.fresh.map(s=>s.token)})).data.blocked,false);
  assert.equal((await two('/api/projects')).status,200);assert.equal((await one('/api/projects')).status,423);
 });
-test('打开项目列出冲突副本；两种大纲说明均带当前数据目录',async t=>{
+test('打开项目列出冲突副本；「复制给 agent」带当前数据目录',async t=>{
  const root=temp(t),dataDir=join(root,'data'),request=await start(t,{dataDir});await request('/api/projects','POST',{id:'example',name:'Example'});
  const file=join(dataDir,'projects/example/project.json');writeFileSync(join(dataDir,'projects/example/project (1).json'),readFileSync(file));
  assert.deepEqual((await request('/api/projects/example')).data.syncConflicts,['project (1).json']);
- for(const mode of ['fill','layout']){const response=await request(`/api/projects/example/outline/brief?mode=${mode}`);assert.equal(response.status,200);assert.ok(response.data.text.includes(dataDir));assert.match(response.data.text,mode==='fill'?/只填不排/:/请按大纲排版/);}
- assert.equal((await request('/api/projects/example/outline/brief?mode=bad')).status,400);
+ const response=await request('/api/projects/example/brief');assert.equal(response.status,200);assert.ok(response.data.text.includes(dataDir));
+ assert.equal((await request('/api/projects/example/brief?pageIds=page_missing')).status,400);
 });
 
 test('上传正文期间同步到新会话，写入前再次检查并拒绝修改',async t=>{
