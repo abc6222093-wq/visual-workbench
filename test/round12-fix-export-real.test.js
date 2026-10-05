@@ -211,7 +211,8 @@ test('课件页：页面自己的点击处理能收到点击（挡板不再盖�
     await settle(page);
     // 引擎能力探针：放映版依赖的几样东西逐个试，结果写进测试输出（WebKit job 里据此判断 Safari 卡在哪一步）
     const probe = async (where, fn) => { try { return await where.evaluate(fn); } catch (error) { return `失败：${String(error.message || error).split('\n')[0]}`; } };
-    const iframe = page.frames().find(f => f !== page.mainFrame() && f.url() === 'about:srcdoc');
+    // 按元素取 iframe 的帧（Chrome 154 起把 srcdoc 帧的 url 报成 about:blank，按 url 找会找不到）
+    const iframe = await (await page.locator('#vw-layer iframe:not([aria-hidden])').elementHandle())?.contentFrame();
     const probes = {
       parentBlobModule: await probe(page, async () => { const url = URL.createObjectURL(new Blob(['export default 1'], { type: 'text/javascript' })); return (await import(url)).default === 1 ? 'ok' : 'bad'; }),
       parentDataModule: await probe(page, async () => ((await import('data:text/javascript;charset=utf-8,export%20default%201')).default === 1 ? 'ok' : 'bad')),

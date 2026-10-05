@@ -1208,6 +1208,9 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         if (k) gotoScreen(k).then(go, error => { postError(error, 'screen'); go(); });
         else go();
       } else {
+        // 先报 loaded（文档已加载、修改单已叠上），放映壳据此把 iframe 显示出来；ready 要等 init 跑完，
+        // 而 init 里 await 的入场动画在 visibility:hidden 的 iframe 里不会走（Chromium 不推进隐藏 iframe 的动画），先显示才能就绪
+        post({ vw: 'loaded', pageId: cfg.pageId, mode, height: contentHeight() });
         startPlay().then(() => { if (!motion) return; post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: motion.total, nextStep: motion.nextStep }); });
       }
     };

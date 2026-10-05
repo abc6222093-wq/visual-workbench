@@ -141,7 +141,7 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.
  *   html 不给时按 pageFileUrl(project, page, assetBase) 取；edits 不给时用 page.edits。
  * 返回 { iframe, ready, send, setEdits, select, set, addImage, removeImage, step, toEnd, leave, settle, screen, setMode, scrollTo, setUiScale, destroy, reload }
  *   screen(k) → Promise<screen-done 消息>：edit 模式里原地快进到第 k 屏（applied:true）；k 比当前屏小时不能原地回退（applied:false），调用方用 reload({ screen: k }) 另建。
- *   ready：Promise<ready 消息>（reload 后换成新的）；step()/toEnd() → Promise<step-done 消息>；leave(dir) → Promise<left 消息>；settle(ms) → Promise<settled 消息>
+ *   ready：Promise<ready 消息>（reload 后换成新的）；loaded：Promise<loaded 或 ready 消息>（play 模式里文档加载完、修改单叠完，init 可能还在跑；reload 后换成新的）；step()/toEnd() → Promise<step-done 消息>；leave(dir) → Promise<left 消息>；settle(ms) → Promise<settled 消息>
  *   页面 → 父的所有消息都会交给 onMessage（ready、edit、select、editing、paste-image、menu、step-done、left、height、scroll、key、nav、error、settled）。
  */
 export function createPageFrame(options = {}) {
@@ -157,15 +157,16 @@ export function createPageFrame(options = {}) {
   };
   applySize();
   let destroyed = false, isReady = false, queue = [], generation = 0;
-  let resolveReady;
+  let resolveReady, resolveLoaded;
   const waiters = { 'step-done': [], left: [], settled: [], 'screen-done': [] };
   const api = {};
-  const newReady = () => { isReady = false; api.ready = new Promise(resolve => { resolveReady = resolve; }); };
+  const newReady = () => { isReady = false; api.ready = new Promise(resolve => { resolveReady = resolve; }); api.loaded = new Promise(resolve => { resolveLoaded = resolve; }); };
   newReady();
   const listener = event => {
     if (destroyed || event.source !== iframe.contentWindow) return;
     const msg = event.data;
     if (!msg || typeof msg !== 'object' || typeof msg.vw !== 'string') return;
+    if (msg.vw === 'loaded' || msg.vw === 'ready') resolveLoaded(msg);
     if (msg.vw === 'ready') {
       isReady = true;
       const pending = queue; queue = [];
@@ -200,7 +201,9 @@ export function createPageFrame(options = {}) {
       if (destroyed || mine !== generation) return;
       options.onError?.({ vw: 'error', phase: 'load', message: error.message, stack: String(error.stack || '') });
       options.onMessage?.({ vw: 'error', phase: 'load', message: error.message });
-      resolveReady({ vw: 'ready', pageId: page?.id, failed: true, error: error.message, steps: 0, nextStep: 0, marks: [], height: 0 });
+      const failed = { vw: 'ready', pageId: page?.id, failed: true, error: error.message, steps: 0, nextStep: 0, marks: [], height: 0 };
+      resolveLoaded(failed);
+      resolveReady(failed);
     }
   }
   Object.assign(api, {

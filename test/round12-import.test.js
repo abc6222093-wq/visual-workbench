@@ -14,7 +14,7 @@ import { startStatic } from '../src/import-html/analyze.js';
 import { scanMarks, scanResources, resolvePageRef } from '../web/page-marks.js';
 
 // 第 12 轮 · 导入保留原网页：按页切开，每页一个 pages/<页面编号>.html（原 HTML、CSS、脚本、动画都在），
-// 文字标 text color、图片标 move resize crop，资源复制进 assets/ fonts/，原文件逐字节复制进 import/。
+// 文字标 text move color、图片标 move resize crop，资源复制进 assets/ fonts/，原文件逐字节复制进 import/。
 const FX = fileURLToPath(new URL('./fixtures/legacy-html/', import.meta.url));
 const SITE = fileURLToPath(new URL('./fixtures/web-site/', import.meta.url));
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -70,7 +70,7 @@ async function runImport(body) {
   return { job, project, projectDir, html };
 }
 const items = html => scanMarks(html).items;
-const texts = html => items(html).filter(m => m.caps.join(' ') === 'text color');
+const texts = html => items(html).filter(m => m.caps.join(' ') === 'text move color');
 const imgs = html => items(html).filter(m => m.tag === 'img');
 /** 直接用浏览器打开生成的页面文件：没有页面错误；返回可见文字和动画数。 */
 async function openPage(file, viewport = { width: 1920, height: 1080 }) {
@@ -105,7 +105,7 @@ test('round12 import: deck-data JSON — each slide document kept whole, CSS ani
   assert.deepEqual(project.pages.map(p => p.name), ['课件第一页', '课件第二页']);
   for (const h of html) { assert.match(h, /@keyframes rise/); assert.match(h, /animation:rise 1\.5s/); }
   assert.deepEqual(texts(html[0]).map(m => m.id), ['t1', 't2']);
-  assert.match(html[0], /<h1 data-vw-id="t1" data-vw="text color" data-vw-origin="h1">课件第一页<\/h1>/);
+  assert.match(html[0], /<h1 data-vw-id="t1" data-vw="text move color" data-vw-origin="h1">课件第一页<\/h1>/);
   assert.deepEqual(imgs(html[0]).map(m => [m.id, m.caps.join(' ')]), [['i1', 'move resize crop']]);
   assert.equal(project.assets.length, 1); assert.equal(project.assets[0].kind, 'image'); assert.match(html[0], new RegExp(`src="\\.\\./${project.assets[0].file}"`));
   assert.doesNotMatch(html[0], /data:image/, '内嵌图片复制进 assets/');

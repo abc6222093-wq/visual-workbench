@@ -1,4 +1,6 @@
 // 放映控制（第 12 轮）：当前页一个 play 模式的 iframe + 预加载下一页（隐藏）；点击 / 右键 / 方向键推进，上一页用 fast:true 重建（停在最后一步）。
+// 换页顺序：新页 loaded（文档加载完、修改单叠完）→ 显示新页、销毁旧页 → 等 ready（init 跑完）。
+// 不能先等 ready 再显示：init 里 await 的入场动画在 visibility:hidden 的 iframe 里不会走（Chromium 不推进隐藏 iframe 的动画），会一直停在「正在准备放映…」。
 // 每页的步数来自 project.json 的 motion.steps。放映页 player.html、导出放映版都可以用它。
 //
 // createPlayback({ project, container, pageId?, startAtEnd?, assetBase?, loadHtml?, frameOptions?, onChange?, onError?, onEnd?, onExit? })
@@ -11,6 +13,8 @@ import { createPageFrame, frameSize } from './page-frame.js';
 
 const LEAVE_TIMEOUT = 3000;
 const within = (promise, ms) => Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(null), ms))]);
+// 等父页面画两帧（最多 200ms）：刚显示的跨源 iframe 要画出一帧之后 Chromium 才会把鼠标事件路由进去，就绪前的点击会被丢掉
+const painted = () => within(new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), 200);
 
 export function createPlayback({ project, container, pageId, startAtEnd = false, assetBase, loadHtml, frameOptions = {}, onChange, onError, onEnd, onExit } = {}) {
   const pages = project.pages || [];
@@ -55,15 +59,20 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
     let frame;
     if (!atEnd && preload && preload.index === i) { frame = preload.frame; preload = null; }
     else frame = await makeFrame(i, { fast: atEnd });
-    const ready = await frame.ready;
+    await frame.loaded;
     if (destroyed) { frame.destroy(); return; }
     const old = current;
     index = i;
-    current = { frame, index: i, nextStep: ready?.nextStep ?? 0, total: ready?.steps ?? (pages[i].motion?.steps || 0) };
+    current = null; // ready 之前不接收这一页的 nav / key（guard 里 busy 也拦着）
     sizeContainer();
     showFrame(frame.iframe);
     try { frame.iframe.focus({ preventScroll: true }); } catch { /* 忽略 */ }
     old?.frame.destroy();
+    const ready = await frame.ready;
+    if (destroyed) { frame.destroy(); return; }
+    await painted();
+    if (destroyed) { frame.destroy(); return; }
+    current = { frame, index: i, nextStep: ready?.nextStep ?? 0, total: ready?.steps ?? (pages[i].motion?.steps || 0) };
     if (preload && preload.index !== i + 1) { preload.frame.destroy(); preload = null; }
     if (!preload && i + 1 < pages.length) preload = { index: i + 1, frame: await makeFrame(i + 1) };
     changed();

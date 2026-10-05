@@ -1,6 +1,6 @@
 # 导入 HTML / 网页（第 12 轮：保留原网页）
 
-把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改（`text color`），图片标成可裁切（`move resize crop`），纯色色块标成可移动缩放改底色（`move resize background`），整页背景只标 `background`。原文件原样复制进项目的 `import/`，绝不修改。导入**永远新建项目**，不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
+把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改、可挪动（`text move color`），图片标成可裁切（`move resize crop`），纯色色块标成可移动缩放改底色（`move resize background`），整页背景只标 `background`。原文件原样复制进项目的 `import/`，绝不修改。导入**永远新建项目**，不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
 
 第 10、11 轮的做法（把页面拆成文字 / 图片 / 形状元素、截图块、分组）已经取消。
 
@@ -52,7 +52,7 @@
   - 原页面宽度和画板不同时（例如 960 宽的 reveal 幻灯片放进 1920 的画板），给这一页加 `zoom`；
   - 保底切分：整份文档，第 N 屏（从 0 数）追加 `html{overflow:hidden} body{margin-top:-N×H px;height:auto;overflow:visible}` 露出这一屏。
 - **自动标记**（编号在一页内唯一）：
-  - 文字：`h1`–`h6`、`p`、`li`、`blockquote`、`figcaption`、`td` / `th`、`dt` / `dd`、`label`、`button`、`a`、`caption`、`summary`、`legend`，以及直接含文字的 `span` / `div` 等，并且里面没有块级元素、图片、表单控件 → `data-vw-id="t<N>" data-vw="text color"`。标了的元素里面不再标（行内格式 `<strong>`、`<span>` 等留在文字里）。
+  - 文字：`h1`–`h6`、`p`、`li`、`blockquote`、`figcaption`、`td` / `th`、`dt` / `dd`、`label`、`button`、`a`、`caption`、`summary`、`legend`，以及直接含文字的 `span` / `div` 等，并且里面没有块级元素、图片、表单控件 → `data-vw-id="t<N>" data-vw="text move color"`（文字也能挪动：导入的多是 agent 在别处做好的绝对定位设计；流式布局里挪动是叠 `translate`，不改排版）。标了的元素里面不再标（行内格式 `<strong>`、`<span>` 等留在文字里）。
   - 图片：每个 `<img>` → `data-vw-id="i<N>" data-vw="move resize crop"`。
   - 纯色色块（第 12 轮修正）：有可见底色（计算后的 `background-color` 不透明，或 `background-image` 是渐变；`background-image` 是图片 `url()` 的不算）、自身没有直接文字（可以有子元素，例如卡片底里的标题照旧标文字）、不是 `img` / `svg` / `video` / `canvas`、显示着并且有尺寸的块（色条、卡片底、印章底、装饰圆点等）→ `data-vw-id="b<N>" data-vw="move resize background"`。
   - 整页背景：`<html>`、`<body>`、这一页的根（`.slide` / `section` 等，加了 `data-vw-import-page` 的那个）和它的祖先容器有底色时，以及盒子 ≥ 页面尺寸 95%（课件是画板宽高，网页是设备宽 × 整页高）的块 → `data-vw-id="bg<N>" data-vw="background"`（只改颜色，不能移动缩放）。

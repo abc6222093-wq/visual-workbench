@@ -70,8 +70,8 @@ test('round10 import: unrecognized short page becomes one page holding the whole
   assert.equal(job.summary.method, 'fallback'); assert.equal(project.pages.length, 1);
   assert.match(job.summary.message, /没有识别出分页结构/);
   const html = readFileSync(join(projectDir, project.pages[0].file), 'utf8');
-  assert.match(html, /<h1 data-vw-id="t1" data-vw="text color"[^>]*>一个普通的短页面<\/h1>/);
-  assert.match(html, /<p data-vw-id="t2" data-vw="text color"[^>]*>没有分页结构<\/p>/);
+  assert.match(html, /<h1 data-vw-id="t1" data-vw="text move color"[^>]*>一个普通的短页面<\/h1>/);
+  assert.match(html, /<p data-vw-id="t2" data-vw="text move color"[^>]*>没有分页结构<\/p>/);
 });
 
 test('round10 import: cancel stops a running job and leaves no project or temp files', async () => {

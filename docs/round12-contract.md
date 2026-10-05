@@ -41,6 +41,7 @@
 页面 → 父：
 | type | 字段 | 说明 |
 |---|---|---|
+| `loaded` | `pageId, height` | 只在 play 模式：文档加载完、修改单叠完、`init` 还没跑（或刚开始跑）。放映壳收到就把 iframe 显示出来（`frame.loaded`） |
 | `ready` | `pageId, height, marks: [{ id, caps, page?, values? }], steps, screen` | 文档加载完、修改单叠完。`height` 是整页内容高度（网页页面）；`marks[].page: true` 表示标在 `<html>` / `<body>` 上的整页背景（画布上点不中、不悬停，父页面在没选中东西时给「页面底色」控件，`values.background` 是当前底色）；`screen` 是当前停在第几屏（没给时 null） |
 | `screen-done` | `screen, applied` | 对 `screen` 的回复 |
 | `edit` | `target, kind, before, after` | 用户做了一个修改（运行时已经叠上）。父页面用 `upsertEdit` 记进 `project.pages[].edits`，走撤销 / 自动保存 |
@@ -71,7 +72,7 @@
 ## 4. play 模式
 - `vw.motion(handlers)` 登记；`__boot` 后在 `load` 时若 `steps > 0` 却没登记 `step` → `error`。
 - `ctx`：`root`、`signal`、`step`、`fast`、`animate`、`timer`、`importModule`（`/vendor/…` 走父页面同源 URL 或导出表；`../assets/…` 相对 base）。快进时 `animate` 立即 finish、`timer` 立即 resolve、`document.getAnimations()` 的有限动画 finish；anime.js 的 wrapper 照第 11 轮 `web/motion-runtime.js` 搬。
-- 放映壳（`web/playback.js`、放映页面、导出放映版的播放器）：当前页 iframe + 预加载下一页 iframe（隐藏）；点击 / 右键 / 方向键推进；上一页用 `fast: true` 重建。
+- 放映壳（`web/playback.js`、放映页面、导出放映版的播放器）：当前页 iframe + 预加载下一页 iframe（隐藏）；点击 / 右键 / 方向键推进；上一页用 `fast: true` 重建。换页顺序是 **新页 `loaded` → 显示新页、销毁旧页 → 等 `ready` → 等父页面画两帧（刚显示的跨源 iframe 画出一帧后 Chromium 才把鼠标事件路由进去）**：Chromium 不推进 `visibility:hidden` 的 iframe 里的动画，`init` 里 `await ctx.animate(...)` 的页面若先等 `ready` 再显示会永远停在「正在准备放映…」（第 12 轮收尾在桌面应用里实测到）。已知限制：预加载的下一页在隐藏状态下已开始跑 `init`，用计时器而非动画的入场在显示前就走完了。
 
 ## 4a. 导出进度（第 12 轮修正）
 - `exportProject({ …, onProgress({ current, total, label }), signal })`：三种导出都报进度；`signal` 取消时抛 `error.cancelled = true`。
