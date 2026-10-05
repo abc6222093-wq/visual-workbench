@@ -63,7 +63,9 @@
 ## Mac 安装
 推荐在用户的 Mac 上由 agent 直接制作（本机做的应用没有「从网上下载」的标记，打开时不会有安全提示）：
 1. 在仓库里 `npm ci`，再 `cd desktop && npm ci && npm run pack:mac`。
-2. 把 `desktop/dist/视觉工作台-darwin-universal/视觉工作台.app` 拖进「应用程序」文件夹，再把它拖到程序坞。
+2. 把 `desktop/dist/视觉工作台-darwin-universal/视觉工作台.app` 拖进「应用程序」文件夹（用户自己的 `~/Applications` 不需要密码；用 `ditto` 复制可保留签名），再把它拖到程序坞。
+3. agent 代为加进程序坞时：先 `lsregister -f <应用路径>` 登记，再 `defaults write com.apple.dock persistent-apps -array-add '<dict>…file-tile…</dict>'`（`_CFURLString` 用 `file:///…/视觉工作台.app/` 的百分号编码形式、`_CFURLStringType` 15），然后 **`killall -KILL Dock`**。普通 `killall Dock` 会让 Dock 在退出时把它内存里的旧列表写回，刚加的条目会被丢掉（macOS 26 上实测如此）。
+4. 制作时 packager 会提示 `Could not find icon … with extension ".icon"`，那是新的 Icon Composer 格式，没有也不影响，`.icns` 照样用上。
 
 也可以用 GitHub Actions 的构建产物：仓库 Actions → desktop → 最新一次运行 → 下载 `visual-workbench-mac`，解压得到 `视觉工作台.app`，拖进「应用程序」。下载来的应用：
 - 第一次打开：在「应用程序」里**右键（或按住 Control 点）→ 打开 → 打开**；或者先双击一次，再到「系统设置 → 隐私与安全性」，往下找到「视觉工作台」那一行点「仍要打开」。只需要做一次。
