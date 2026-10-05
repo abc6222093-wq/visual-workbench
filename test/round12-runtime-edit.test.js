@@ -61,6 +61,9 @@ async function open(t, { edits = [] } = {}) {
   }, { project });
   const frame = await until(() => page.frames().find(f => f !== page.mainFrame()), { label: '页面 iframe' });
   await frame.waitForFunction(() => document.getElementById('pic').complete);
+  // 跨源 iframe 要先画出第一帧，Chromium 才会把鼠标事件路由进去；刚就绪就点会被丢掉（CI 上尤其明显）。父页面和 iframe 各等两帧
+  await frame.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
   return { page, frame };
 }
 const msgs = (page, type) => page.evaluate(type => window.__msgs.filter(m => m.vw === type), type);
@@ -131,15 +134,14 @@ test('单击文字直接出光标改字，保留行内格式；Esc 退出不重�
   await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 'title'), { label: '标题获得焦点' });
   const caret = await frame.evaluate(() => { const s = getSelection(); return { collapsed: s.isCollapsed, inside: document.querySelector('[data-vw-id=title]').contains(s.anchorNode), editable: document.querySelector('[data-vw-id=title]').isContentEditable }; });
   assert.deepEqual(caret, { collapsed: true, inside: true, editable: true });
-  assert.equal((await msgs(page, 'editing')).at(-1).on, true);
+  assert.equal((await until(async () => (await msgs(page, 'editing')).at(-1), { label: '进入改字的消息' })).on, true);
   await page.keyboard.type('X');
   const typed = await frame.evaluate(() => document.querySelector('[data-vw-id=title]').innerHTML);
   assert.match(typed, /^H?X/, '在单击的位置插入');
   assert.match(typed, /<b>World<\/b>/, '行内格式保留');
   await page.keyboard.press('Escape');
   await until(async () => (await msgs(page, 'editing')).at(-1)?.on === false, { label: '退出改字' });
-  const edits = await msgs(page, 'edit');
-  const last = edits.filter(e => e.kind === 'text').at(-1);
+  const last = await until(async () => (await msgs(page, 'edit')).filter(e => e.kind === 'text').at(-1), { label: '文字修改' });
   assert.equal(last.target, 'title');
   assert.deepEqual(last.before, { html: 'Hello <b>World</b> again', text: 'Hello World again' });
   assert.equal(last.after.html, typed);
@@ -233,7 +235,7 @@ test('拖动：无 text 的元素点哪都能拖、不覆盖原 transform；text
   await page.mouse.move(card.x + 130, card.y + 80, { steps: 4 });
   await page.mouse.move(card.x + 150, card.y + 90, { steps: 4 });
   await page.mouse.up();
-  const move = (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'card');
+  const move = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'card'), { label: '拖动修改' });
   assert.deepEqual(move.before, { x: 500, y: 300, width: 200, height: 120 });
   assert.deepEqual(move.after, { dx: 50, dy: 30 });
   assert.deepEqual(await box(frame, 'card'), { x: 550, y: 330, width: 200, height: 120 });
@@ -265,12 +267,12 @@ test('拖动：无 text 的元素点哪都能拖、不覆盖原 transform；text
   await page.mouse.down();
   await page.mouse.move(title.x + 22, title.y + title.height / 2 + 40, { steps: 5 });
   await page.mouse.up();
-  const moved = (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'title');
+  const moved = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'title'), { label: '拖动标题的修改' });
   assert.deepEqual(moved.after, { dx: 20, dy: 40 });
   assert.equal(await frame.evaluate(() => document.querySelector('[data-vw-id=title]').hasAttribute('contenteditable')), false);
   // 方向键微调
   await page.keyboard.press('Shift+ArrowRight');
-  const nudged = (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1);
+  const nudged = await until(async () => { const e = (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1); return e && e.after.dx === 30 ? e : null; }, { label: '方向键微调的修改' });
   assert.deepEqual(nudged.after, { dx: 30, dy: 40 });
 });
 
@@ -282,7 +284,7 @@ test('缩放把手：普通元素自由缩放、左上把手同时移动；图�
   await page.mouse.down();
   await page.mouse.move(card.x + card.width + 40, card.y + card.height + 20, { steps: 4 });
   await page.mouse.up();
-  let resize = (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'card').at(-1);
+  let resize = await until(async () => (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'card').at(-1), { label: '缩放修改' });
   assert.deepEqual(resize.before, { width: 200, height: 120 });
   assert.deepEqual(resize.after, { width: 240, height: 140 });
   // 左上把手：变大并移动
@@ -290,7 +292,7 @@ test('缩放把手：普通元素自由缩放、左上把手同时移动；图�
   await page.mouse.down();
   await page.mouse.move(card.x - 10, card.y - 10, { steps: 3 });
   await page.mouse.up();
-  resize = (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'card').at(-1);
+  resize = await until(async () => { const e = (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'card').at(-1); return e && e.after.width === 250 ? e : null; }, { label: '左上把手的修改' });
   assert.deepEqual(resize.after, { width: 250, height: 150 });
   assert.deepEqual(await box(frame, 'card'), { x: 490, y: 290, width: 250, height: 150 });
   // 图片：角上锁比例
@@ -300,7 +302,7 @@ test('缩放把手：普通元素自由缩放、左上把手同时移动；图�
   await page.mouse.down();
   await page.mouse.move(pic.x + pic.width + 100, pic.y + pic.height + 5, { steps: 4 });
   await page.mouse.up();
-  const picResize = (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'pic').at(-1);
+  const picResize = await until(async () => (await msgs(page, 'edit')).filter(e => e.kind === 'resize' && e.target === 'pic').at(-1), { label: '图片缩放的修改' });
   assert.deepEqual(picResize.after, { width: 300, height: 150 });
 });
 
@@ -341,7 +343,7 @@ test('父页面 set、edits 重放、贴图 addImage、右键菜单、Delete 键
   // 拖动已有修改的卡片：before 用修改单里的原位置
   const card = await box(frame, 'card');
   await page.mouse.move(card.x + 50, card.y + 50); await page.mouse.down(); await page.mouse.move(card.x + 70, card.y + 50, { steps: 3 }); await page.mouse.up();
-  const move = (await msgs(page, 'edit')).find(e => e.kind === 'move');
+  const move = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move'), { label: '拖动修改' });
   assert.deepEqual(move.before, { x: 500, y: 300, width: 200, height: 120 });
   assert.deepEqual(move.after, { dx: 30, dy: 0 });
   // 整份重放：清空 → 全部恢复

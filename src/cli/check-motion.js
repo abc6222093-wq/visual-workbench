@@ -70,7 +70,8 @@ try {
       const page = await browser.newPage();
       await page.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort('blockedbyclient'));
       page.on('pageerror', error => errors.push(String(error)));
-      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+      // 页面里引用的网络地址（CDN 等）被检查拦截（只允许本地）：那是离线运行的正常现象，不算动效错误；本地文件 404 仍会报
+      page.on('console', message => { if (message.type() === 'error' && !/ERR_BLOCKED_BY_CLIENT/.test(message.text())) errors.push(message.text()); });
       const result = await Promise.race([
         (async () => {
           await page.goto(`${origin}/motion-check.html`);
