@@ -4,7 +4,7 @@
 //   pages(kind)                  每页的 { path（从 body 数的子元素下标）, width, height }
 //   clues(path)                  原页面的动画、脚本库、分步线索（只记录，写进迁移说明）
 //   prepare(o) / finish(o)       生成一页的 HTML：取原文档（未执行脚本的原文，或网址抓取时的当前 DOM），
-//                                标出可改的文字 / 图片（data-vw-id、data-vw、data-vw-origin），只留这一页的那一块；
+//                                标出可改的文字 / 图片 / 纯色色块（data-vw-id、data-vw、data-vw-origin），只留这一页的那一块；
 //                                资源引用先换成绝对地址交给 Node 复制，再按 Node 给的对照表改写，最后序列化。
 // 标记全部用 DOM 操作完成，不用正则改 HTML。
 export function install() {
@@ -144,6 +144,93 @@ export function install() {
     return stats;
   }
 
+  // ---------- 自动标记：纯色色块（第 12 轮修正） ----------
+  // 有可见底色（底色不透明，或 background 是渐变；background-image 是图片的不算）、自身没有直接文字、不是图片 / 矢量 / 视频 / 画布、有尺寸的块：
+  // 标 data-vw="move resize background"（编号 b1、b2…）。整页背景（html、body、这一页的根和它的祖先容器，
+  // 或盒子 ≥ 页面尺寸 95% 的块）只标 background（编号 bg1、bg2…），可改颜色，不可移动缩放。
+  // 判断要用到计算样式和盒子尺寸：网址抓取时量当前页面（文档是它的克隆）；本地文件在一个不跑脚本的隐藏 iframe 里
+  // 按工作台显示时的尺寸渲染这一页再量。量之前先给候选元素打临时编号 data-vw-tmp，量完去掉。
+  const NOT_BLOCK = new Set(['IMG', 'PICTURE', 'EMBED', 'INPUT', 'LINK', 'META', 'BR', 'WBR', 'SOURCE', 'TRACK', 'PARAM', 'AREA', 'MAP', 'BASE', 'TITLE']);
+  function blockCandidates(scope, doc, root, snapshot) {
+    const out = []; let n = 0;
+    const live = el => {
+      if (!snapshot) return null;
+      if (el === doc.documentElement) return document.documentElement;
+      if (el === doc.body) return document.body;
+      const path = []; for (let e = el; e && e !== doc.body; e = e.parentElement) { if (!e.parentElement) return null; path.unshift([...e.parentElement.children].indexOf(e)); }
+      const found = byPath(document.body, path);
+      return found && found.localName === el.localName ? found : null;
+    };
+    const add = (el, page) => { if (!el || el.hasAttribute('data-vw-id')) return; el.setAttribute('data-vw-tmp', String(++n)); out.push({ n: String(n), el, page, live: live(el) }); };
+    add(doc.documentElement, true); add(doc.body, true);
+    if (root) { const chain = []; for (let e = root; e && e !== doc.body; e = e.parentElement) chain.unshift(e); for (const e of chain) add(e, true); }
+    const walk = el => { for (const c of [...el.children]) { const tag = c.tagName.toUpperCase(); if (NEVER.has(tag) || NOT_BLOCK.has(tag) || c.hasAttribute('data-vw-id')) continue; add(c, false); walk(c); } };
+    walk(root || doc.body);
+    return out;
+  }
+  const clearColor = c => !c || c === 'transparent' || /,\s*0(\.0+)?\s*\)$/.test(c) || /\/\s*0(\.0+)?%?\s*\)$/.test(c);
+  const colorBg = s => { const img = s.backgroundImage || 'none'; if (/url\(/i.test(img)) return false; return !clearColor(s.backgroundColor) || /gradient\(/i.test(img); };
+  // 本地文件：在隐藏 iframe（sandbox 只给 allow-same-origin，不跑脚本）里按工作台的尺寸渲染这一页
+  async function renderedView(doc, { base, width, height, web }) {
+    const clone = doc.documentElement.cloneNode(true);
+    let head = clone.querySelector('head'); if (!head) { head = doc.createElement('head'); clone.prepend(head); }
+    for (const m of clone.querySelectorAll('meta[http-equiv]')) m.remove();
+    const st = doc.createElement('style'); st.textContent = web ? `html,body{margin:0;width:${width}px}` : `html,body{margin:0;width:${width}px;height:${height}px;overflow:hidden}`;
+    head.prepend(st);
+    if (base) { const b = doc.createElement('base'); b.setAttribute('href', base); head.prepend(b); }
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-same-origin'); frame.setAttribute('aria-hidden', 'true'); frame.setAttribute('tabindex', '-1');
+    frame.style.cssText = `position:fixed!important;left:${-width - 2000}px!important;top:0!important;width:${width}px!important;height:${height}px!important;border:0!important;pointer-events:none!important;display:block!important;visibility:visible!important`;
+    const loaded = new Promise(ok => { frame.addEventListener('load', ok, { once: true }); setTimeout(ok, 10000); });
+    frame.srcdoc = `<!DOCTYPE html>\n${clone.outerHTML}`;
+    document.documentElement.append(frame);
+    await loaded;
+    const fdoc = frame.contentDocument;
+    if (fdoc?.fonts?.ready) await Promise.race([fdoc.fonts.ready, new Promise(ok => setTimeout(ok, 3000))]);
+    return { frame, fdoc };
+  }
+  async function markBlocks({ doc, whole, cands, snapshot, base, width, height, web }) {
+    const stats = { block: 0, background: 0 };
+    if (!cands.length) return stats;
+    let view = null;
+    try {
+      let find, pageW = width, pageH = height;
+      if (snapshot) { find = c => c.live; if (web) pageH = Math.max(height, document.documentElement.scrollHeight, document.body?.scrollHeight || 0); }
+      else {
+        view = await renderedView(doc, { base, width, height, web });
+        const byTmp = new Map(); if (view.fdoc) for (const e of view.fdoc.querySelectorAll('[data-vw-tmp]')) byTmp.set(e.getAttribute('data-vw-tmp'), e);
+        find = c => byTmp.get(c.n) || null;
+        if (web && view.fdoc) pageH = Math.max(height, view.fdoc.documentElement.scrollHeight, view.fdoc.body?.scrollHeight || 0);
+      }
+      const used = new Set([...doc.querySelectorAll('[data-vw-id]')].map(e => e.getAttribute('data-vw-id')));
+      const counters = { b: 0, bg: 0 };
+      const nextId = p => { let id; do id = `${p}${++counters[p]}`; while (used.has(id)); used.add(id); return id; };
+      for (const c of cands) {
+        if (!c.el.isConnected) continue; // 这一页之外的（兄弟页已经去掉）
+        const el = find(c); if (!el) continue;
+        const s = el.ownerDocument.defaultView.getComputedStyle(el);
+        if (!colorBg(s)) continue;
+        let page = c.page;
+        if (!page) {
+          if (s.display === 'none' || s.visibility === 'hidden' || directText(c.el)) continue;
+          const r = el.getBoundingClientRect();
+          if (!(r.width >= 2 && r.height >= 2)) continue;
+          page = r.width >= pageW * 0.95 && r.height >= pageH * 0.95;
+        }
+        const w = whole.querySelector(`[data-vw-tmp="${c.n}"]`);
+        const origin = w ? selectorOf(w, whole) : '';
+        c.el.removeAttribute('data-vw-tmp');
+        c.el.setAttribute('data-vw-id', nextId(page ? 'bg' : 'b')); c.el.setAttribute('data-vw', page ? 'background' : 'move resize background');
+        if (origin) c.el.setAttribute('data-vw-origin', origin);
+        stats[page ? 'background' : 'block']++;
+      }
+    } finally {
+      view?.frame.remove();
+      for (const e of doc.querySelectorAll('[data-vw-tmp]')) e.removeAttribute('data-vw-tmp');
+    }
+    return stats;
+  }
+
   // ---------- 生成一页 ----------
   // 网址抓取：当前 DOM（脚本跑过之后的样子）；能读到的样式表内容放进 <style>（url() 换成绝对地址）
   const absCss = (text, base) => String(text).replace(/url\(\s*(['"]?)([^'")]*)\1\s*\)/g, (m, q, u) => { if (!u || /^(data:|#)/i.test(u.trim())) return m; try { return `url("${new URL(u.trim(), base).href}")`; } catch { return m; } });
@@ -166,7 +253,7 @@ export function install() {
     ['img', 'src'], ['img', 'srcset'], ['source', 'src'], ['source', 'srcset'], ['video', 'src'], ['video', 'poster'], ['audio', 'src'], ['track', 'src'],
     ['input', 'src'], ['embed', 'src'], ['object', 'data'], ['script', 'src'], ['link', 'href'], ['image', 'href'], ['image', 'xlink:href'], ['use', 'href'], ['use', 'xlink:href'],
   ];
-  function prepare({ source, sourceUrl, spec, width, height, snapshot }) {
+  async function prepare({ source, sourceUrl, spec, width, height, snapshot }) {
     const doc = snapshot ? snapshotDoc() : new DOMParser().parseFromString(String(source), 'text/html');
     let base = snapshot ? document.baseURI : sourceUrl;
     const baseEl = doc.querySelector('base[href]');
@@ -175,6 +262,9 @@ export function install() {
     const root = spec.mode === 'section' ? byPath(doc.body, spec.path) : null;
     if (spec.mode === 'section' && !root) throw new Error('原文件里找不到这一页');
     const stats = mark(root || doc.body, doc);
+    // 色块候选：先打临时编号，再留一份整份文档的副本（data-vw-origin 要在整份原文档里唯一）
+    const cands = blockCandidates(root || doc.body, doc, root, snapshot);
+    const whole = doc.cloneNode(true);
     const notes = { scripts: { inline: 0, external: [] }, removedScripts: [], styles: 0, canvas: doc.querySelectorAll('canvas').length, iframes: [], fragments: 0 };
     // 网址抓取：DOM 是脚本跑过之后的样子，脚本再跑一遍会重复渲染，所以不保留
     if (snapshot) for (const s of [...doc.querySelectorAll('script')]) { const t = (s.getAttribute('type') || '').toLowerCase(); if (t && !/javascript|module|ecmascript/.test(t)) continue; notes.removedScripts.push(s.getAttribute('src') || '内联脚本'); s.remove(); }
@@ -194,6 +284,8 @@ export function install() {
       st.textContent = `html{overflow:hidden!important}body{margin-top:${-spec.index * height}px!important;height:auto!important;overflow:visible!important}`;
       doc.head.append(st);
     }
+    // 色块：这一页切好之后量（隐藏的幻灯片已经显示出来、缩放已经加上）
+    Object.assign(stats, await markBlocks({ doc, whole, cands, snapshot, base, width, height, web: !!spec.web }));
     // 资源引用 → 绝对地址，交给 Node
     const slots = [], refs = new Set();
     const abs = u => { const v = String(u || '').trim(); if (!v || /^(#|javascript:|about:|mailto:|tel:)/i.test(v)) return null; try { return new URL(v, base).href; } catch { return null; } };

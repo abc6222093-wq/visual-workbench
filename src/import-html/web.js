@@ -63,7 +63,7 @@ async function webPage(page, { device, check, store, source, sourceUrl }) {
   const full = await lazyScroll(page); check();
   await page.evaluate(`(${install})()`);
   const clue = await page.evaluate(() => window.__vwImport.clues());
-  const res = await renderPage(page, { source, sourceUrl, snapshot: source === null, spec: { mode: 'whole' }, width: d.width, height: d.height, store });
+  const res = await renderPage(page, { source, sourceUrl, snapshot: source === null, spec: { mode: 'whole', web: true }, width: d.width, height: d.height, store });
   return { ...res, clue, device, height: Math.max(d.height, Math.min(MAX_PAGE_HEIGHT, Math.round(full))), truncated: full > MAX_PAGE_HEIGHT ? full : 0 };
 }
 const failedPage = (device, error) => ({ device, height: WEB_DEVICES[device].height, truncated: 0, html: failedHtml(error?.message || error), heading: '', title: '', stats: { text: 0, image: 0 }, notes: null, log: newLog(), clue: null, error: String(error?.message || error) });

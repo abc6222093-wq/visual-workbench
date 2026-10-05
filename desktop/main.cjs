@@ -14,6 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 const core = require('./lib/core.cjs');
 const editMenu = require('./lib/edit-menu.cjs');
+// 应用版本（desktop/package.json）。写进窗口的 User-Agent，工作台据此提示「应用是旧版本，要重新制作」
+const DESKTOP_VERSION = require('./package.json').version;
 
 const SMOKE = process.argv.includes('--smoke');
 const SMOKE_TIMEOUT_MS = 90_000;
@@ -63,12 +65,17 @@ function setMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(editMenu.appMenuTemplate(process.platform === 'darwin')));
 }
 
-/** 右键：可编辑区域弹原生的剪切 / 复制 / 粘贴 / 全选；非编辑区不弹（页面 iframe 里的改字也走这里）。 */
+/**
+ * 右键：可编辑区域弹原生的剪切 / 复制 / 粘贴 / 全选；非编辑区有选中文字只给「复制」；其他地方不弹。
+ * 页面 iframe（沙箱）里改字时右键，事件仍在窗口的 webContents 上触发，params.frame 指向那个 iframe；
+ * popup 把 frame 传过去，菜单项用 role（作用于聚焦的 frame），再绑定 contents 兜底。
+ */
 function attachContextMenu(contents) {
   contents.on('context-menu', (_event, params) => {
     const template = editMenu.contextMenuTemplate(params);
     if (!template) return;
-    Menu.buildFromTemplate(template).popup({ window: win || undefined, frame: params.frame || undefined });
+    const owner = BrowserWindow.fromWebContents(contents) || win || undefined;
+    Menu.buildFromTemplate(editMenu.bindToContents(template, contents)).popup({ window: owner, frame: params.frame || undefined });
   });
 }
 
@@ -198,6 +205,9 @@ function createWindow() {
     if (core.isExternalOpenable(url)) shell.openExternal(url);
   });
   attachContextMenu(win.webContents);
+  // User-Agent 末尾带应用版本（页面和页面里的 iframe 都读得到 navigator.userAgent）
+  win.webContents.setUserAgent(core.desktopUserAgent(win.webContents.getUserAgent(), DESKTOP_VERSION));
+  log('应用版本', DESKTOP_VERSION, 'User-Agent：', win.webContents.getUserAgent());
   win.once('ready-to-show', () => win.show());
   win.on('close', (e) => { if (!closing) { e.preventDefault(); shutdownAndQuit(0); } else e.preventDefault(); });
   win.webContents.once('did-finish-load', () => {

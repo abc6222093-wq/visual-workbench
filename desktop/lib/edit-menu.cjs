@@ -51,4 +51,18 @@ function contextMenuTemplate(params = {}) {
   return null;
 }
 
-module.exports = { editSubmenu, appMenuTemplate, contextMenuTemplate };
+const CONTENTS_METHOD = { cut: 'cut', copy: 'copy', paste: 'paste', selectAll: 'selectAll' };
+/**
+ * 把右键菜单项绑定到窗口的 webContents：role 保留（Electron 按 role 执行：Mac 走系统的 copy: 等动作，
+ * 其他系统调用聚焦的 webContents 的 copy() 等，作用于聚焦的 frame，也就是页面 iframe 里正在改字的那一处）；
+ * 再加一个 click 兜底——只有 role 执行不了（例如拿不到聚焦的 webContents）时 Electron 才会调用它，调用 contents 对应的方法。
+ */
+function bindToContents(template, contents) {
+  return (template || []).map((item) => {
+    const method = item && CONTENTS_METHOD[item.role];
+    if (!method || !contents || typeof contents[method] !== 'function') return item;
+    return { ...item, click: () => contents[method]() };
+  });
+}
+
+module.exports = { editSubmenu, appMenuTemplate, contextMenuTemplate, bindToContents };

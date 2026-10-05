@@ -112,7 +112,7 @@ test('round12 import: deck-data JSON — each slide document kept whole, CSS ani
   assert.match(project.pages[0].notes, /CSS 动画 rise/); assert.match(project.pages[0].notes, /课件 JSON/);
   assert.deepEqual(job.summary.animations.sort(), ['fade', 'rise']);
   const run = await openPage(join(projectDir, project.pages[0].file));
-  assert.deepEqual(run.errors, []); assert.ok(run.animations >= 2, '原来的 CSS 动画照常播放'); assert.deepEqual(run.marked, ['t1', 't2', 'i1']);
+  assert.deepEqual(run.errors, []); assert.ok(run.animations >= 2, '原来的 CSS 动画照常播放'); assert.deepEqual(run.marked, ['bg1', 't1', 't2', 'i1'], '第 12 轮修正：body 的底色标成整页背景 bg1');
   await checkMotion(projectDir);
 });
 
@@ -121,7 +121,8 @@ test('round12 import: <section class="slide"> deck — one section per page, anc
   assert.equal(job.summary.method, 'generic'); assert.equal(project.pages.length, 3);
   assert.deepEqual(project.pages.map(p => p.name), ['第一页标题', '第二页标题', '第三页标题']);
   for (const h of html) { assert.match(h, /@keyframes drop/); assert.equal((h.match(/<section/g) || []).length, 1, '只留这一页的 section'); }
-  assert.match(html[1], /<section class="slide two" data-vw-import-page="">/);
+  // 第 12 轮修正：这一页的根有底色，标成整页背景（只能改颜色），标记跟在 data-vw-import-page 后面
+  assert.match(html[1], /<section class="slide two" data-vw-import-page="" data-vw-id="bg2" data-vw="background" data-vw-origin="section:nth-of-type\(2\)">/);
   assert.match(html[0], /这是第一页的段落，<strong>重点<\/strong>文字合并在一起。/, '行内格式保留在文字里');
   assert.deepEqual(project.pages.map((p, i) => imgs(html[i]).length), [1, 0, 1]);
   assert.equal(project.assets.length, 1, '同一张图只登记一次');

@@ -1,6 +1,6 @@
 # 导入 HTML / 网页（第 12 轮：保留原网页）
 
-把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改（`text color`），图片标成可裁切（`move resize crop`）。原文件原样复制进项目的 `import/`，绝不修改。导入**永远新建项目**，不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
+把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改（`text color`），图片标成可裁切（`move resize crop`），纯色色块标成可移动缩放改底色（`move resize background`），整页背景只标 `background`。原文件原样复制进项目的 `import/`，绝不修改。导入**永远新建项目**，不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
 
 第 10、11 轮的做法（把页面拆成文字 / 图片 / 形状元素、截图块、分组）已经取消。
 
@@ -26,7 +26,7 @@
 
 入口文件：指定的 `entry`，否则层级最浅的 `index.html`，否则层级最浅、按名字排第一的 `.html`。所有文件在同一个顶层文件夹里时去掉这一层。路径里有 `../`、绝对路径的直接拒绝。
 
-`summary`：`method`、`methodLabel`、`pages`、`texts`（标成可改的文字数）、`images`（标成可裁切的图片数）、`assets`、`fonts`、`styles`（复制的外部样式表数）、`scripts`、`animations`（样式表里的 @keyframes 名）、`missingFonts`、`remote`（没下载到的网络地址）、`missing`（原文件里引用了但找不到的文件）、`failed`、`message`、`seconds`；网页另有 `kind: "web"`、`source`、`devices: {desktop, mobile}`、`skipped: [{url, devices, reason}]`、`truncated`。
+`summary`：`method`、`methodLabel`、`pages`、`texts`（标成可改的文字数）、`images`（标成可裁切的图片数）、`blocks`（标成色块的数）、`backgrounds`（标成整页背景的数）、`assets`、`fonts`、`styles`（复制的外部样式表数）、`scripts`、`animations`（样式表里的 @keyframes 名）、`missingFonts`、`remote`（没下载到的网络地址）、`missing`（原文件里引用了但找不到的文件）、`failed`、`message`、`seconds`；网页另有 `kind: "web"`、`source`、`devices: {desktop, mobile}`、`skipped: [{url, devices, reason}]`、`truncated`。
 
 ## 流程与清理
 
@@ -54,9 +54,12 @@
 - **自动标记**（编号在一页内唯一）：
   - 文字：`h1`–`h6`、`p`、`li`、`blockquote`、`figcaption`、`td` / `th`、`dt` / `dd`、`label`、`button`、`a`、`caption`、`summary`、`legend`，以及直接含文字的 `span` / `div` 等，并且里面没有块级元素、图片、表单控件 → `data-vw-id="t<N>" data-vw="text color"`。标了的元素里面不再标（行内格式 `<strong>`、`<span>` 等留在文字里）。
   - 图片：每个 `<img>` → `data-vw-id="i<N>" data-vw="move resize crop"`。
+  - 纯色色块（第 12 轮修正）：有可见底色（计算后的 `background-color` 不透明，或 `background-image` 是渐变；`background-image` 是图片 `url()` 的不算）、自身没有直接文字（可以有子元素，例如卡片底里的标题照旧标文字）、不是 `img` / `svg` / `video` / `canvas`、显示着并且有尺寸的块（色条、卡片底、印章底、装饰圆点等）→ `data-vw-id="b<N>" data-vw="move resize background"`。
+  - 整页背景：`<html>`、`<body>`、这一页的根（`.slide` / `section` 等，加了 `data-vw-import-page` 的那个）和它的祖先容器有底色时，以及盒子 ≥ 页面尺寸 95%（课件是画板宽高，网页是设备宽 × 整页高）的块 → `data-vw-id="bg<N>" data-vw="background"`（只改颜色，不能移动缩放）。
+  - 色块要看计算样式和盒子尺寸：网址来源量打开后的当前画面；本地文件在一个不跑脚本的隐藏 iframe 里按工作台显示时的尺寸渲染这一页（只留这一页、zoom 已加）再量。只加标记，不改样式、不做任何调整。
   - 每个标记都写 `data-vw-origin="<CSS 选择器>"`：在原文档里唯一（有唯一 id 用 `#id`；否则 `标签.稳定 class`；再不唯一就自下而上拼 `父 > 标签:nth-of-type(n)`），交接包用它定位回原网页。
   - 原文件里已经有 `data-vw-id` 的元素不动，新编号避开它们。
-  - `script`、`style`、`svg`、`canvas`、`video`、`iframe`、表单输入框里面不标。底色块（`background` 能力）本轮不自动标。
+  - `script`、`style`、`svg`、`canvas`、`video`、`iframe`、表单输入框里面不标。底色块按上面的规则自动标（第 12 轮修正起）。
 - **资源**（`src/import-html/resources.js`）：页面里的引用先在浏览器里换成绝对地址，Node 取到字节后复制进项目，再改写引用：
   - 图片（`img` / `source` 的 `src`、`srcset`，`video` 的 `poster`，SVG `image`，CSS 里的 `url()`，包括 `data:` 内嵌图）→ `assets/`，登记 `kind: "image"`（带宽高）；
   - 外部样式表 → `assets/*.css`（`kind: "file"`），样式表里的 `url()`、`@import` 按样式表自己的地址换算后同样复制并改写；
@@ -70,7 +73,7 @@
 
 ## 每页 notes（迁移说明）
 
-分页方式及原文件第几页；只留这一页 / 保底切分 / zoom 的说明；自动标记了多少文字和图片；保留了哪些 `<style>`、外部样式表、内联 / 外部脚本；原来在跑的动画（CSS 动画 / 过渡名称和元素数）和样式表里的 @keyframes；动画 / 脚本库（gsap、anime、Reveal 等全局对象）；分步线索（`.fragment`、`data-fragment-index`、`data-aos` 等）；`<canvas>`、`iframe`；没下载到的网络地址；找不到的文件；缺失字体；复制进 `fonts/` 的字体；「本轮导入不截图」；需要点击推进的动效请用 `vw.motion` 写；原文件位置。页面名取页内第一个 h1–h3 文字前 20 字，否则课件 JSON 里的页名，否则「第 N 页」；网页是「<网页标题> · 电脑端 / 手机端」。
+分页方式及原文件第几页；只留这一页 / 保底切分 / zoom 的说明；自动标记了多少文字、图片、色块和整页背景；保留了哪些 `<style>`、外部样式表、内联 / 外部脚本；原来在跑的动画（CSS 动画 / 过渡名称和元素数）和样式表里的 @keyframes；动画 / 脚本库（gsap、anime、Reveal 等全局对象）；分步线索（`.fragment`、`data-fragment-index`、`data-aos` 等）；`<canvas>`、`iframe`；没下载到的网络地址；找不到的文件；缺失字体；复制进 `fonts/` 的字体；「本轮导入不截图」；需要点击推进的动效请用 `vw.motion` 写；原文件位置。页面名取页内第一个 h1–h3 文字前 20 字，否则课件 JSON 里的页名，否则「第 N 页」；网页是「<网页标题> · 电脑端 / 手机端」。
 
 ## 导入网页
 

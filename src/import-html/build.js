@@ -28,7 +28,7 @@ function pageNotes({ res, index, analysis, web, entry, now, skipped }) {
   }
   if (res.error) lines.push(`- 这一页导入失败：${res.error}；请参照原文件重做这一页`);
   const st = res.stats || { text: 0, image: 0 };
-  lines.push(`- 自动标记：可改的文字 ${st.text} 处（data-vw-id t1、t2…，能力 text color），可裁切的图片 ${st.image} 张（i1、i2…，能力 move resize crop）；data-vw-origin 是原网页里的定位`);
+  lines.push(`- 自动标记：可改的文字 ${st.text} 处（data-vw-id t1、t2…，能力 text color），可裁切的图片 ${st.image} 张（i1、i2…，能力 move resize crop），纯色色块 ${st.block || 0} 个（b1、b2…，能力 move resize background），整页背景 ${st.background || 0} 处（bg1、bg2…，能力 background，只改颜色）；data-vw-origin 是原网页里的定位`);
   const n = res.notes;
   if (n) {
     const kept = [];
@@ -107,7 +107,7 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
   const message = analysis.kind === 'fallback' ? (pages.length > 1 ? `没有识别出分页结构，按画板高度把整页切成了 ${pages.length} 页（保底办法），分页位置可能切断内容。` : '没有识别出分页结构（不是常见的幻灯片框架，也不是按屏滚动的页面），整份页面作为 1 页导入。') : '';
   const summary = {
     method: analysis.kind, methodLabel: analysis.label, pages: pages.length,
-    texts: sum(p => p.stats?.text || 0), images: sum(p => p.stats?.image || 0),
+    texts: sum(p => p.stats?.text || 0), images: sum(p => p.stats?.image || 0), blocks: sum(p => p.stats?.block || 0), backgrounds: sum(p => p.stats?.background || 0),
     assets: store.assets.length, fonts: store.fonts.length,
     styles: union('css').size, scripts: union('scripts').size + sum(p => p.notes?.scripts?.inline || 0),
     animations: [...new Set(analysis.pages.flatMap(p => p.clue?.keyframes || []))],
@@ -121,11 +121,11 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
     analysis.source === 'urls' ? `- 网址：${(analysis.urls || []).join('、') || '无'}` : `- 入口文件：${entry}`,
     `- 导入时间：${now}`,
     web ? `- 设备：${(analysis.devices || []).map(deviceLabel).join('、')}` : `- 分页方式：${analysis.label}`,
-    `- 页数：${pages.length}；可改的文字：${summary.texts}；可裁切的图片：${summary.images}`,
+    `- 页数：${pages.length}；可改的文字：${summary.texts}；可裁切的图片：${summary.images}；纯色色块：${summary.blocks}；整页背景：${summary.backgrounds}`,
     ...(summary.missingFonts.length ? [`- 缺失字体：${summary.missingFonts.join('、')}`] : []), ...(message ? [`- 说明：${message}`] : []),
     ...(skipped.length ? ['- 跳过的网址：', ...skippedLines(skipped).map(l => `  - ${l}`)] : []), '',
     analysis.source === 'urls' ? '这个文件夹里 pages/ 是导入时的网页快照（只读参考），source.json 记录网址、设备、时间和跳过的网址。抓取全程只读：只发 GET 请求，不提交表单、不登录、不点击，原网站不受影响。' : '这个文件夹是导入时复制的原文件（文件名不变，逐字节相同），原来的文件没有被修改。',
-    '每页的页面文件保留了原来的 HTML、CSS、脚本和动画，自动标出了可改的文字和图片；每页 notes 是给 agent 的迁移说明。用户在工作台里的修改记在每页的修改单（edits）里。', '',
+    '每页的页面文件保留了原来的 HTML、CSS、脚本和动画，自动标出了可改的文字、图片和纯色色块；每页 notes 是给 agent 的迁移说明。用户在工作台里的修改记在每页的修改单（edits）里。', '',
   ].join('\n');
   writeFileSync(join(importDir, files.includes('README.md') ? 'README-导入说明.md' : 'README.md'), readme);
   return { project, summary };

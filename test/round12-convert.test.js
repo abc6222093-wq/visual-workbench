@@ -198,7 +198,7 @@ for (const name of ['v2-deck', 'v2-web']) {
       const html = pageHtml(projectDir, motionPage);
       assert.match(html, /vw\.motion\(/);
       assert.match(html, /\/vendor\/anime\.esm\.min\.js/); // 字面量路径留着，导出能打包
-      assert.ok(!/<\/script>[\s\S]*<\/script>[\s\S]*<\/script>/.test(html.split('<body>')[1]), '源码不能提前结束脚本');
+      assert.ok(!/<\/script>[\s\S]*<\/script>[\s\S]*<\/script>/.test(html.split(/<body[^>]*>/)[1]), '源码不能提前结束脚本');
       assert.ok(!project.pages.find(p => p.id === 'page_text1').notes, '没有动效的页面不加迁移说明');
     } else {
       assert.match(pageHtml(projectDir, project.pages[0]), /data-vw-origin="main h1"/);

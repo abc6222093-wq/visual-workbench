@@ -11,6 +11,13 @@
 
 `src/`、`web/` 不打进应用包，所以 `git pull` 之后**不需要重新制作应用**，下次打开就是新版本。只有 `desktop/` 本身改了才需要重新制作。
 
+### 第 12 轮修正：必须重新制作并替换应用（应用版本 0.2.0）
+第 12 轮给 `desktop/` 加了右键菜单（剪切 / 复制 / 粘贴 / 全选），本轮又改了 `desktop/`（右键菜单绑定、窗口 User-Agent 带应用版本）。这些代码在应用包里，**旧应用（第 11 轮制作的 0.1.0）里没有**——这就是「右键不能复制粘贴」一直没好的原因。必须重新制作并替换应用，否则右键菜单不会出现：
+- Mac：关掉应用 → 在仓库里 `cd desktop && npm ci && npm run pack:mac` → 用新的 `desktop/dist/视觉工作台-darwin-universal/视觉工作台.app` 替换「应用程序」里的旧应用（见下文「Mac 安装」）；或者从 Actions 的 desktop 工作流下载 `visual-workbench-mac`。
+- Windows：关掉应用 → 重新运行 `install-windows.ps1`。
+
+应用在窗口的 User-Agent 末尾追加 ` VisualWorkbenchDesktop/<desktop/package.json 的 version>`（`core.desktopUserAgent`）。工作台界面看到 `Electron/` 但没有这个标记、或版本低于 0.2.0 时，在顶部提示「桌面应用是旧版本，右键菜单等功能要重新制作应用才有」。以后再改 `desktop/`，把 `desktop/package.json`（和 `package-lock.json` 顶部两处）的 version 一起升上去，界面的版本门槛也跟着改。
+
 ## 行为细节
 - 已经开着时再点图标：只把原来的窗口叫到前面（单实例锁；Mac 上点程序坞图标同理）。
 - 4173 上已有本仓库的工作台在跑（`/api/health` 的 `repoDir` 相同、代码指纹相同）：直接连上，不再启动；关窗口时仍然正常关闭它（发 shutdown），但不会去结束别人启动的进程。
@@ -18,6 +25,7 @@
 - 4173 被别的程序占用：弹中文提示，不启动。
 - 找不到系统 Node 22+：弹「未找到 Node.js 22 或更新版本…」，可点「打开下载页」。Mac 从程序坞打开时 PATH 很短，应用会自己补上 `/opt/homebrew/bin`、`/usr/local/bin` 等。
 - 页面里点「关闭工作台」按钮：服务退出后应用也跟着退出。
+- 右键（第 12 轮起）：可编辑的地方（工作台的输入框、页面里正在改的字）弹原生菜单「剪切 / 复制 / 粘贴 / 全选」，按能不能用变灰；不可编辑但选中了文字时只有「复制」；其他地方不弹（工作台自己的菜单照旧）。页面在沙箱 iframe 里，右键事件仍在窗口的 webContents 上触发，`params.frame` 指向那个 iframe，`Menu.popup({ window, frame })` 把它传过去；菜单项用 role（cut / copy / paste / selectAll，作用于聚焦的 frame），另外绑定 `contents.copy()` 等作兜底（`desktop/lib/edit-menu.cjs` 的 `bindToContents`）。应用菜单的「编辑」也用 role，Mac 上 Cmd+X/C/V/A/Z 靠它。
 - 外链和 `window.open` 用系统浏览器打开；工作台自己的页面留在窗口里。`Ctrl/Cmd+R` 重新载入，Windows 上 `F12`、Mac 上 `Alt+Cmd+I` 打开开发者工具。
 - 运行日志：Windows `%APPDATA%\视觉工作台\desktop.log`，Mac `~/Library/Application Support/视觉工作台/desktop.log`。
 
@@ -34,13 +42,14 @@
 | 文件 | 作用 |
 |---|---|
 | `desktop/main.cjs` | 主进程接线 |
-| `desktop/lib/core.cjs` | 可测的纯逻辑：找仓库、找 Node、健康检查、端口判断、关闭流程 |
+| `desktop/lib/core.cjs` | 可测的纯逻辑：找仓库、找 Node、健康检查、端口判断、关闭流程、User-Agent 版本标记 |
+| `desktop/lib/edit-menu.cjs` | 应用菜单「编辑」和右键菜单的模板（纯逻辑） |
 | `desktop/lib/icons.cjs` | 手写 ICO / ICNS 容器 |
 | `desktop/scripts/make-icons.mjs` | 用 `web/ui/mascot.js` 的兔子生成 `desktop/build/icon.png/.ico/.icns`（生成物进 git） |
 | `desktop/scripts/pack.mjs` | 用 `@electron/packager` 制作应用（不签名；Mac 上只做免费的 ad-hoc 临时签名） |
 | `desktop/install-windows.ps1` | Windows 一键安装：制作应用、写仓库位置、建桌面和开始菜单快捷方式 |
 | `.github/workflows/desktop.yml` | macOS + Windows 构建、`--smoke` 自测、上传下载包 |
-| `test/round11-desktop-*.test.js` | 单元测试（不需要装 electron） |
+| `test/round11-desktop-*.test.js`、`test/round12-desktop-menu.test.js`、`test/round12-fix-desktop-shell.test.js` | 单元测试（不需要装 electron） |
 
 ## 常用命令（在 `desktop/` 里）
 | 做什么 | 命令 |
