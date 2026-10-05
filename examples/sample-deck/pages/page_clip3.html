@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>裁切与分组</title>
+<style>
+  @font-face { font-family: "Inter"; src: url("../fonts/Inter-Variable.ttf"); font-weight: 100 900; }
+  html, body { margin: 0; width: 1920px; height: 1080px; }
+  body { position: relative; overflow: hidden; background: #fafaf9; color: #1c1917; font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  /* 用户可以双击这张图裁切；菱形外框是 agent 的设计，裁切在框里面进行 */
+  .shot { position: absolute; left: 160px; top: 160px; width: 800px; height: 600px; object-fit: cover; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+  .panel {
+    position: absolute; left: 1100px; top: 200px; width: 640px; height: 520px; box-sizing: border-box;
+    padding: 40px; border: 2px solid #d6d3d1; border-radius: 32px; background: #fff;
+    display: grid; grid-template-columns: 240px 1fr; grid-template-rows: auto 1fr; gap: 40px;
+  }
+  .panel h2 { grid-column: 1 / -1; margin: 0; font-size: 48px; font-weight: 600; line-height: 1.4; }
+  .panel svg { width: 240px; height: 240px; }
+  .panel p { margin: 0; font-size: 28px; line-height: 1.5; color: #44403c; }
+  .footnote { position: absolute; left: 160px; top: 860px; width: 1600px; margin: 0; font-size: 28px; color: #78716c; }
+</style>
+</head>
+<body>
+  <img class="shot" data-vw-id="shot" data-vw="move resize crop" src="../assets/photo-city.png" alt="城市照片">
+  <section class="panel" data-vw-id="panel" data-vw="move resize background">
+    <h2 data-vw-id="panelTitle" data-vw="text color">分组：<b>整体</b>一起动</h2>
+    <svg class="triangle" data-vw-id="triangle" viewBox="0 0 100 100"><polygon points="50,0 100,100 0,100" fill="#0ea5e9"/></svg>
+    <p data-vw-id="panelText" data-vw="text color">卡片里的东西跟着卡片走。用户拖动卡片时，<span style="color:#0ea5e9">标题、图形和这段话</span>一起移动。</p>
+  </section>
+  <p class="footnote" data-vw-id="footnote" data-vw="text color">素材 asset_newpic1 是用户新拖进来的照片，agent 下一轮把它排进页面。</p>
+
+<script type="module">
+  // 两步：① 菱形窗口展开成六边形；② 卡片整体左移放大，三角形转半圈。
+  const shot = document.querySelector('[data-vw-id="shot"]');
+  const panel = document.querySelector('[data-vw-id="panel"]');
+  const triangle = document.querySelector('[data-vw-id="triangle"]');
+  window.vw?.motion({
+    async step(index, ctx) {
+      if (index === 0) {
+        await ctx.animate(shot, [
+          { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%, 0% 50%, 50% 0%)' },
+          { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' },
+        ], { duration: 700, fill: 'forwards' });
+      } else if (index === 1) {
+        await Promise.all([
+          ctx.animate(panel, [{ transform: 'none' }, { transform: 'translateX(-80px) scale(1.05)' }], { duration: 560, fill: 'forwards' }),
+          ctx.animate(triangle, [{ transform: 'none' }, { transform: 'rotate(180deg)' }], { duration: 560, fill: 'forwards' }),
+        ]);
+      }
+    },
+  });
+</script>
+</body>
+</html>

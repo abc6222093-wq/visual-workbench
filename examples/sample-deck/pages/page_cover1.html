@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>封面：逐项出现</title>
+<style>
+  @font-face { font-family: "Inter"; src: url("../fonts/Inter-Variable.ttf"); font-weight: 100 900; }
+  html, body { margin: 0; width: 1920px; height: 1080px; }
+  body {
+    position: relative; overflow: hidden;
+    background: #0f172a; color: #fff;
+    font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  /* 背景照片：渐隐到底色，纯装饰，不给用户动 */
+  .backdrop {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .8;
+    -webkit-mask-image: linear-gradient(180deg, #000, transparent); mask-image: linear-gradient(180deg, #000, transparent);
+    pointer-events: none;
+  }
+  .content { position: absolute; left: 160px; top: 300px; width: 1600px; }
+  h1 { margin: 0; font-size: 120px; font-weight: 700; line-height: 1.2; }
+  .lead { margin: 36px 0 0; font-size: 48px; line-height: 1.4; color: #cbd5e1; }
+  .lead b { color: #fff; }
+  ol { list-style: none; margin: 92px 0 0; padding: 0; display: grid; gap: 34px; }
+  li { font-size: 40px; line-height: 1.4; }
+  .logo { position: absolute; left: 1560px; top: 80px; width: 200px; height: 200px; object-fit: contain; }
+</style>
+</head>
+<body>
+  <img class="backdrop" src="../assets/photo-city.png" alt="">
+  <div class="content">
+    <h1 data-vw-id="title" data-vw="text move color">视觉工作台</h1>
+    <p class="lead" data-vw-id="lead" data-vw="text move color">agent <b>生成</b> · 用户<span style="color:#fbbf24">微调</span> · agent 继续</p>
+    <ol>
+      <li data-vw-id="point1" data-vw="text move color">① 点一下文字直接改，<b>局部加粗、变色</b>都保留</li>
+      <li data-vw-id="point2" data-vw="text move color">② agent 写页面和动效，用户只管微调</li>
+      <li data-vw-id="point3" data-vw="text move color">③ 挪了位置，动效从<span style="color:#38bdf8">新位置</span>接着播</li>
+    </ol>
+  </div>
+  <img class="logo" data-vw-id="logo" data-vw="move resize" src="../assets/logo.png" alt="标志">
+
+<script type="module">
+  // 第 1 屏：标题、副标题淡入，三条要点先藏起来；第 1 次点击逐条出现；第 2 次点击背景亮一下。
+  const points = ['point1', 'point2', 'point3'].map(id => document.querySelector(`[data-vw-id="${id}"]`));
+  const title = document.querySelector('[data-vw-id="title"]');
+  const lead = document.querySelector('[data-vw-id="lead"]');
+  const backdrop = document.querySelector('.backdrop');
+  window.vw?.motion({
+    async init(ctx) {
+      for (const node of points) node.style.opacity = '0';
+      await Promise.all([
+        ctx.animate(title, [{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }], { duration: 520, easing: 'ease-out' }),
+        ctx.animate(lead, [{ opacity: 0 }, { opacity: 1 }], { duration: 680 }),
+      ]);
+    },
+    async step(index, ctx) {
+      if (index === 0) {
+        await Promise.all(points.map(async (node, i) => {
+          await ctx.timer(i * 170);
+          await ctx.animate(node, [{ opacity: 0, transform: 'translateY(18px)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: 'ease-out', fill: 'forwards' });
+        }));
+      } else if (index === 1) {
+        await ctx.animate(backdrop, [{ filter: 'none' }, { filter: 'brightness(1.35)' }, { filter: 'none' }], { duration: 700 });
+      }
+    },
+    async leave(ctx, { direction }) {
+      await ctx.animate(document.body, [{ opacity: 1 }, { opacity: 0, transform: `translateX(${direction > 0 ? -4 : 4}%)` }], { duration: 400, fill: 'forwards' });
+    },
+  });
+</script>
+</body>
+</html>

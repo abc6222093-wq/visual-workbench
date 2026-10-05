@@ -1,0 +1,579 @@
+{
+  "format": "visual-workbench/project",
+  "formatVersion": 2,
+  "id": "v2-deck",
+  "name": "v2 deck fixture",
+  "createdAt": "2026-10-01T00:00:00.000Z",
+  "updatedAt": "2026-10-01T00:00:00.000Z",
+  "artboard": {
+    "preset": "custom",
+    "width": 640,
+    "height": 360
+  },
+  "assets": [
+    {
+      "id": "asset_photo1",
+      "kind": "image",
+      "file": "assets/photo.png",
+      "name": "photo",
+      "width": 640,
+      "height": 360,
+      "pendingLayout": false,
+      "addedAt": "2026-10-01T00:00:00.000Z",
+      "source": {
+        "type": "upload"
+      }
+    },
+    {
+      "id": "asset_star1",
+      "kind": "image",
+      "file": "assets/star.svg",
+      "name": "star",
+      "width": 100,
+      "height": 100,
+      "pendingLayout": false,
+      "addedAt": "2026-10-01T00:00:00.000Z",
+      "source": {
+        "type": "upload"
+      }
+    }
+  ],
+  "fonts": [
+    {
+      "id": "font_inter",
+      "family": "Inter",
+      "file": "fonts/Inter-600-ascii.woff2",
+      "weight": 600,
+      "style": "normal"
+    }
+  ],
+  "pages": [
+    {
+      "id": "page_text1",
+      "name": "text",
+      "background": "#0f172a",
+      "elements": [
+        {
+          "id": "el_text1",
+          "type": "text",
+          "name": "el_text1",
+          "x": 40,
+          "y": 30,
+          "width": 560,
+          "height": 56,
+          "zIndex": 2,
+          "text": "Hello Workbench",
+          "font": "font_inter",
+          "fontSize": 40,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#ffffff"
+        },
+        {
+          "id": "el_text2",
+          "type": "text",
+          "name": "el_text2",
+          "x": 40,
+          "y": 104,
+          "width": 560,
+          "height": 50,
+          "zIndex": 3,
+          "text": "Stroke & Shadow",
+          "font": "font_inter",
+          "fontSize": 36,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 2,
+          "align": "center",
+          "color": "#fde68a",
+          "stroke": {
+            "color": "#e11d48",
+            "width": 3
+          },
+          "shadow": {
+            "color": "#00000099",
+            "x": 4,
+            "y": 6,
+            "blur": 8
+          }
+        },
+        {
+          "id": "el_text3",
+          "type": "text",
+          "name": "el_text3",
+          "x": 40,
+          "y": 180,
+          "width": 300,
+          "height": 120,
+          "zIndex": 2,
+          "text": "Line one\nLine two wraps across the box width nicely",
+          "font": "font_inter",
+          "fontSize": 18,
+          "fontWeight": 600,
+          "lineHeight": 1.6,
+          "letterSpacing": 0,
+          "align": "right",
+          "color": "#94a3b8",
+          "rotation": -4,
+          "opacity": 0.85
+        },
+        {
+          "id": "el_text4",
+          "type": "text",
+          "name": "el_text4",
+          "x": 400,
+          "y": 290,
+          "width": 200,
+          "height": 40,
+          "zIndex": 2,
+          "text": "Mirror",
+          "font": "font_inter",
+          "fontSize": 28,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#38bdf8",
+          "flipX": true
+        },
+        {
+          "id": "el_text5",
+          "type": "text",
+          "name": "el_text5",
+          "x": 420,
+          "y": 150,
+          "width": 200,
+          "height": 150,
+          "zIndex": 0,
+          "text": "42",
+          "font": null,
+          "fontSize": 120,
+          "fontWeight": 400,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#ffffff22",
+          "locked": true
+        }
+      ]
+    },
+    {
+      "id": "page_images2",
+      "name": "images",
+      "background": "#e2e8f0",
+      "elements": [
+        {
+          "id": "el_img1",
+          "type": "image",
+          "name": "el_img1",
+          "x": 20,
+          "y": 20,
+          "width": 200,
+          "height": 150,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover"
+        },
+        {
+          "id": "el_img2",
+          "type": "image",
+          "name": "el_img2",
+          "x": 240,
+          "y": 20,
+          "width": 160,
+          "height": 150,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "contain"
+        },
+        {
+          "id": "el_img3",
+          "type": "image",
+          "name": "el_img3",
+          "x": 420,
+          "y": 20,
+          "width": 192,
+          "height": 108,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover",
+          "crop": {
+            "x": 0.25,
+            "y": 0.1,
+            "width": 0.5,
+            "height": 0.5
+          }
+        },
+        {
+          "id": "el_img4",
+          "type": "image",
+          "name": "el_img4",
+          "x": 20,
+          "y": 200,
+          "width": 120,
+          "height": 120,
+          "zIndex": 1,
+          "asset": "asset_star1",
+          "fit": "contain",
+          "tint": "#e11d48"
+        },
+        {
+          "id": "el_img5",
+          "type": "image",
+          "name": "el_img5",
+          "x": 170,
+          "y": 210,
+          "width": 160,
+          "height": 90,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover",
+          "flipX": true,
+          "rotation": 8,
+          "effects": {
+            "filters": {
+              "grayscale": 1
+            }
+          }
+        },
+        {
+          "id": "el_img6",
+          "type": "image",
+          "name": "el_img6",
+          "x": 360,
+          "y": 180,
+          "width": 240,
+          "height": 135,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover",
+          "crop": {
+            "x": 0,
+            "y": 0,
+            "width": 0.5,
+            "height": 0.5
+          },
+          "effects": {
+            "blend": "multiply",
+            "mask": {
+              "type": "linear",
+              "angle": 90,
+              "stops": [
+                {
+                  "offset": 0,
+                  "opacity": 1
+                },
+                {
+                  "offset": 1,
+                  "opacity": 0.2
+                }
+              ]
+            },
+            "clip": {
+              "type": "polygon",
+              "points": [
+                [
+                  10,
+                  0
+                ],
+                [
+                  100,
+                  0
+                ],
+                [
+                  90,
+                  100
+                ],
+                [
+                  0,
+                  100
+                ]
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "page_shapes3",
+      "name": "shapes",
+      "background": {
+        "type": "linear",
+        "angle": 135,
+        "stops": [
+          {
+            "offset": 0,
+            "color": "#1e293b"
+          },
+          {
+            "offset": 1,
+            "color": "#334155"
+          }
+        ]
+      },
+      "elements": [
+        {
+          "id": "el_shp1",
+          "type": "shape",
+          "name": "el_shp1",
+          "x": 20,
+          "y": 20,
+          "width": 180,
+          "height": 110,
+          "zIndex": 1,
+          "shape": "rect",
+          "fill": {
+            "type": "linear",
+            "angle": 90,
+            "stops": [
+              {
+                "offset": 0,
+                "color": "#f43f5e"
+              },
+              {
+                "offset": 1,
+                "color": "#f59e0b"
+              }
+            ]
+          },
+          "stroke": {
+            "color": "#ffffff",
+            "width": 3
+          },
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_shp2",
+          "type": "shape",
+          "name": "el_shp2",
+          "x": 220,
+          "y": 20,
+          "width": 140,
+          "height": 110,
+          "zIndex": 1,
+          "shape": "ellipse",
+          "fill": {
+            "type": "radial",
+            "stops": [
+              {
+                "offset": 0,
+                "color": "#fde047"
+              },
+              {
+                "offset": 1,
+                "color": "#16a34a"
+              }
+            ]
+          },
+          "stroke": null,
+          "opacity": 0.8
+        },
+        {
+          "id": "el_shp3",
+          "type": "shape",
+          "name": "el_shp3",
+          "x": 380,
+          "y": 20,
+          "width": 220,
+          "height": 110,
+          "zIndex": 1,
+          "shape": "line",
+          "fill": null,
+          "stroke": {
+            "color": "#38bdf8",
+            "width": 4
+          }
+        },
+        {
+          "id": "el_shp4",
+          "type": "shape",
+          "name": "el_shp4",
+          "x": 30,
+          "y": 170,
+          "width": 150,
+          "height": 150,
+          "zIndex": 1,
+          "shape": "polygon",
+          "fill": {
+            "type": "linear",
+            "angle": 180,
+            "stops": [
+              {
+                "offset": 0,
+                "color": "#a78bfa"
+              },
+              {
+                "offset": 1,
+                "color": "#4c1d95"
+              }
+            ]
+          },
+          "stroke": {
+            "color": "#f5f3ff",
+            "width": 2
+          },
+          "points": [
+            [
+              50,
+              0
+            ],
+            [
+              61,
+              35
+            ],
+            [
+              98,
+              35
+            ],
+            [
+              68,
+              57
+            ],
+            [
+              79,
+              91
+            ],
+            [
+              50,
+              70
+            ],
+            [
+              21,
+              91
+            ],
+            [
+              32,
+              57
+            ],
+            [
+              2,
+              35
+            ],
+            [
+              39,
+              35
+            ]
+          ],
+          "rotation": 15
+        },
+        {
+          "id": "el_grp1",
+          "type": "group",
+          "name": "group",
+          "x": 220,
+          "y": 160,
+          "width": 380,
+          "height": 180,
+          "zIndex": 2,
+          "rotation": -3,
+          "flipY": true,
+          "children": [
+            {
+              "id": "el_grp1bg",
+              "type": "shape",
+              "name": "el_grp1bg",
+              "x": 0,
+              "y": 0,
+              "width": 380,
+              "height": 180,
+              "zIndex": 0,
+              "shape": "rect",
+              "fill": "#0ea5e9",
+              "stroke": null,
+              "cornerRadius": 20
+            },
+            {
+              "id": "el_grp1t",
+              "type": "text",
+              "name": "el_grp1t",
+              "x": 20,
+              "y": 20,
+              "width": 200,
+              "height": 40,
+              "zIndex": 1,
+              "text": "Group",
+              "font": "font_inter",
+              "fontSize": 24,
+              "fontWeight": 600,
+              "lineHeight": 1.3,
+              "letterSpacing": 0,
+              "align": "left",
+              "color": "#ffffff"
+            },
+            {
+              "id": "el_g1dot",
+              "type": "shape",
+              "name": "el_g1dot",
+              "x": 300,
+              "y": 110,
+              "width": 50,
+              "height": 50,
+              "zIndex": 1,
+              "shape": "ellipse",
+              "fill": "#fde047",
+              "stroke": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_motion4",
+      "name": "motion",
+      "background": "#111827",
+      "motion": {
+        "steps": 2,
+        "source": "export default async function (ctx) {\n  const title = ctx.element('el_mtitle').node;\n  const box = ctx.element('el_mbox').node;\n  const dot = ctx.element('el_mdot').node;\n  const pose = box.style.transform || '';\n  title.style.opacity = '0';\n  return {\n    async step(index) {\n      if (index === 0) {\n        await ctx.animate(title, [{ opacity: 0 }, { opacity: ctx.element('el_mtitle').base.opacity ?? 1 }], { duration: 300, fill: 'forwards' });\n        await ctx.animate(box, [{ transform: pose }, { transform: pose + ' translateX(' + ctx.element('el_mbox').base.width * 2 + 'px)' }], { duration: 300, fill: 'forwards' });\n      } else if (index === 1) {\n        const { animate } = await ctx.importModule('/vendor/anime.esm.min.js');\n        await animate(dot, { translateY: -120, backgroundColor: '#facc15', duration: 300 });\n        await ctx.timer(50);\n      }\n    },\n    async transition({ to }) { if (to) await ctx.animate(to, [{ opacity: 0 }, { opacity: 1 }], { duration: 200 }); },\n    dispose() {}\n  };\n}"
+      },
+      "elements": [
+        {
+          "id": "el_mtitle",
+          "type": "text",
+          "name": "el_mtitle",
+          "x": 40,
+          "y": 40,
+          "width": 560,
+          "height": 50,
+          "zIndex": 2,
+          "text": "Step by step",
+          "font": "font_inter",
+          "fontSize": 36,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#ffffff"
+        },
+        {
+          "id": "el_mbox",
+          "type": "shape",
+          "name": "el_mbox",
+          "x": 40,
+          "y": 200,
+          "width": 80,
+          "height": 80,
+          "zIndex": 1,
+          "shape": "rect",
+          "fill": "#22c55e",
+          "stroke": null,
+          "cornerRadius": 8
+        },
+        {
+          "id": "el_mdot",
+          "type": "shape",
+          "name": "el_mdot",
+          "x": 520,
+          "y": 240,
+          "width": 40,
+          "height": 40,
+          "zIndex": 1,
+          "shape": "ellipse",
+          "fill": "#f43f5e",
+          "stroke": null
+        }
+      ]
+    }
+  ]
+}
