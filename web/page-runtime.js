@@ -7,7 +7,7 @@
  */
 (function () {
   'use strict';
-  const VERSION = '12.0.0';
+  const VERSION = '13.0.0';
   const CAPS = ['text', 'move', 'resize', 'color', 'background', 'crop'];
   const USER_PREFIX = 'u_';
   const USER_CAPS = ['move', 'resize', 'crop'];
@@ -324,6 +324,13 @@
 
   // ---------- 动效（play 模式） ----------
   let handlers = null;
+  let editReadySent = false, heldStart = null;
+  // 编辑画布 ready 里额外报：页面自己的动画数、自己的 <script> 数（导入的旧页面用自己的 CSS / JS 动画，没有 vw.motion）
+  const pageActivity = () => ({
+    animations: typeof doc.getAnimations === 'function' ? doc.getAnimations().length : 0,
+    scripts: [...doc.scripts].filter(s => !s.hasAttribute('data-vw-runtime') && !s.hasAttribute('data-vw-boot') && !s.hasAttribute('data-vw-apply')).length
+  });
+  const motionInfo = () => ({ registered: !!handlers, hasStep: !!handlers && typeof handlers.step === 'function' });
   let registeredResolve;
   const registered = new Promise(resolve => { registeredResolve = resolve; });
   let motion = null; // { controller, ctx, nextStep, total, fast, busy, current, ready }
@@ -448,6 +455,46 @@
       }
     });
     return state.ready;
+  }
+  // ---------- 数屏（第 13 轮 §4.3）：快进跑 init，再逐步 step(i)，每步后比对画面快照，和上一步一样就停 ----------
+  const MAX_COUNT = 30;
+  function screenSnapshot() {
+    const parts = [];
+    const props = ['opacity', 'visibility', 'transform', 'display', 'translate', 'scale', 'rotate'];
+    for (const el of (doc.body || doc.documentElement).querySelectorAll('*')) {
+      if (el.closest('vw-ui,script,style,template')) continue;
+      const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+      parts.push(`${el.innerHTML.length}|${props.map(p => cs.getPropertyValue(p)).join('|')}|${r2(r.left)},${r2(r.top)},${r2(r.width)},${r2(r.height)}`);
+    }
+    return parts.join('\n');
+  }
+  async function countSteps() {
+    const state = { controller: new AbortController(), nextStep: 0, total: 0, fast: true, edit: false, target: 0, busy: false, current: Promise.resolve(), ctxStep: -1, inited: false, finishAll: () => {} };
+    motion = state;
+    state.ctx = createContext(state);
+    state.ready = Promise.resolve();
+    await loaded;
+    // 页面脚本里写了 vw.motion 或有模块脚本时才等登记（最多 timeout）；都没有的页面不用等
+    if (!handlers && pageMentionsMotion()) await Promise.race([registered, delay(Number(cfg.timeout) || 5000)]);
+    const hasStep = !!handlers && typeof handlers.step === 'function';
+    let count = 0;
+    try {
+      if (handlers && typeof handlers.init === 'function') { state.inited = true; await handlers.init(state.ctx); }
+      state.finishAll();
+      if (hasStep) {
+        let prev = screenSnapshot();
+        for (let i = 0; i < MAX_COUNT; i++) {
+          state.ctxStep = i;
+          try { await handlers.step(i, state.ctx); } catch (error) { postError(error, `step ${i + 1}`); break; }
+          state.finishAll();
+          const next = screenSnapshot();
+          if (next === prev) break;
+          count = i + 1; prev = next;
+        }
+      }
+    } catch (error) { postError(error, 'init'); }
+    state.nextStep = state.total = count;
+    return { countedSteps: count, hasStep };
   }
   function stopPlay() {
     if (!motion) return;
@@ -732,6 +779,30 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     if (!range || !el.contains(range.startContainer)) { range = doc.createRange(); range.selectNodeContents(el); range.collapse(false); }
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
   }
+  // 选中 (x, y) 处的词（Intl.Segmenter 分词，中文也按词；没有时用 Selection.modify）
+  function selectWordAt(el, x, y) {
+    el.focus({ preventScroll: true });
+    let range = null;
+    if (doc.caretRangeFromPoint) range = doc.caretRangeFromPoint(x, y);
+    else if (doc.caretPositionFromPoint) { const p = doc.caretPositionFromPoint(x, y); if (p) { range = doc.createRange(); range.setStart(p.offsetNode, p.offset); } }
+    const sel = window.getSelection();
+    if (!range || !el.contains(range.startContainer)) { placeCaret(el, x, y); return; }
+    const node = range.startContainer, offset = range.startOffset;
+    if (node.nodeType === 3 && typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const text = node.nodeValue;
+      for (const seg of new Intl.Segmenter(doc.documentElement.lang || undefined, { granularity: 'word' }).segment(text)) {
+        const end = seg.index + seg.segment.length;
+        if (offset < end || end === text.length) {
+          // 点在词尾的空白上时取前一个词（和浏览器一样）
+          const r = doc.createRange(); r.setStart(node, seg.index); r.setEnd(node, end);
+          sel.removeAllRanges(); sel.addRange(r);
+          return;
+        }
+      }
+    }
+    sel.removeAllRanges(); sel.addRange(range);
+    try { sel.modify('move', 'backward', 'word'); sel.modify('extend', 'forward', 'word'); } catch (error) { /* 不支持 */ }
+  }
   function flushText() {
     const E = edit; const el = E && E.editing;
     clearTimeout(E.textTimer);
@@ -802,12 +873,18 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     const el = edge || markFrom(e.target);
     if (!el) { e.preventDefault(); takeFocus(); select(null); return; }
     const caps = capsOf(el);
-    if (caps.includes('text') && !edge) { enterEditing(el, e); return; }
+    // 选中优先（第 13 轮 §4.1）：带 text 的元素第一下只选中整块（可拖、可方向键）；已选中再点一下（没拖动）才在点的位置出光标；
+    // 双击（第二下按下时已选中）直接进入改字，不拦默认行为，浏览器照常选词。框线附近（edge）的点击永远只是选中 / 拖动。
+    const wasSelected = E.selected === el;
+    const textClick = caps.includes('text') && !edge && wasSelected;
+    if (textClick && e.detail >= 2) { enterEditing(el, e); return; }
     e.preventDefault();
     takeFocus();
     select(el);
     if (caps.includes('move')) {
-      E.drag = { type: 'move', el, id: e.pointerId, sx: e.clientX, sy: e.clientY, scrollX: window.scrollX, scrollY: window.scrollY, base: Object.assign({ dx: 0, dy: 0 }, moveOf(el)), moved: false, before: beforeOf(el, 'move') };
+      E.drag = { type: 'move', el, id: e.pointerId, sx: e.clientX, sy: e.clientY, scrollX: window.scrollX, scrollY: window.scrollY, base: Object.assign({ dx: 0, dy: 0 }, moveOf(el)), moved: false, before: beforeOf(el, 'move'), editOnClick: textClick };
+    } else if (textClick) {
+      E.drag = { type: 'click', el, id: e.pointerId, sx: e.clientX, sy: e.clientY, editOnClick: true };
     }
   }
   // 按下时 preventDefault 会让浏览器不把焦点给 iframe；手动拿一下，键盘（Delete、方向键、Esc）才能到这里
@@ -821,7 +898,8 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     const d = E.drag;
     if (d && e.pointerId === d.id) {
       d.lastX = e.clientX; d.lastY = e.clientY;
-      if (d.type === 'move') dragMove(d, e.clientX, e.clientY);
+      if (d.type === 'click') { if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) >= 3) d.editOnClick = false; }
+      else if (d.type === 'move') dragMove(d, e.clientX, e.clientY);
       else dragResize(d, e);
       return;
     }
@@ -832,11 +910,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     E.hovered = el && movable(capsOf(el)) ? el : null;
     let cursor = '';
     if (edge) cursor = 'move';
-    else if (el && el !== E.editing) {
-      const caps = capsOf(el);
-      if (caps.includes('text')) cursor = 'text';
-      else if (caps.includes('move')) cursor = 'move';
-    }
+    else if (el && el !== E.editing && capsOf(el).includes('move')) cursor = 'move'; // 带 text 的也是 move（第一下是选中整块）；改字中的元素由样式给 I 形
     if (cursor) doc.documentElement.setAttribute('data-vw-cursor', cursor); else doc.documentElement.removeAttribute('data-vw-cursor');
   }
   function dragMove(d, cx, cy) {
@@ -871,6 +945,11 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     E.drag = null;
     try { doc.documentElement.releasePointerCapture(e.pointerId); } catch (error) { /* 忽略 */ }
     if (d.type === 'move' && d.moved) commit(d.el, 'move', STATE.applied.get(d.el).move);
+    else if (d.editOnClick && E.selected === d.el && d.el.isConnected) { // 已选中的文字再点一下：在点的位置出光标
+      enterEditing(d.el, e);
+      E.justEntered = d.el;
+      setTimeout(() => { if (E.justEntered === d.el) E.justEntered = null; }, 800);
+    }
     if (d.type === 'resize' && d.changed) {
       commit(d.el, 'resize', STATE.applied.get(d.el).resize);
       if (d.moves) commit(d.el, 'move', STATE.applied.get(d.el).move);
@@ -916,6 +995,8 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   }
   function onDblClick(e) {
     const E = edit;
+    // 双击未选中的文字：第二下松开时刚进入改字（按下时还不可编辑，浏览器没选词），这里补选点到的词
+    if (E.editing && E.editing.contains(e.target) && E.editing === E.justEntered) { E.justEntered = null; selectWordAt(E.editing, e.clientX, e.clientY); return; }
     if (E.crop || E.editing) return;
     const hit = e.target === doc.documentElement || e.target === doc.body ? doc.elementFromPoint(e.clientX, e.clientY) : e.target;
     const el = markFrom(hit);
@@ -1120,6 +1201,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         case 'screen': gotoScreenMessage(m.screen); break;
         case 'settle': settle(m.timeout).then(() => post({ vw: 'settled', ok: true, height: contentHeight() }), error => post({ vw: 'settled', ok: false, error: describe(error).message, height: contentHeight() })); break;
         case 'mode': switchMode(m.mode); break;
+        case 'start': if (heldStart) { const run = heldStart; heldStart = null; run(); } break;
         case 'scroll': window.scrollTo(window.scrollX, Number(m.top) || 0); break;
         case 'uiScale': if (edit) { edit.scale = Number(m.scale) || 1; applyScale(); } cfg.uiScale = m.scale; break;
       }
@@ -1192,6 +1274,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     let lastHeight = 0, scrollRaf = 0;
     const reportHeight = () => { const h = contentHeight(); if (h !== lastHeight) { lastHeight = h; post({ vw: 'height', height: h }); } };
     window.addEventListener('scroll', () => { if (scrollRaf) return; scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; post({ vw: 'scroll', top: window.scrollY, left: window.scrollX }); }); }, { passive: true });
+    const runPlay = () => startPlay().then(() => { if (!motion) return; post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: motion.total, nextStep: motion.nextStep }); });
     const start = () => {
       applyNow();
       mode = cfg.mode === 'play' ? 'play' : 'edit';
@@ -1203,15 +1286,19 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         const go = () => {
           if (mode !== 'edit') return;
           setupEdit();
-          post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: Math.max(0, Number(cfg.steps) || 0), nextStep: motion ? motion.nextStep : 0, screen: k });
+          editReadySent = true;
+          post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: Math.max(0, Number(cfg.steps) || 0), nextStep: motion ? motion.nextStep : 0, screen: k, motion: Object.assign(motionInfo(), pageActivity()) });
         };
         if (k) gotoScreen(k).then(go, error => { postError(error, 'screen'); go(); });
         else go();
       } else {
         // 先报 loaded（文档已加载、修改单已叠上），放映壳据此把 iframe 显示出来；ready 要等 init 跑完，
         // 而 init 里 await 的入场动画在 visibility:hidden 的 iframe 里不会走（Chromium 不推进隐藏 iframe 的动画），先显示才能就绪
-        post({ vw: 'loaded', pageId: cfg.pageId, mode, height: contentHeight() });
-        startPlay().then(() => { if (!motion) return; post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: motion.total, nextStep: motion.nextStep }); });
+        // hold（放映预加载，第 13 轮 §4.2）：只报 loaded，等父页面 { vw: 'start' } 再跑 init
+        post({ vw: 'loaded', pageId: cfg.pageId, mode, height: contentHeight(), held: !!cfg.hold && !cfg.countSteps });
+        if (cfg.countSteps) countSteps().then(result => post(Object.assign({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: result.countedSteps, nextStep: result.countedSteps }, result)));
+        else if (cfg.hold) heldStart = runPlay;
+        else runPlay();
       }
     };
     if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start, { once: true }); else start();
@@ -1225,6 +1312,8 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       if (!h || typeof h !== 'object') throw new Error('vw.motion(...) 需要一个对象：{ init, step, leave, dispose }');
       handlers = h;
       registeredResolve(h);
+      // 编辑画布：登记晚于 ready（模块脚本）时补报一条（第 13 轮 §4.3）
+      if (editReadySent && mode === 'edit') post(Object.assign({ vw: 'motion' }, motionInfo()));
     },
     __boot: boot,
     __apply: applyNow,

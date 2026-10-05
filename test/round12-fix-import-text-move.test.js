@@ -79,8 +79,10 @@ test('编辑画布上：导入的文字从框线拖动 → move 修改写进修�
   assert.ok(moved, '拖动导入的标题写进了 move 修改');
   assert.ok(moved.after.dx > 0 && moved.after.dy > 0, JSON.stringify(moved.after));
   assert.notEqual(await frame.locator('[data-vw-id="t1"]').evaluate(n => getComputedStyle(n).translate), 'none', '画布上标题已挪动');
-  // 点在字中间：进入改字（不是拖动）
+  // 点在字中间：第一下选中，再点一下进入改字（第 13 轮选中优先）
   await page.keyboard.press('Escape');
+  await clickInFrame(page, '[data-vw-id="t2"]');
+  await page.waitForTimeout(600);
   await clickInFrame(page, '[data-vw-id="t2"]');
   await frame.waitForFunction(() => document.activeElement?.dataset.vwId === 't2', null, { timeout: 5000 });
   assert.equal(await frame.evaluate(() => document.activeElement.isContentEditable), true);

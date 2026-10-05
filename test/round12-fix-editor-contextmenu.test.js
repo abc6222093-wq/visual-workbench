@@ -9,6 +9,8 @@ test('round12 修正 右键：页面名输入框和改字中的元素的 context
  await openProject(page);await page.waitForSelector('#artboard[data-ready="1"]',{timeout:15000});await painted(page);
  const input=page.locator('[data-page-name]');
  assert.equal(await input.evaluate(new Function('return '+fire)()),true,'页面名输入框的右键没被拦');
+ // 第 13 轮选中优先：第一下选中整块，隔开双击间隔再点一下才进入改字
+ await clickInFrame(page,'[data-vw-id="title"]');await page.waitForTimeout(600);
  await clickInFrame(page,'[data-vw-id="title"]');
  const frame=await (await page.$('#artboard > iframe')).contentFrame();
  await frame.waitForFunction(()=>document.querySelector('[data-vw-id="title"]')?.isContentEditable===true,null,{timeout:5000});

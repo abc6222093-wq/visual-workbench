@@ -41,7 +41,8 @@ test('round12 修正 玻璃：选中 / 取消选中 / 进出改字都不重建�
  const after=await plate(page,'quickbar');
  assert.ok(after&&!after.visible,'工具条隐藏后玻璃片不画（但节点保留）');
 
- // 3. 进出改字：单击标题进入改字，Esc 退出
+ // 3. 进出改字：第一下选中标题、再点一下进入改字（第 13 轮），Esc 退出
+ await clickInFrame(page,'[data-vw-id="title"]');await page.waitForTimeout(600);
  await clickInFrame(page,'[data-vw-id="title"]');await page.waitForTimeout(400);
  await page.keyboard.press('Escape');await page.waitForTimeout(200);await page.keyboard.press('Escape');
  await page.waitForTimeout(600);

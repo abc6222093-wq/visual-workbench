@@ -67,6 +67,14 @@ async function open(t, { edits = [] } = {}) {
   return { page, frame };
 }
 const msgs = (page, type) => page.evaluate(type => window.__msgs.filter(m => m.vw === type), type);
+// 第 13 轮选中优先：文字第一下选中整块，隔开双击间隔再点一下才出光标
+async function clickIntoText(page, frame, x, y, id = 'title') {
+  await page.mouse.click(x, y);
+  await until(async () => (await msgs(page, 'select')).at(-1)?.id === id, { label: '第一下选中' });
+  await pause(600);
+  await page.mouse.click(x, y);
+  await until(() => frame.evaluate(id => document.activeElement?.dataset.vwId === id, id), { label: '再点一下进入改字' });
+}
 const box = (frame, id) => frame.evaluate(id => { const r = document.querySelector(`[data-vw-id="${id}"]`).getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }, id);
 
 test('applyEditsToDocument：DOMParser 文档叠修改单、对不上的跳过、重放只恢复去掉的；staticDocument 删脚本', async t => {
@@ -124,12 +132,19 @@ test('applyEditsToDocument：DOMParser 文档叠修改单、对不上的跳过�
   assert.match(result.thumb, /data-vw-base/);
 });
 
-test('单击文字直接出光标改字，保留行内格式；Esc 退出不重建节点、不重载 iframe', async t => {
+test('文字第一下选中整块、再点一下出光标改字（第 13 轮），保留行内格式；Esc 退出不重建节点、不重载 iframe', async t => {
   const { page, frame } = await open(t);
   const token = `t${Date.now()}`;
   await page.evaluate(token => window.__iframe.contentWindow.postMessage({ vwtest: 'mark', token }, '*'), token);
   const title = await box(frame, 'title');
-  // 点在 "Hello" 的 H 后面一点
+  // 第一下：只选中（框 + 把手），不出光标
+  await page.mouse.click(title.x + 30, title.y + title.height / 2);
+  await until(async () => (await msgs(page, 'select')).at(-1)?.id === 'title', { label: '第一下选中标题' });
+  await pause(150);
+  assert.deepEqual(await frame.evaluate(() => ({ editable: document.querySelector('[data-vw-id=title]').hasAttribute('contenteditable'), focus: document.activeElement?.dataset?.vwId || null })), { editable: false, focus: null }, '第一下不出光标');
+  assert.equal((await msgs(page, 'editing')).length, 0);
+  await pause(600); // 隔开双击间隔
+  // 再点一下：点在 "Hello" 的 H 后面一点
   await page.mouse.click(title.x + 8, title.y + title.height / 2);
   await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 'title'), { label: '标题获得焦点' });
   const caret = await frame.evaluate(() => { const s = getSelection(); return { collapsed: s.isCollapsed, inside: document.querySelector('[data-vw-id=title]').contains(s.anchorNode), editable: document.querySelector('[data-vw-id=title]').isContentEditable }; });
@@ -152,7 +167,11 @@ test('单击文字直接出光标改字，保留行内格式；Esc 退出不重�
   await until(async () => (await msgs(page, 'editing')).at(-1)?.on === true);
   await page.mouse.click(900, 500);
   await until(async () => (await msgs(page, 'editing')).at(-1)?.on === false, { label: '点外面退出' });
-  // 父页面要求取消选中（例如点了 iframe 外面）也退出
+  // 父页面要求取消选中（例如点了 iframe 外面）也退出（点外面后标题没选中：先点一下选中，再点一下进入改字）
+  await pause(600);
+  await page.mouse.click(title.x + 30, title.y + title.height / 2);
+  await until(async () => (await msgs(page, 'select')).at(-1)?.id === 'title');
+  await pause(600);
   await page.mouse.click(title.x + 30, title.y + title.height / 2);
   await until(async () => (await msgs(page, 'editing')).at(-1)?.on === true);
   await page.evaluate(() => window.__f.select(null));
@@ -169,8 +188,8 @@ test('原生选区：双击选词、三击选段、Shift+方向键、Cmd/Ctrl+A 
   const { page, frame } = await open(t);
   const title = await box(frame, 'title');
   const wordX = await frame.evaluate(() => { const b = document.querySelector('[data-vw-id=title] b').getBoundingClientRect(); return b.left + b.width / 2; });
-  await page.mouse.click(wordX, title.y + title.height / 2);
-  await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 'title'));
+  await clickIntoText(page, frame, wordX, title.y + title.height / 2);
+  await pause(600);
   await page.mouse.dblclick(wordX, title.y + title.height / 2);
   assert.equal((await frame.evaluate(() => getSelection().toString())).trim(), 'World');
   await page.mouse.click(wordX, title.y + title.height / 2, { clickCount: 3 });
@@ -212,8 +231,7 @@ test('原生选区：双击选词、三击选段、Shift+方向键、Cmd/Ctrl+A 
 test('输入法组合期间不写修改，compositionend 后才写', async t => {
   const { page, frame } = await open(t);
   const title = await box(frame, 'title');
-  await page.mouse.click(title.x + 160, title.y + title.height / 2);
-  await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 'title'));
+  await clickIntoText(page, frame, title.x + 160, title.y + title.height / 2);
   await frame.evaluate(() => {
     const el = document.querySelector('[data-vw-id=title]');
     el.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }));
@@ -227,7 +245,7 @@ test('输入法组合期间不写修改，compositionend 后才写', async t => 
   assert.match(edit.after.text, /ni/);
 });
 
-test('拖动：无 text 的元素点哪都能拖、不覆盖原 transform；text 元素只能从框线拖，点在字上是改字', async t => {
+test('拖动：无 text 的元素点哪都能拖、不覆盖原 transform；text 元素第一下按住整块就能拖（第 13 轮），改字中在字上拖是拖选、框线仍能拖', async t => {
   const { page, frame } = await open(t);
   const card = await box(frame, 'card');
   await page.mouse.move(card.x + 100, card.y + 60);
@@ -253,27 +271,40 @@ test('拖动：无 text 的元素点哪都能拖、不覆盖原 transform；text
   assert.match(styles.transform, /^matrix\(0\.98/);
   assert.equal(styles.translate, '30px 20px');
   assert.equal(styles.inline, '');
-  // 标题：点在字中间是改字，不移动
+  // 标题（没选中）：第一下在字中间按住拖 = 移动整块，不进改字
   const title = await box(frame, 'title');
   await page.mouse.move(title.x + 150, title.y + title.height / 2);
   await page.mouse.down();
   await page.mouse.move(title.x + 250, title.y + title.height / 2, { steps: 5 });
   await page.mouse.up();
-  assert.deepEqual(await box(frame, 'title'), title);
-  assert.equal(await frame.evaluate(() => getSelection().toString().length > 0), true, '在字上拖是拖选');
+  const first = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'title'), { label: '在字上拖动标题的修改' });
+  assert.deepEqual(first.after, { dx: 100, dy: 0 });
+  assert.equal(await frame.evaluate(() => document.querySelector('[data-vw-id=title]').hasAttribute('contenteditable')), false, '拖完不进改字');
+  assert.equal((await msgs(page, 'editing')).length, 0);
+  // 已选中：双击进入改字，改字中在字上拖是拖选、不移动
+  const t2 = await box(frame, 'title');
+  await pause(600);
+  await page.mouse.dblclick(t2.x + 150, t2.y + t2.height / 2);
+  await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 'title'), { label: '双击进入改字' });
+  await page.mouse.move(t2.x + 50, t2.y + t2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(t2.x + 250, t2.y + t2.height / 2, { steps: 5 });
+  await page.mouse.up();
+  assert.deepEqual(await box(frame, 'title'), t2);
+  assert.equal(await frame.evaluate(() => getSelection().toString().length > 0), true, '改字中在字上拖是拖选');
   await page.keyboard.press('Escape');
   // 从框线（左边缘 3px 内）拖：移动
-  await page.mouse.move(title.x + 2, title.y + title.height / 2);
+  await page.mouse.move(t2.x + 2, t2.y + t2.height / 2);
   await page.mouse.down();
-  await page.mouse.move(title.x + 22, title.y + title.height / 2 + 40, { steps: 5 });
+  await page.mouse.move(t2.x + 22, t2.y + t2.height / 2 + 40, { steps: 5 });
   await page.mouse.up();
-  const moved = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 'title'), { label: '拖动标题的修改' });
-  assert.deepEqual(moved.after, { dx: 20, dy: 40 });
+  const moved = await until(async () => { const e = (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1); return e && e.after.dx === 120 ? e : null; }, { label: '从框线拖动标题的修改' });
+  assert.deepEqual(moved.after, { dx: 120, dy: 40 });
   assert.equal(await frame.evaluate(() => document.querySelector('[data-vw-id=title]').hasAttribute('contenteditable')), false);
   // 方向键微调
   await page.keyboard.press('Shift+ArrowRight');
-  const nudged = await until(async () => { const e = (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1); return e && e.after.dx === 30 ? e : null; }, { label: '方向键微调的修改' });
-  assert.deepEqual(nudged.after, { dx: 30, dy: 40 });
+  const nudged = await until(async () => { const e = (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1); return e && e.after.dx === 130 ? e : null; }, { label: '方向键微调的修改' });
+  assert.deepEqual(nudged.after, { dx: 130, dy: 40 });
 });
 
 test('缩放把手：普通元素自由缩放、左上把手同时移动；图片角上锁比例', async t => {

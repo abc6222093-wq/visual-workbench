@@ -1,6 +1,7 @@
 // 第 12 轮修正：文字怎么拖动要一眼看得出（参照 PowerPoint 文本框）。
 // 悬停有清楚的实线框；选中后 2px 实线框 + 8 个明显的把手；文字框的框线附近（内侧 10px、外侧 6px，屏幕像素）是移动光标、按下就能拖；
-// 点在字上仍是改字；图片、色块整块都能拖。框线和把手按 uiScale 换算，画布缩小时仍是屏幕像素。
+// 第 13 轮选中优先：带 move 的文字整块悬停也是移动光标、第一下按住整块就能拖；已选中再点一下（或双击）才改字。
+// 图片、色块整块都能拖。框线和把手按 uiScale 换算，画布缩小时仍是屏幕像素。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { launchBrowser } from '../src/browser.js';
@@ -73,10 +74,10 @@ test('悬停：可动的元素有清楚的实线框（≥2px、不透明度 ≥0
   assert.equal(state.hover.style, 'solid');
   assert.ok(alpha(state.hover.color) >= 0.9, state.hover.color);
   assert.equal(state.cursor, 'move', '色块整块都能拖');
-  // 文字：悬停也有框
+  // 文字：悬停也有框；带 move 的文字在字上也是移动光标（第 13 轮：第一下是选中整块）
   const title = await box(frame, 'title');
   await page.mouse.move(title.x + 150, title.y + title.height / 2);
-  await until(async () => (await ui(frame)).cursor === 'text', { label: '字上是 I 形光标' });
+  await until(async () => (await ui(frame)).cursor === 'move', { label: '字上是移动光标' });
   assert.equal((await ui(frame)).hover.hidden, false);
   // 选中色块
   await page.mouse.click(card.x + 100, card.y + 60);
@@ -90,8 +91,8 @@ test('悬停：可动的元素有清楚的实线框（≥2px、不透明度 ≥0
     assert.equal(h.bg, 'rgb(255, 255, 255)');
     assert.ok(h.border >= 1.5);
   }
-  // 改字中是虚线框
-  await page.mouse.click(title.x + 150, title.y + title.height / 2);
+  // 改字中是虚线框（双击未选中的文字：选中并进入改字）
+  await page.mouse.dblclick(title.x + 150, title.y + title.height / 2);
   await until(async () => (await ui(frame)).sel.style === 'dashed', { label: '改字时虚线框' });
 });
 
@@ -126,7 +127,7 @@ test('文字框：框线外 4px 处按下拖动 30px 是移动；框线内侧（
   await page.mouse.move(t2.x + t2.width - 40, t2.y + 28, { steps: 5 });
   await page.mouse.up();
   await until(async () => (await msgs(page, 'edit')).filter(e => e.kind === 'move' && e.target === 'title').at(-1)?.after.dy === 20, { label: '从上边框拖' });
-  // 字中间：改字，不移动
+  // 已选中（刚拖过）再点一下字中间：改字，不移动
   const t3 = await box(frame, 'title');
   await page.mouse.click(t3.x + 150, t3.y + t3.height / 2);
   await until(async () => (await msgs(page, 'editing')).at(-1)?.on === true, { label: '进入改字' });
