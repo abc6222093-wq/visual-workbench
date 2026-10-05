@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { WEBKIT_TEST_FILES, webkitTestArgs, runWebkitTests } from '../scripts/test-webkit.js';
 const repo = fileURLToPath(new URL('../', import.meta.url));
 
-test('WebKit selection covers text editing, crop, auto height, stroke and tint, and every file exists', () => {
-  for (const name of ['round9-text-edit', 'round10-crop', 'round10-text-height', 'round10-canvas', 'text-style', 'image-tint']) assert.ok(WEBKIT_TEST_FILES.includes(`test/${name}.test.js`), name);
+test('WebKit selection covers the round 12 editor canvas and layout, and every file exists', () => {
+  for (const name of ['round12-editor-canvas', 'round12-editor-layout', 'image-tint']) assert.ok(WEBKIT_TEST_FILES.includes(`test/${name}.test.js`), name);
   assert.equal(new Set(WEBKIT_TEST_FILES).size, WEBKIT_TEST_FILES.length);
   for (const file of WEBKIT_TEST_FILES) assert.ok(existsSync(join(repo, file)), `${file} must exist`);
   assert.deepEqual(webkitTestArgs(), ['--test', ...WEBKIT_TEST_FILES]);

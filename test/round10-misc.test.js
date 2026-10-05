@@ -1,4 +1,4 @@
-// 第 10 轮遗留待办：总览 Shift 范围选择与拖框自动滚动；往回翻页时 anime.js 动效瞬间停在最后一步
+// 第 10 轮遗留待办：总览 Shift 范围选择与拖框自动滚动（往回翻页的 anime.js 快进由第 12 轮的放映运行时测试负责）
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
@@ -79,73 +79,3 @@ test('round10 home: dragging a marquee to the bottom/top edge auto-scrolls and k
 });
 
 // 用 anime.js 写的单步动效：3 秒（或给定时长）右移 200px，await then 后记下完成
-const animeSource=duration=>`export default async function (ctx) {
-  const anime = await ctx.importModule('/vendor/anime.esm.min.js');
-  const { node } = ctx.element('el_box');
-  return {
-    async step(index) {
-      const loop = anime.animate(node.querySelector('i'), { rotate: 360, duration: 500, loop: true });
-      const tl = anime.createTimeline().add(node, { opacity: 0.5, duration: ${duration} }).add(node, { scale: 1.5, duration: ${duration} });
-      await anime.animate(node, { translateX: 200, duration: ${duration}, delay: 50 }).then(() => { node.dataset.moved = '1'; });
-      await tl;
-      await new Promise(resolve => anime.createTimer({ duration: ${duration}, onComplete: resolve }));
-      node.dataset.done = String(index);
-      ctx.signal.addEventListener('abort', () => loop.cancel(), { once: true });
-    }
-  };
-}`;
-
-async function runAnime(page,{duration,startAtEnd,thenReset=false}){
- return page.evaluate(async({source,startAtEnd,thenReset})=>{
-  document.body.replaceChildren();
-  const root=document.createElement('div');root.style.cssText='position:relative;width:400px;height:200px';
-  root.innerHTML='<div data-element-id="el_box" style="position:absolute;width:40px;height:40px;background:#38bdf8"><i style="display:block;width:10px;height:10px"></i></div>';
-  document.body.append(root);
-  const node=root.firstElementChild;
-  const project={id:'anime-test',formatVersion:2,artboard:{width:400,height:200},pages:[]};
-  const page={id:'page_anime',elements:[{id:'el_box',type:'shape',x:0,y:0,width:40,height:40}],motion:{steps:1,source}};
-  project.pages=[page];
-  const {createPlayback}=await import('/playback.js');
-  const errors=[];const t0=performance.now();
-  const playback=createPlayback(project,page,{root,startAtEnd,onError:e=>errors.push(e.message)});
-  await playback.ready;
-  const readyMs=performance.now()-t0;
-  const state=()=>({transform:node.style.transform,opacity:node.style.opacity,moved:node.dataset.moved||'',done:node.dataset.done||''});
-  const out={readyMs,afterReady:state(),nextStep:playback.getState().nextStep,errors};
-  if(thenReset){
-   await playback.reset();
-   const n=root.querySelector('[data-element-id="el_box"]');
-   const t1=performance.now();
-   await new Promise(resolve=>{const check=()=>n.dataset.done==='0'?resolve():setTimeout(check,10);playback.next();check();});
-   out.normalMs=performance.now()-t1;
-   out.afterNormal={transform:n.style.transform,done:n.dataset.done};
-  }
-  await playback.destroy();
-  return out;
- },{source:animeSource(duration),startAtEnd,thenReset});
-}
-
-test('round10 back navigation: anime.js steps jump to their end state instantly while fast-forwarding',async t=>{
- const o=await openPage(t);if(!o)return;const {page,errors}=o;
- const fast=await runAnime(page,{duration:3000,startAtEnd:true,thenReset:false});
- assert.deepEqual(fast.errors,[]);
- assert.ok(fast.readyMs<300,`快进用了 ${Math.round(fast.readyMs)} ms`);
- assert.equal(fast.nextStep,1);
- assert.equal(fast.afterReady.done,'0');assert.equal(fast.afterReady.moved,'1');
- assert.match(fast.afterReady.transform,/translateX\(200px\)/);assert.match(fast.afterReady.transform,/scale\(1\.5\)/);
- assert.equal(fast.afterReady.opacity,'0.5');
- assert.deepEqual(errors,[]);
-});
-
-test('round10 back navigation: anime.js keeps its real duration in normal playback, including after a fast-forward',async t=>{
- const o=await openPage(t);if(!o)return;const {page,errors}=o;
- // 一步里依次：600ms 动画、再等 600ms 的时间线、再 600ms 计时器 → 正常播放至少约 1.8 秒
- const normal=await runAnime(page,{duration:600,startAtEnd:false,thenReset:true});
- assert.ok(normal.normalMs>=1700,`正常播放只用了 ${Math.round(normal.normalMs)} ms`);
- assert.match(normal.afterNormal.transform,/translateX\(200px\)/);
- // 先快进（瞬间完成），reset 后再正常播放：速度恢复
- const mixed=await runAnime(page,{duration:600,startAtEnd:true,thenReset:true});
- assert.ok(mixed.readyMs<300,`快进用了 ${Math.round(mixed.readyMs)} ms`);
- assert.ok(mixed.normalMs>=1700,`快进之后的正常播放只用了 ${Math.round(mixed.normalMs)} ms`);
- assert.deepEqual([...normal.errors,...mixed.errors],[]);assert.deepEqual(errors,[]);
-});

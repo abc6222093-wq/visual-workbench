@@ -1,106 +1,143 @@
-// 页面缩略图（左侧页面列表、时间轴、网格、总览卡片）：迷你画板按宿主大小缩放，整页完整显示（contain、居中）。
-// 第 11 轮抽成独立模块。宿主尺寸为 0（面板折叠、视图切换中、还没挂进文档）时量不到，以前就停在 scale(1)
-// 的原始尺寸，只露出画板左上角一块。现在每张缩略图都挂 ResizeObserver：宿主一有大小（展开、切回列表、窗口变化）
-// 就自动重算，不依赖调用方记得 refit()。
-import { renderPage, patchPage } from './render.js';
-import { pageSize as kindPageSize } from './project-kinds.js';
+// 页面缩略图（左侧页面列表、时间轴、网格、总览卡片），第 12 轮：
+// 页面文件文本 → page-frame.js 的 staticDocument（叠好修改单、去掉所有脚本）→ 放进 sandbox="" 的 iframe（不跑脚本），
+// 按宿主大小 CSS 缩放（contain、居中）。只给看得见（含视口外一小段）的缩略图建 iframe，远离视口的卸掉，
+// 所以几十页的项目页面栏也流畅；同一时刻的 iframe 数有上限。
+import { pageViewport } from './project-kinds.js';
 
-// 页面自己的尺寸（网页项目每页高度不同）；没有就用画板
-export function pageSize(project, page) { return kindPageSize(project, page); }
-
-// 迷你画板的尺寸跟页面走（renderPage 按画板尺寸画；网页项目的竖长页要改成页自己的高度）
-function sizeBoard(board, size) {
-  const w = `${size.width}px`, h = `${size.height}px`;
-  if (board.style.width !== w) board.style.width = w;
-  if (board.style.height !== h) board.style.height = h;
+let frameModule = null;
+/** 父页面侧的页面显示模块（web/page-frame.js，子智能体 A 写）。加载失败时下次再试。 */
+export function loadFrameModule() {
+  frameModule ||= import('./page-frame.js').catch(error => { frameModule = null; throw error; });
+  return frameModule;
 }
 
-export function fitThumb(wrapper, board, project, page) {
-  const size = pageSize(project, page);
-  sizeBoard(board, size);
+/** 页面文件地址；stamp 是 agent 换过文件后的时间戳（让浏览器重新取）。 */
+export function pageFileURL(project, page, stamp = '') {
+  const file = page.file || `pages/${page.id}.html`;
+  return `/data/projects/${encodeURIComponent(project.id)}/${String(file).split('/').map(encodeURIComponent).join('/')}${stamp ? `?v=${stamp}` : ''}`;
+}
+const texts = new Map(); // 地址 → Promise<文本>（只留最近的一些）
+export function fetchPageText(url) {
+  if (!texts.has(url)) {
+    const p = fetch(url, { cache: 'no-cache' }).then(r => (r.ok ? r.text() : '')).catch(() => '');
+    texts.set(url, p);
+    p.then(text => { if (!text) texts.delete(url); });
+    if (texts.size > 200) texts.delete(texts.keys().next().value);
+  }
+  return texts.get(url);
+}
+
+// 缩略图显示的范围：课件页是整个画板；网页页是设备窗口那一屏（像浏览器截图）
+export function thumbSize(project, page) { return pageViewport(project, page); }
+
+function fit(wrapper, frame, size) {
   const W = wrapper.clientWidth, H = wrapper.clientHeight;
   if (!W || !H || !size.width || !size.height) return false;
   const s = Math.min(W / size.width, H / size.height);
   const x = Math.round(((W - size.width * s) / 2) * 100) / 100, y = Math.round(((H - size.height * s) / 2) * 100) / 100;
-  const transform = `translate(${x}px, ${y}px) scale(${s})`;
-  if (board.style.transform !== transform) board.style.transform = transform;
-  if (board.style.transformOrigin !== 'left top') board.style.transformOrigin = 'left top';
+  const t = `translate(${x}px, ${y}px) scale(${s})`;
+  if (frame.style.transform !== t) frame.style.transform = t;
   return true;
 }
 
-// 所有缩略图共用一个 ResizeObserver：wrapper → { board, pageId, page, getProject }
-const watched = new WeakMap();
-let observer = null;
-function fitEntry(wrapper) {
-  const entry = watched.get(wrapper);
-  if (!entry) return false;
-  const project = entry.getProject();
-  const page = project?.pages?.find((p) => p.id === entry.pageId) || entry.page;
-  return fitThumb(wrapper, entry.board, project || entry.project, page);
-}
-function watch(wrapper, entry) {
-  watched.set(wrapper, entry);
-  if (!observer && typeof ResizeObserver === 'function') observer = new ResizeObserver((records) => { for (const r of records) fitEntry(r.target); });
-  observer?.observe(wrapper);
-}
-
 /**
- * 创建缩略图管理器。getProject() 给当前项目；thumbOptions() 给 renderPage / patchPage 的选项；
- * host 是放缩略图的根（里面找 [data-preview]）；active() 为 false 时不做空闲刷新。
+ * 创建缩略图管理器。getProject() 给当前项目（总览用 null：每张缩略图带自己的项目）；host 里找 [data-preview]；
+ * stamp(file) 给页面文件的时间戳；active() 为 false 时不做刷新。max 是同时存在的 iframe 上限。
  */
-export function createThumbnails({ getProject, thumbOptions, host, active = () => true, idle = globalThis.requestIdleCallback || ((fn) => setTimeout(fn, 60)), cancelIdle = globalThis.cancelIdleCallback || clearTimeout }) {
-  let handle = null;
+export function createThumbnails({ getProject = () => null, host, stamp = () => '', active = () => true, rootMargin = '300px 300px', max = 40 } = {}) {
+  const entries = new Map(); // wrapper → { project, pageId, visible, frame, sig, token }
+  let io = null, ro = null;
+  const observers = () => {
+    if (!io && typeof IntersectionObserver === 'function') io = new IntersectionObserver(records => {
+      for (const r of records) { const e = entries.get(r.target); if (!e) continue; e.visible = r.isIntersecting; if (e.visible) mount(r.target); else unmount(r.target); }
+      trim();
+    }, { root: null, rootMargin });
+    if (!ro && typeof ResizeObserver === 'function') ro = new ResizeObserver(records => { for (const r of records) refit(r.target); });
+  };
+  const projectOf = e => { const p = getProject(); return p && p.id === e.project.id ? p : e.project; };
+  const pageOf = e => projectOf(e).pages.find(p => p.id === e.pageId);
+  const signature = (project, page) => JSON.stringify([page.file, page.edits || [], stamp(page.file || ''), page.device, page.size, project.artboard]);
+  function refit(wrapper) {
+    const e = entries.get(wrapper);
+    if (!e?.frame) return;
+    const project = projectOf(e), page = pageOf(e);
+    if (page) fit(wrapper, e.frame, thumbSize(project, page));
+  }
+  async function mount(wrapper) {
+    const e = entries.get(wrapper);
+    if (!e || !e.visible || !wrapper.isConnected) return;
+    const project = projectOf(e), page = pageOf(e);
+    if (!page) return;
+    const sig = signature(project, page);
+    if (e.frame && e.sig === sig) return;
+    const token = ++e.token;
+    const size = thumbSize(project, page);
+    let doc = '';
+    try {
+      const [mod, html] = await Promise.all([loadFrameModule(), fetchPageText(pageFileURL(project, page, stamp(page.file || '')))]);
+      doc = html ? mod.staticDocument({ html, project, page, edits: page.edits || [] }) : '';
+    } catch { doc = ''; }
+    if (token !== e.token || !e.visible || !wrapper.isConnected) return;
+    const frame = document.createElement('iframe');
+    frame.className = 'vw-thumb-frame';
+    frame.setAttribute('sandbox', '');
+    frame.setAttribute('tabindex', '-1');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('loading', 'eager');
+    frame.style.width = `${size.width}px`;
+    frame.style.height = `${size.height}px`;
+    frame.srcdoc = doc;
+    const old = e.frame;
+    e.frame = frame;
+    e.sig = sig;
+    wrapper.dataset.thumbPage = page.id;
+    fit(wrapper, frame, size);
+    if (old) { // 新内容画好再换，不闪
+      frame.style.visibility = 'hidden';
+      wrapper.append(frame);
+      frame.addEventListener('load', () => { frame.style.visibility = ''; old.remove(); }, { once: true });
+      setTimeout(() => { if (old.isConnected) { frame.style.visibility = ''; old.remove(); } }, 1500);
+    } else wrapper.append(frame);
+  }
+  function unmount(wrapper) {
+    const e = entries.get(wrapper);
+    if (!e) return;
+    e.token++;
+    wrapper.querySelectorAll(':scope > iframe').forEach(n => n.remove());
+    e.frame = null;
+    e.sig = null;
+  }
+  // 超过上限：卸掉看不见的（IntersectionObserver 回调前偶尔会多出来）
+  function trim() {
+    const mounted = [...entries].filter(([, e]) => e.frame);
+    if (mounted.length <= max) return;
+    for (const [w, e] of mounted) { if (mounted.length <= max) break; if (!e.visible || !w.isConnected) { unmount(w); mounted.splice(mounted.findIndex(([x]) => x === w), 1); } }
+  }
+  function forget(wrapper) { unmount(wrapper); io?.unobserve(wrapper); ro?.unobserve(wrapper); entries.delete(wrapper); }
+  /** 一张缩略图（总览卡片直接用；编辑器的页面视图由 refresh 自动填）。 */
   function make(project, page) {
+    observers();
     const wrapper = document.createElement('div');
     wrapper.className = 'miniature';
-    const board = renderPage(project, page, thumbOptions(project));
-    board.removeAttribute('data-page-id');
-    wrapper.append(board);
-    sizeBoard(board, pageSize(project, page));
-    watch(wrapper, { board, pageId: page.id, page, project, getProject: () => getProject() || project });
-    // 没有 ResizeObserver 的环境兜底：下一帧量一次
-    if (!observer) requestAnimationFrame(() => fitEntry(wrapper));
+    entries.set(wrapper, { project, pageId: page.id, visible: false, frame: null, sig: null, token: 0 });
+    io ? io.observe(wrapper) : requestAnimationFrame(() => { const e = entries.get(wrapper); if (e) { e.visible = true; mount(wrapper); } });
+    ro?.observe(wrapper);
     return wrapper;
   }
-  // 所有缩略图重新量一遍（ResizeObserver 已经自动做；留给调用方强制重算）
-  function refit() {
-    for (const h of host.querySelectorAll('[data-preview]')) {
-      const wrapper = h.querySelector(':scope > .miniature');
-      if (wrapper) fitEntry(wrapper);
-    }
-  }
-  // 空的宿主立刻填上；内容变了的页（按页 JSON 签名比较）空闲时在原来的迷你画板上原地更新，图片复用、不闪
-  function refresh(extraSignature = '') {
+  function refresh() {
     const project = getProject();
-    if (!project) return;
-    const signatures = new Map();
-    const signature = (p) => {
-      if (!signatures.has(p.id)) signatures.set(p.id, JSON.stringify([p, project.artboard, project.fonts, project.assets, extraSignature]));
-      return signatures.get(p.id);
-    };
-    let dirty = false;
+    for (const w of [...entries.keys()]) if (!w.isConnected) forget(w);
+    if (!project || !active()) return;
     for (const h of host.querySelectorAll('[data-preview]')) {
-      const p = project.pages.find((x) => x.id === h.dataset.preview);
-      if (!p) continue;
-      if (!h.querySelector(':scope > .miniature')) { h.replaceChildren(make(project, p)); h._thumbSig = signature(p); }
-      else if (h._thumbSig !== signature(p)) dirty = true;
+      const page = project.pages.find(x => x.id === h.dataset.preview);
+      if (!page) continue;
+      let wrapper = h.querySelector(':scope > .miniature');
+      if (!wrapper) { wrapper = make(project, page); h.replaceChildren(wrapper); continue; }
+      const e = entries.get(wrapper);
+      if (e && e.visible && e.sig !== signature(project, page)) mount(wrapper);
     }
-    if (!dirty) return;
-    cancelIdle(handle);
-    handle = idle(() => {
-      const current = getProject();
-      if (!active() || !current) return;
-      signatures.clear();
-      for (const h of host.querySelectorAll('[data-preview]')) {
-        const p = current.pages.find((x) => x.id === h.dataset.preview);
-        const wrapper = h.querySelector(':scope > .miniature'), board = wrapper?.querySelector(':scope > .vw-artboard');
-        if (!p || !board || h._thumbSig === signature(p)) continue;
-        h._thumbSig = signature(p);
-        patchPage(board, current, p, thumbOptions(current));
-        // patchPage 会按画板尺寸重写宽高，这里按页自己的尺寸再量一次（尺寸变了也会重算缩放）
-        fitThumb(wrapper, board, current, p);
-      }
-    }, { timeout: 400 });
   }
-  return { make, refresh, refit, fitThumb };
+  function refitAll() { for (const w of entries.keys()) refit(w); }
+  const count = () => [...entries.values()].filter(e => e.frame).length;
+  return { make, refresh, refit: refitAll, count };
 }

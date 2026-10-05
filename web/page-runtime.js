@@ -540,7 +540,13 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       h.style.display = show ? '' : 'none';
     }
     const key = `${r.x},${r.y},${r.width},${r.height}`;
-    if (key !== E.lastRect) { E.lastRect = key; post({ vw: 'select', id: el.getAttribute('data-vw-id'), caps, rect: { x: r2(r.x), y: r2(r.y), width: r2(r.width), height: r2(r.height) } }); }
+    if (key !== E.lastRect) {
+      E.lastRect = key;
+      // 当前值给父页面的工具条回显（字号 / 文字颜色 / 底色）
+      const cs = getComputedStyle(el);
+      const values = { fontSize: r2(parseFloat(cs.fontSize)) || null, color: toHex(cs.color), background: toHex(cs.backgroundColor) };
+      post({ vw: 'select', id: el.getAttribute('data-vw-id'), caps, rect: { x: r2(r.x), y: r2(r.y), width: r2(r.width), height: r2(r.height) }, values });
+    }
   }
   function select(el) {
     const E = edit;

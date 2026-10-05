@@ -1,52 +1,38 @@
+// 页面整理的纯逻辑（第 12 轮）：选择、排序、页面剪贴板。
+// 加页、复制页、删页、跨项目复制由服务端做（页面文件和资源一起处理：POST /api/projects/:id/pages）。
 const clone = value => structuredClone(value);
-const walk = (elements, fn) => { for (const el of elements || []) { fn(el); walk(el.children, fn); } };
-function allocator(project) {
-  const used = new Set();
-  function collect(v) { if (!v || typeof v !== 'object') return; if (typeof v.id === 'string') used.add(v.id); Object.values(v).forEach(collect); }
-  collect(project); let n = 0;
-  return prefix => { let id; do { id = prefix + (++n).toString(36).padStart(8, '0'); } while (used.has(id)); used.add(id); return id; };
-}
 export function selectPageIds(pages, selected, id, event = {}, anchorId = null) {
   const ids = pages.map(p => p.id), set = new Set(selected || []);
   if (!ids.includes(id)) return { selectedPageIds: ids.filter(x => set.has(x)), anchorId };
   if (event.shiftKey && ids.includes(anchorId)) {
     if (!event.metaKey && !event.ctrlKey) set.clear();
     const a = ids.indexOf(anchorId), b = ids.indexOf(id);
-    ids.slice(Math.min(a,b), Math.max(a,b)+1).forEach(x => set.add(x));
+    ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(x => set.add(x));
   } else if (event.metaKey || event.ctrlKey || event.toggle) { set.has(id) ? set.delete(id) : set.add(id); anchorId = id; }
   else { set.clear(); set.add(id); anchorId = id; }
   return { selectedPageIds: ids.filter(x => set.has(x)), anchorId };
 }
-export function copyPages(project, ids) { const set = new Set(ids); return { type:'visual-workbench/pages', projectId:project.id, pages:clone(project.pages.filter(p => set.has(p.id))) }; }
-export function remapMotionSource(source, map) { return source.replace(/[a-zA-Z0-9_]+/g, token => map.get(token) || token); }
-function copiedPage(page, allocate) {
-  const out = clone(page), map = new Map(); out.id = allocate('page_');
-  walk(out.elements, el => { const id = allocate('el_'); map.set(el.id,id); el.id=id; });
-  const outlineIds = new Map();
-  function remap(v) { if (!v || typeof v !== 'object') return; if (typeof v.id === 'string') { if (!outlineIds.has(v.id)) outlineIds.set(v.id,allocate(v.id.startsWith('image_')?'image_':'row_')); v.id=outlineIds.get(v.id); } if (map.has(v.elementId)) v.elementId=map.get(v.elementId); Object.values(v).forEach(remap); }
-  remap(out.outline); if (out.motion?.source) out.motion.source=remapMotionSource(out.motion.source,map); return out;
+/** 拖动排序：把 ids 挪到 targetId 前面 / 后面（不改入参）。目标就是被拖的页时原地不动。 */
+export function movePages(project, ids, targetId, position = 'before') {
+  const set = new Set(ids), out = clone(project), moving = out.pages.filter(p => set.has(p.id));
+  if (!set.has(targetId)) {
+    out.pages = out.pages.filter(p => !set.has(p.id));
+    let index = out.pages.findIndex(p => p.id === targetId);
+    if (index < 0) index = out.pages.length; else if (position === 'after') index++;
+    out.pages.splice(index, 0, ...moving);
+  }
+  return { project: out, selectedPageIds: moving.map(p => p.id) };
 }
-export function pastePages(project, clipboard, afterId) {
-  if (clipboard?.type !== 'visual-workbench/pages' || clipboard.projectId !== project.id) throw new Error('页面仅支持在同一项目内粘贴');
-  const out=clone(project), allocate=allocator(out), added=clipboard.pages.map(p=>copiedPage(p,allocate));
-  const index=out.pages.findIndex(p=>p.id===afterId); out.pages.splice(index<0?out.pages.length:index+1,0,...added);
-  return { project:out, selectedPageIds:added.map(p=>p.id), currentPageId:added[0]?.id || afterId };
+// 页面剪贴板只记「哪个项目的哪几页」：粘贴时同一项目走 duplicate，别的项目走 copy-from（服务端带上页面文件和资源）
+export const PAGE_CLIPBOARD_TYPE = 'visual-workbench/page-refs';
+const KEY = 'visual-workbench.page-clipboard';
+export function pageClipboard(project, ids) {
+  const order = project.pages.map(p => p.id).filter(id => ids.includes(id));
+  return { type: PAGE_CLIPBOARD_TYPE, fromProject: project.id, pageIds: order };
 }
-export function duplicatePages(project, ids, afterId=ids.at(-1)) { return pastePages(project,copyPages(project,ids),afterId); }
-export function deletePages(project, ids, currentPageId) {
-  const set=new Set(ids), out=clone(project), index=project.pages.findIndex(p=>p.id===currentPageId); out.pages=out.pages.filter(p=>!set.has(p.id));
-  if (!out.pages.length) throw new Error('请至少保留一页');
-  const current=out.pages.find(p=>p.id===currentPageId)||out.pages[Math.min(Math.max(index,0),out.pages.length-1)];
-  return {project:out,selectedPageIds:[],currentPageId:current.id};
+export function readPageClipboard(storage = globalThis.localStorage) {
+  try { const v = JSON.parse(storage?.getItem(KEY) || 'null'); return v?.type === PAGE_CLIPBOARD_TYPE && typeof v.fromProject === 'string' && Array.isArray(v.pageIds) ? v : null; } catch { return null; }
 }
-export function movePages(project, ids, targetId, position='before') {
-  const set=new Set(ids), out=clone(project), moving=out.pages.filter(p=>set.has(p.id));
-  if (!set.has(targetId)) { out.pages=out.pages.filter(p=>!set.has(p.id)); let index=out.pages.findIndex(p=>p.id===targetId); if(index<0)index=out.pages.length; else if(position==='after')index++; out.pages.splice(index,0,...moving); }
-  return {project:out,selectedPageIds:moving.map(p=>p.id)};
-}
-export function insertPage(project,targetId,position='after') {
-  const out=clone(project), id=allocator(out)('page_'), target=project.pages.find(p=>p.id===targetId), page={id,name:'新页面',background:clone(target?.background || '#ffffff'),elements:[]};
-  if(target?.device&&target?.size)Object.assign(page,{device:target.device,size:clone(target.size)}); // 网页页面：沿用相邻页的设备与尺寸
-  let index=out.pages.findIndex(p=>p.id===targetId); if(index<0)index=out.pages.length; else if(position==='after')index++; out.pages.splice(index,0,page);
-  return {project:out,selectedPageIds:[id],currentPageId:id};
+export function writePageClipboard(value, storage = globalThis.localStorage) {
+  try { storage?.setItem(KEY, JSON.stringify(value)); } catch {}
 }

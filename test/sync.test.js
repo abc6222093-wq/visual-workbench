@@ -2,9 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { mergeProjects, summarizeConflicts, createSyncController, deepEqual } from '../web/sync.js';
-import { findElement } from '../web/editor.js';
+// 第 12 轮：合并逻辑与格式无关；这里沿用第 11 轮示例项目（v2，冻结成测试夹具）测元素级合并，文件末尾补 v3 修改单的合并用例
+function findElement(page, id) {
+  const scan = items => { for (const element of items || []) { if (element.id === id) return { element }; const found = scan(element.children); if (found) return found; } };
+  return scan(page.elements);
+}
 
-const SAMPLE = JSON.parse(readFileSync(new URL('../examples/sample-deck/project.json', import.meta.url), 'utf8'));
+const SAMPLE = JSON.parse(readFileSync(new URL('./fixtures/round12-editor-sync-sample.json', import.meta.url), 'utf8'));
 const fresh = () => structuredClone(SAMPLE);
 const pageOf = (project, id) => project.pages.find(page => page.id === id);
 const el = (project, pageId, id) => findElement(pageOf(project, pageId), id)?.element;
@@ -452,4 +456,33 @@ test('默认定时器在浏览器里也能用：用户忙时不报错，忙完�
     globalThis.setTimeout = realSet;
     globalThis.clearTimeout = realClear;
   }
+});
+
+// ---------- 第 12 轮：v3 修改单（pages[].edits，按条目 id 合并） ----------
+const v3 = () => ({ format: 'visual-workbench/project', formatVersion: 3, id: 'v3', name: 'v3', createdAt: 'x', updatedAt: 'x', artboard: { preset: 'custom', width: 100, height: 100 }, assets: [], fonts: [],
+  pages: [{ id: 'page_a', name: 'A', file: 'pages/page_a.html', edits: [] }, { id: 'page_b', name: 'B', file: 'pages/page_b.html', edits: [] }] });
+test('v3：用户新增修改单条目、agent 改页名和备注：都保留，无冲突', () => {
+  const base = v3(), local = v3(), remote = v3();
+  local.pages[0].edits.push({ id: 'ed_aaaa1111', target: 'title', kind: 'fontSize', before: { fontSize: 64 }, after: { fontSize: 72 } });
+  remote.pages[0].name = 'agent 改名'; remote.pages[1].notes = '备注';
+  const { merged, conflicts } = mergeProjects(base, local, remote);
+  assert.deepEqual(conflicts, []);
+  assert.equal(merged.pages[0].edits.length, 1); assert.equal(merged.pages[0].name, 'agent 改名'); assert.equal(merged.pages[1].notes, '备注');
+});
+test('v3：agent 清掉了已处理的条目、用户同时又加了一条：清掉的不回来，新加的在', () => {
+  const base = v3(); base.pages[0].edits.push({ id: 'ed_old00001', target: 'title', kind: 'color', before: { color: '#000000' }, after: { color: '#ff0000' } });
+  const local = structuredClone(base), remote = structuredClone(base);
+  remote.pages[0].edits = [];
+  local.pages[0].edits.push({ id: 'ed_new00001', target: 'card', kind: 'background', before: { background: '#ffffff' }, after: { background: '#000000' } });
+  const { merged, conflicts } = mergeProjects(base, local, remote);
+  assert.deepEqual(conflicts, []);
+  assert.deepEqual(merged.pages[0].edits.map(e => e.id), ['ed_new00001']);
+});
+test('v3：双方改同一条修改单的 after：保留用户的并记冲突', () => {
+  const base = v3(); base.pages[0].edits.push({ id: 'ed_same0001', target: 'title', kind: 'fontSize', before: { fontSize: 64 }, after: { fontSize: 72 } });
+  const local = structuredClone(base), remote = structuredClone(base);
+  local.pages[0].edits[0].after.fontSize = 80; remote.pages[0].edits[0].after.fontSize = 90;
+  const { merged, conflicts } = mergeProjects(base, local, remote);
+  assert.equal(merged.pages[0].edits[0].after.fontSize, 80);
+  assert.equal(conflicts.length, 1);
 });

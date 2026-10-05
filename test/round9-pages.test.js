@@ -1,15 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';
-import {createServer} from './helpers/isolated-server.js';import {launchBrowser} from '../src/browser.js';
+import {createServer} from './helpers/isolated-server.js';import {pageHTML} from './round12-editor-fixture.js';import {launchBrowser} from '../src/browser.js';
 const now='2026-10-04T12:00:00.000Z',ids=Array.from({length:8},(_,i)=>`page_pg0${i+1}`);
 async function open(t,viewport={width:1600,height:1200}){
  const dir=mkdtempSync(join(tmpdir(),'vw-round9-pages-'));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  mkdirSync(join(dir,'projects/demo'),{recursive:true});const file=join(dir,'projects/demo/project.json');
- const project={format:'visual-workbench/project',formatVersion:2,id:'demo',name:'页面拖动验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1600,height:900},assets:[],fonts:[],pages:ids.map((id,i)=>({id,name:`第${i+1}页`,background:'#ffffff',elements:[]}))};
+ // 第 12 轮：v3 夹具（每页一个页面文件）
+ const project={format:'visual-workbench/project',formatVersion:3,id:'demo',name:'页面拖动验收',createdAt:now,updatedAt:now,artboard:{preset:'custom',width:1600,height:900},assets:[],fonts:[],pages:ids.map((id,i)=>({id,name:`第${i+1}页`,file:`pages/${id}.html`,edits:[]}))};
+ mkdirSync(join(dir,'projects/demo/pages'),{recursive:true});for(const p of project.pages)writeFileSync(join(dir,'projects/demo',p.file),pageHTML(p.name));
  writeFileSync(file,JSON.stringify(project));server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
  browser=await launchBrowser();const page=await browser.newPage({viewport});const errors=[],puts=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='PUT'&&r.url().endsWith('/api/projects/demo'))puts.push(r);});
- await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('[data-action="open"][data-id="demo"]').click();await page.waitForSelector('#artboard');return {page,file,errors,puts};
+ await page.goto(`http://127.0.0.1:${server.address().port}`);await page.locator('[data-action="open"][data-id="demo"]').click();await page.waitForSelector('#artboard > iframe');return {page,file,errors,puts};
 }
 const order=file=>JSON.parse(readFileSync(file,'utf8')).pages.map(p=>p.id);
 const surface={list:'.page-list',timeline:'.ed-page-timeline',grid:'.ed-page-grid'};

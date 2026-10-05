@@ -18,7 +18,7 @@ async function open(t) {
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));
   const url=`http://127.0.0.1:${server.address().port}`;
-  async function enter(){await page.goto(url);await page.locator('[data-action="open"][data-id="sample-deck"]').click();await page.waitForSelector('#artboard [data-element-id="el_title1"]');}
+  async function enter(){await page.goto(url);await page.locator('[data-action="open"][data-id="sample-deck"]').click();await page.waitForSelector('#artboard > iframe');}
   await enter();return {page,enter,errors,name:project.pages[0].name};
 }
 

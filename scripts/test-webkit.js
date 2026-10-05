@@ -1,4 +1,4 @@
-// Safari 内核验证（第 10 轮 7d）：用 Playwright 自带的 WebKit 跑就地编辑文字、图片裁切、文字框自动长高、描边与图片颜色这几组浏览器测试。
+// Safari 内核验证（第 10 轮 7d，第 12 轮更新清单）：用 Playwright 自带的 WebKit 跑编辑画布（隔离 iframe 里的修改）、窄窗口布局这几组浏览器测试。
 // 用法：node scripts/test-webkit.js（先 npx playwright install webkit）；--list 只列清单。
 // 不进 npm test：Actions 只装 Chromium，这组在本机按需跑。
 import { spawnSync } from 'node:child_process';
@@ -8,12 +8,9 @@ import { webkit } from 'playwright';
 import { existsSync } from 'node:fs';
 
 export const WEBKIT_TEST_FILES = Object.freeze([
-  'test/round9-text-edit.test.js',   // 就地编辑文字（光标、拖选、换行、输入法）
-  'test/round10-crop.test.js',       // 图片裁切：渲染、裁切工具、替换图片弹窗
-  'test/round10-text-height.test.js',// 文字框自动长高的测量
-  'test/round10-canvas.test.js',     // 编辑器里：自动长高校正、裁切、替换、旋转把手
-  'test/text-style.test.js',         // 文字描边 / 阴影：编辑、放映、导出一致
-  'test/image-tint.test.js',         // 图片重新着色
+  'test/round12-editor-canvas.test.js', // 编辑画布：隔离 iframe、选中工具条改字号、修改单撤销、贴图、文件变化重载
+  'test/round12-editor-layout.test.js', // 窄窗口工具条一行、专注模式、折叠栏
+  'test/image-tint.test.js',            // SVG 上传安全检查（贴图、素材库走同一条上传）
 ]);
 export function webkitTestArgs() { return ['--test', ...WEBKIT_TEST_FILES]; }
 export function webkitMissingMessage() {

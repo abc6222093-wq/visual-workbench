@@ -37,6 +37,7 @@ test('导出弹窗：选 PDF → 正在导出… → 显示保存位置、文件
   await page.locator('[data-action="export"]').click();
   await page.getByRole('heading', { name: '导出' }).waitFor();
   for (const label of ['放映版 HTML', '每页图片', 'PDF']) await page.locator('[data-action="export-kind"]', { hasText: label }).first().waitFor();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); // 第 12 轮：画布是跨进程的隔离 iframe，弹窗画出来之前就点，点击会按旧画面送进 iframe
 
   await page.locator('[data-action="export-kind"][data-kind="images"]').click();
   assert.equal(await page.locator('[data-action="export-kind"][data-kind="images"]').getAttribute('aria-checked'), 'true');
@@ -84,14 +85,19 @@ test('版本列表：删除按钮先确认，删掉后列表刷新', async t => 
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
   await page.locator('[data-action="open"][data-id="sample-deck"]').click();
-  await page.locator('.ed-bar [data-action="versions"]').click();
+  await page.locator('.ed-inspector [data-action="versions"]').click();
   await page.getByText('要删掉的版本').waitFor();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); // 第 12 轮：画布是跨进程的隔离 iframe，弹窗画出来之前就点，点击会按旧画面送进 iframe
   await page.locator(`[data-action="version-delete"][data-id="${gone.id}"]`).click();
   await page.getByRole('heading', { name: '删除这个版本？' }).waitFor();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); // 第 12 轮：画布是跨进程的隔离 iframe，弹窗画出来之前就点，点击会按旧画面送进 iframe
   // 返回列表：什么都不删
   await page.locator('.g-sheet [data-action="versions"]').click();
   await page.getByText('要删掉的版本').waitFor();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); // 第 12 轮：画布是跨进程的隔离 iframe，弹窗画出来之前就点，点击会按旧画面送进 iframe
   await page.locator(`[data-action="version-delete"][data-id="${gone.id}"]`).click();
+  await page.getByRole('heading', { name: '删除这个版本？' }).waitFor();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
   await page.locator('[data-action="version-delete-confirm"]').click();
   await page.getByRole('heading', { name: '版本列表' }).waitFor();
   await page.getByText('留着的版本').waitFor();

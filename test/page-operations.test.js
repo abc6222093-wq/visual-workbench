@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {selectPageIds,copyPages,pastePages,duplicatePages,deletePages,movePages,insertPage} from '../web/page-operations.js';
-const project=()=>({id:'test-deck',pages:[{id:'page_first',name:'First',background:'#fff',elements:[{id:'el_group',type:'group',children:[{id:'el_title',type:'text',text:'Hello'}]}],outline:{mode:'document',screens:2,rows:[{id:'row_title',elementId:'el_title',text:'Hello'}],baseline:{rows:[{id:'row_title',elementId:'el_title',text:'Hello'}]}},motion:{steps:1,source:"export default ctx => { ctx.element('el_title'); return {step(){ctx.element('el_group')}} }"}},{id:'page_second',name:'Second',background:'#fff',elements:[]},{id:'page_third',name:'Third',background:'#fff',elements:[]}]});
+import {selectPageIds,movePages,pageClipboard,readPageClipboard,writePageClipboard,PAGE_CLIPBOARD_TYPE} from '../web/page-operations.js';
+// 第 12 轮：页面是独立的 HTML 文件，增删复制由服务端做；这里只剩选择、排序、页面剪贴板的纯逻辑。
+const project=()=>({id:'test-deck',pages:[{id:'page_first',name:'First',file:'pages/page_first.html',edits:[]},{id:'page_second',name:'Second',file:'pages/page_second.html'},{id:'page_third',name:'Third',file:'pages/page_third.html'}]});
 test('selection supports toggles, ordered shift ranges and preserved anchor',()=>{const p=project().pages;let r=selectPageIds(p,[],'page_first');r=selectPageIds(p,r.selectedPageIds,'page_third',{ctrlKey:true},r.anchorId);assert.deepEqual(r.selectedPageIds,['page_first','page_third']);r=selectPageIds(p,r.selectedPageIds,'page_second',{shiftKey:true},r.anchorId);assert.deepEqual(r.selectedPageIds,['page_second','page_third']);assert.equal(r.anchorId,'page_third');});
-test('copy/paste keeps nested motion and outline with fresh coherent IDs, leaves input untouched',()=>{const p=project(),before=structuredClone(p),clip=copyPages(p,['page_first']);const result=pastePages(p,clip,'page_second'),page=result.project.pages[2],el=page.elements[0].children[0];assert.deepEqual(p,before);assert.notEqual(page.id,p.pages[0].id);assert.notEqual(el.id,'el_title');assert.equal(page.outline.rows[0].elementId,el.id);assert.equal(page.outline.baseline.rows[0].id,page.outline.rows[0].id);assert.equal(page.outline.baseline.rows[0].elementId,el.id);assert.ok(page.motion.source.includes(`'${el.id}'`));assert.ok(!page.motion.source.includes("'el_title'"));const second=pastePages(result.project,clip,page.id);assert.notEqual(second.selectedPageIds[0],page.id);assert.notEqual(second.project.pages[3].elements[0].id,page.elements[0].id);});
-test('cross project paste rejects',()=>{const p=project(),clip=copyPages(p,['page_first']);assert.throws(()=>pastePages({...p,id:'other-deck'},clip,'page_second'),/同一项目/);});
-test('batch move preserves project order and handles own target',()=>{const p=project();assert.deepEqual(movePages(p,['page_third','page_first'],'page_second','after').project.pages.map(p=>p.id),['page_second','page_first','page_third']);assert.deepEqual(movePages(p,['page_first'],'page_first').project,p);});
-test('delete preserves last page and chooses adjacent current page',()=>{const p=project();assert.equal(deletePages(p,['page_second'],'page_second').currentPageId,'page_third');assert.throws(()=>deletePages(p,p.pages.map(p=>p.id),'page_first'),/保留/);assert.equal(p.pages.length,3);});
-test('insertion and duplicate preserve originals and place after target',()=>{const p=project();assert.equal(insertPage(p,'page_second','before').project.pages[1].name,'新页面');assert.equal(duplicatePages(p,['page_first'],'page_third').project.pages.length,4);assert.equal(p.pages.length,3);});
+test('batch move preserves project order and handles own target',()=>{const p=project(),before=structuredClone(p);assert.deepEqual(movePages(p,['page_third','page_first'],'page_second','after').project.pages.map(p=>p.id),['page_second','page_first','page_third']);assert.deepEqual(movePages(p,['page_first'],'page_first').project,p);assert.deepEqual(p,before);});
+test('page clipboard records source project and pages in project order; storage is resilient',()=>{
+ const clip=pageClipboard(project(),['page_third','page_first']);
+ assert.deepEqual(clip,{type:PAGE_CLIPBOARD_TYPE,fromProject:'test-deck',pageIds:['page_first','page_third']});
+ const values=new Map(),storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v)};
+ assert.equal(readPageClipboard(storage),null);writePageClipboard(clip,storage);assert.deepEqual(readPageClipboard(storage),clip);
+ values.set('visual-workbench.page-clipboard','{bad');assert.equal(readPageClipboard(storage),null);
+ assert.equal(readPageClipboard({getItem(){throw Error('blocked');}}),null);
+ assert.doesNotThrow(()=>writePageClipboard(clip,{setItem(){throw Error('full');}}));
+});
