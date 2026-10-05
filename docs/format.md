@@ -198,7 +198,7 @@
 存版把项目文件夹里 `versions/` 之外的所有普通文件（含 `pages/`、`assets/`、`fonts/`、`import/`）按内容去重存一份。用户可以在工作台里退回；agent 动手前 `npm run save-version -- <项目> -m "<说明>"`。
 
 ## 10. 校验 `npm run validate -- <项目>`
-查：JSON 结构（`schema/project.schema.json`）；页面、素材、字体、修改单编号重复；页面文件缺失；页面内 `data-vw-id` 重复、格式不对；修改单指向不存在的编号或页面没给的能力（报「对不上」，是错误）；页面引用的相对资源缺失、`assets/` `fonts/` 下的引用未登记；`assets[].file` / `fonts[].file` 文件缺失；网页项目页面缺 `device` / `size`。
+工作台自己保存、退回、复制项目时只查结构（schema 与编号），不查页面内容——修改单对不上、资源缺失都不会挡住用户保存；`npm run validate` 做完整检查。完整检查查：JSON 结构（`schema/project.schema.json`）；页面、素材、字体、修改单编号重复；页面文件缺失；页面内 `data-vw-id` 重复、格式不对；修改单指向不存在的编号或页面没给的能力（报「对不上」，是错误）；页面引用的相对资源缺失、`assets/` `fonts/` 下的引用未登记；`assets[].file` / `fonts[].file` 文件缺失；网页项目页面缺 `device` / `size`。
 
 ## 11. 导出
 - 放映版 HTML：一个文件，每页一个隔离 iframe，资源内嵌，不依赖网络；点击推进、方向键翻页；内嵌同一套运行时。

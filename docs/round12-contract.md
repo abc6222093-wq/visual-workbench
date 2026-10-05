@@ -34,6 +34,8 @@
 | `leave` | `direction` | 跑 `leave`，完成后回 `left` |
 | `mode` | `mode` | 切换 edit / play（放映内嵌预览用） |
 | `scroll` | `top` | 网页页面滚到某个位置 |
+| `settle` | `timeout` | 等字体、图片、有限动画结束，无限动画暂停（截图前用） |
+| `uiScale` | `scale` | 画布缩放时发，让把手、框线保持屏幕像素大小 |
 
 页面 → 父：
 | type | 字段 | 说明 |
@@ -48,6 +50,10 @@
 | `left` | — | `leave` 跑完 |
 | `height` | `height` | 内容高度变化（网页页面） |
 | `error` | `message, stack?, phase` | 动效 / 运行时错误（动效检查用） |
+| `key` | `key, code, metaKey, ctrlKey, shiftKey, altKey, id` | iframe 有焦点时键盘事件进不了父页面：非改字状态下的按键转发给父页面（撤销 / 重做、Delete 删贴图、Esc 取消选中） |
+| `nav` | `dir` | play 模式里的点击 / 右键（父页面据此推进） |
+| `scroll` | `top, left` | 页面滚动了 |
+| `settled` | `ok, height, error?` | 对 `settle` 的回复 |
 
 ## 3. 运行时在 edit 模式里的交互（Word / PowerPoint 习惯）
 - 只有带 `data-vw-id` 且能力非空的元素（和用户贴的图）能被碰。鼠标移上去：淡淡的 1px 框；有 `text` 能力时指针是 I 形。

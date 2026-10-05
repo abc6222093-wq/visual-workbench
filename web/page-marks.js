@@ -2,7 +2,8 @@
 // 1) 标记：data-vw-id / data-vw（docs/format.md §4.2）；2) 相对资源引用（§5）。正则扫描，够校验和复制页面用。
 import { MARK_ID, CAPS } from './edits-model.js';
 
-const TAG = /<([a-zA-Z][\w:-]*)\b([^>]*)>/g;
+// 属性值里可以有 >（例如 data-vw-origin="main > h1"），所以引号内的内容整段吞掉
+const TAG = /<([a-zA-Z][\w:-]*)\b((?:"[^"]*"|'[^']*'|[^"'>])*)>/g;
 const ATTR = /([^\s=/"'<>]+)(?:\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'<>`]+)))?/g;
 function attrsOf(raw) {
   const out = {};
