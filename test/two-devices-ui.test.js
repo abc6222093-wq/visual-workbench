@@ -23,13 +23,13 @@ test('新鲜电脑标记在界面要求确认；确认后才显示总览',async 
  await page.getByRole('button',{name:'我已确认，继续使用'}).click();await page.getByRole('button',{name:'数据文件夹',exact:true}).waitFor();assert.equal(await page.getByRole('alertdialog').count(),0);
 });
 
-// 第 12 轮：大纲取消；右侧栏「复制给 agent」复制服务端生成的说明（含项目编号）
+// 第 12 轮：大纲取消；右侧栏「复制给 agent」复制服务端生成的说明（含项目编号）。第 13 轮按钮改成菜单，选「请处理修改单」
 test('右侧栏「复制给 agent」复制当前项目的说明',async t=>{
  const root=mkdtempSync(join(tmpdir(),'vw-brief-ui-')),server=createServer({dataDir:root});let browser;
  t.after(async()=>{await browser?.close();await new Promise(r=>server.close(r));rmSync(root,{recursive:true,force:true});});await new Promise(r=>server.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${server.address().port}`;
  await fetch(url+'/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'brief-demo',name:'复制测试'})});
  browser=await launchBrowser();const page=await browser.newPage();await page.goto(url);await page.locator('[data-action="open"][data-id="brief-demo"]').click();await page.waitForSelector('#artboard > iframe');
  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.copiedBrief=text;}}}));
- await page.locator('.ed-inspector [data-action="brief"]').click();await page.waitForFunction(()=>window.copiedBrief);
+ await page.locator('.ed-inspector [data-action="brief"]').click();await page.getByRole('menuitem',{name:'请处理修改单'}).click();await page.waitForFunction(()=>window.copiedBrief);
  assert.match(await page.evaluate(()=>window.copiedBrief),/brief-demo/);
 });
