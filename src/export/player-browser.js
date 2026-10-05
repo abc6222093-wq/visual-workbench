@@ -77,7 +77,9 @@ function touchDevice() {
 // 挡板和页面四周的留白（点不到 iframe 的地方）：点击 / 轻点推进；手指横向滑动：向左滑前进、向右滑后退。
 // 点在 iframe 里的事件到不了这里，由页面运行时处理。
 let down = null;
-stage.addEventListener('pointerdown', event => { if (event.button > 0) return; down = { x: event.clientX, y: event.clientY }; });
+// 发生在页面 iframe 上的事件由页面运行时转成 nav（Chromium 不会把它们冒到这里；WebKit 可能会），这里不重复推进
+const onFrame = event => event.target && event.target.tagName === 'IFRAME';
+stage.addEventListener('pointerdown', event => { if (event.button > 0 || onFrame(event)) return; down = { x: event.clientX, y: event.clientY }; });
 stage.addEventListener('pointercancel', () => { down = null; });
 stage.addEventListener('pointerup', event => {
   if (!down) return;
@@ -87,7 +89,7 @@ stage.addEventListener('pointerup', event => {
   if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) advance(); else back(); }
   else if (Math.hypot(dx, dy) < 24) advance();
 });
-stage.addEventListener('contextmenu', event => { event.preventDefault(); advance(); });
+stage.addEventListener('contextmenu', event => { event.preventDefault(); if (!onFrame(event)) advance(); });
 addEventListener('keydown', event => {
   if (event.metaKey || event.ctrlKey || event.altKey || !playback) return;
   if (event.key === 'f' || event.key === 'F') {
