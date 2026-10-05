@@ -28,7 +28,7 @@ export function throwIfCancelled(signal) { if (signal?.aborted) throw cancelledE
  * signal（AbortSignal）：取消时尽快停下（截图循环、浏览器会被关掉），抛出 error.cancelled = true 的错误；半成品文件由调用方清理。
  * 返回 { kind, outDir, files: [{ path, bytes }] }；html 另带 breakdown / items / skipped / warnings。
  */
-export async function exportProject({ projectDir, kind, outDir, name, onProgress, signal }) {
+export async function exportProject({ projectDir, kind, outDir, name, onProgress, signal, dataDir }) {
   if (!EXPORT_KINDS.includes(kind)) throw new Error(`不支持的导出类型：${kind}（只能是 ${EXPORT_KINDS.join(' / ')}）`);
   if (!projectDir || !outDir) throw new Error('导出需要 projectDir 和 outDir');
   throwIfCancelled(signal);
@@ -40,7 +40,7 @@ export async function exportProject({ projectDir, kind, outDir, name, onProgress
   // 进度回调出错不能中断导出
   const progress = typeof onProgress === 'function' ? info => { try { onProgress(info); } catch { /* 忽略 */ } } : () => {};
   if (kind === 'html') {
-    const result = await exportHtml({ projectDir, outFile: join(outDir, `${base}.html`), onProgress: progress, signal });
+    const result = await exportHtml({ projectDir, outFile: join(outDir, `${base}.html`), onProgress: progress, signal, ...(dataDir ? { dataDir } : {}) });
     return { kind, outDir, files: [{ path: result.file, bytes: result.bytes }], breakdown: result.breakdown, items: result.items, skipped: result.skipped, warnings: result.warnings };
   }
   let images;
