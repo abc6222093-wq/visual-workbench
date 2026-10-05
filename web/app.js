@@ -13,6 +13,11 @@ import { createThumbnails, fetchPageText, pageFileURL, loadFrameModule } from ".
 import { patchPageItems } from "./page-items.js";
 import { upsertEdit, removeUserImage, newUserImageId, isUserImage } from "./edits-model.js";
 import { isWebProject, pageSize, pageViewport, WEB_DEVICES } from "./project-kinds.js";
+// 第 13 轮：草稿页编辑、批注、从其他项目添加页面、拖进来导入成页面
+import { createDraftEditor } from "./drafts.js";
+import { createAnnotations } from "./annotations.js";
+import { openAddPagesDialog } from "./add-pages.js";
+import * as importHtml from "./import-html.js";
 // 实时连接（第 3 轮）：合并用户和 agent 的修改
 import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
@@ -55,6 +60,8 @@ const S = {
   editingText: false, // 运行时正在改字
   scrollTop: 0, // 网页页面：窗口里往下浏览了多少（运行时回报）
   screen: 1, // 带动效的页面：画布停在第几屏（换页回到 1）
+  motionInfo: new Map(), // 页面文件 + 时间戳 → 运行时报的 { registered, hasStep, animations, scripts }
+  screenProbes: new Map(), // 页面文件 + 时间戳 → 隐藏探测 iframe 数出的屏数 { status, counted, hasStep, failed }
 };
 const web = () => isWebProject(S.project);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -213,6 +220,10 @@ async function open(id, data) {
   S.ownRevisions.clear();
   S.echoRevision = null;
   S.focus = false;
+  S.motionInfo.clear();
+  S.screenProbes.clear();
+  drafts.reset();
+  annotations.reset();
   S.view = "editor";
   renderEditor();
   connectEvents(S.project.id);
@@ -333,8 +344,10 @@ const inspectorToggleButton = () => ibtn("toggle-inspector", S.inspectorCollapse
 const headTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers");
 const toolGridButton = () => tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize");
 const toolTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers");
+const annotateButton = () => tbtn("annotate", "批注", "type", annotations.mode ? "is-on" : "", `aria-pressed="${annotations.mode ? "true" : "false"}"`);
 const focusButton = () => ibtn("focus", S.focus ? "minimize" : "maximize", S.focus ? "退出专注模式" : "专注模式", `aria-pressed="${S.focus ? "true" : "false"}"`);
 const focusExitBar = () => `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>`;
+const footHTML = () => `<div class="ed-screens" role="group" aria-label="画布显示第几屏" hidden></div><span class="ed-screens__note" data-screens-note hidden></span><span class="ed-spacer"></span><span class="ed-foot__size">${footText()}</span>`;
 const pageViewHost = (mode) => `<div class="ed-page-${mode} ed-scroll">${renderPageItems(pageViewContext(mode))}</div>`;
 const footText = () => {
   const p = page();
@@ -351,7 +364,7 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span>${screenBar()}<div class="ed-tools">${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${annotateButton()}<span class="ed-sep"></span>${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footHTML()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
   );
   if (saveState === "busy") saveStatus(SAVE_TEXT.busy);
   const well = $("#canvas-well");
@@ -367,10 +380,13 @@ function renderEditor() {
   S.resizeObserver.disconnect();
   S.resizeObserver.observe(well);
   refreshBoard();
+  refreshLayers();
+  refreshScreenBar();
   refreshInspector();
   refreshQuickToolbar();
   refreshThumbnails();
   mountEditorPageViews();
+  mountPageDrops();
   liven(app);
   syncGlass(app);
 }
@@ -382,8 +398,15 @@ function updateEditor() {
   refreshToolbar();
   refreshPageViews();
   refreshBoard();
+  refreshLayers();
   refreshInspector();
   refreshQuickToolbar();
+}
+// 画布上盖的两层（草稿表单、批注）：跟着当前页，和 #artboard 同一个缩放
+function refreshLayers() {
+  drafts.sync();
+  annotations.sync();
+  fitBoard();
 }
 function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
 function setHTML(node, html) { if (node && node._html !== html) { node.innerHTML = html; node._html = html; } }
@@ -404,33 +427,102 @@ function refreshToolbar() {
   const p = page(), crumb = $(".ed-crumb");
   setText(crumb, p.name);
   if (crumb && crumb.title !== p.name) crumb.title = p.name;
-  setHTML($(".ed-foot"), footText());
+  setHTML($(".ed-foot__size"), footText());
   refreshScreenBar();
 }
 // ---------- 第 N 屏：带动效的页面，画布停在选定那一屏播完的样子，照常修改 ----------
-// 屏数 = motion.steps + 1；第 1 屏 = 初始化完成、还没执行第 1 步。
-const screenTotal = (p = page()) => { const n = Number(p?.motion?.steps); return Number.isInteger(n) && n > 0 ? n + 1 : 0; };
+// 屏数 = motion.steps + 1；第 1 屏 = 初始化完成、还没执行第 1 步。steps 没写但页面登记了 step：
+// 用隐藏的探测 iframe（play、快进、countSteps）数出步数 n → n + 1 屏，按页面文件 + 时间戳缓存。
+// 屏选择是画布下方一排标签按钮（像日常软件的分页标签）。
+const probeKey = (p) => `${p?.file || ""}|${stampOf(p?.file || "")}`;
+function screenInfo(p = page()) {
+  if (!p) return { total: 0, source: null };
+  const n = Number(p.motion?.steps);
+  if (Number.isInteger(n) && n > 0) return { total: n + 1, source: "steps" };
+  const key = probeKey(p), m = S.motionInfo.get(key), probe = S.screenProbes.get(key);
+  if (probe?.status === "done" && probe.counted > 0) return { total: probe.counted + 1, source: "counted" };
+  if (m?.hasStep || probe?.hasStep) return probe?.status === "done" ? { total: 1, source: "unknown" } : { total: 0, source: "pending" };
+  if (m && (Number(m.animations) > 0 || Number(m.scripts) > 0)) return { total: 0, source: "own" };
+  return { total: 0, source: null };
+}
+// 能切屏的屏数（只有写了 steps 或数出来的才切；数不出来时只显示「第 1 屏」，画布照原样显示）
+const screenTotal = (p = page()) => { const info = screenInfo(p); return info.source === "steps" || info.source === "counted" ? info.total : 0; };
+// 页面栏「N 屏」小字
+const screensOf = (p) => screenTotal(p);
+// 给画布 iframe 的页面：屏数是数出来的，就按数出来的步数给运行时（不然切屏会被 steps = 0 挡住）
+const framePage = (p) => (screenInfo(p).source === "counted" ? { ...p, motion: { ...(p.motion || {}), steps: screenTotal(p) - 1 } } : p);
 const clampScreen = (k, p = page()) => Math.min(Math.max(1, Math.round(Number(k)) || 1), Math.max(1, screenTotal(p)));
 // 给画布 iframe 的 screen 选项：没有动效的页面不给（照原样显示，不跑初始化）
 const screenOption = (p = page()) => (screenTotal(p) ? clampScreen(S.screen, p) : null);
+const SCREEN_NOTES = {
+  counted: "屏数由工作台数出，请 agent 在 project.json 写上 motion.steps",
+  unknown: "这页的屏数要请 agent 写上",
+  own: "这页有自己的动画，但没有分屏；要分屏请让 agent 用 vw.motion 写并填上 motion.steps",
+};
 function screenButtons(p = page()) {
-  const total = screenTotal(p);
+  const info = screenInfo(p), total = info.source === "unknown" ? 1 : screenTotal(p);
   let html = "";
-  for (let k = 1; k <= total; k++) html += `<button class="ed-tbtn ed-screen" data-action="screen" data-screen="${k}" aria-pressed="${k === S.screen}" title="画布停在第 ${k} 屏${k === 1 ? "（动效开始前）" : `（第 ${k - 1} 步播完）`}"><span>第 ${k} 屏</span></button>`;
+  for (let k = 1; k <= total; k++) html += `<button class="ed-screen" data-action="screen" data-screen="${k}" aria-pressed="${k === S.screen || total === 1}" title="画布停在第 ${k} 屏${k === 1 ? "（动效开始前）" : `（第 ${k - 1} 步播完）`}">第 ${k} 屏</button>`;
   return html;
 }
-const screenBar = () => { const html = screenButtons(); return `<div class="ed-screens" role="group" aria-label="画布显示第几屏" ${html ? "" : "hidden"}>${html}</div>`; };
 function refreshScreenBar() {
-  const bar = $(".ed-screens");
-  if (!bar) return;
-  const html = screenButtons();
+  const bar = $(".ed-screens"), note = $("[data-screens-note]");
+  if (!bar || !S.project) return;
+  const p = page(), html = p?.draft ? "" : screenButtons(p), text = p?.draft ? "" : SCREEN_NOTES[screenInfo(p).source] || "";
   if (bar.hidden !== !html) bar.hidden = !html;
   setHTML(bar, html);
+  if (note) { if (note.hidden !== !text) note.hidden = !text; setText(note, text); }
+}
+// 运行时报了这一页有没有动效（ready.motion，或晚到的 { vw: 'motion' }）：steps 没写、登记了 step → 数屏
+function noteMotion(p, motion) {
+  if (!p || !motion || typeof motion !== "object") return;
+  const key = probeKey(p);
+  S.motionInfo.set(key, { ...(S.motionInfo.get(key) || {}), ...motion });
+  const n = Number(p.motion?.steps);
+  if (!(Number.isInteger(n) && n > 0) && motion.hasStep) startProbe(p);
+  refreshScreenBar();
+}
+function probeHost() {
+  let box = document.querySelector("#vw-probe-host");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "vw-probe-host";
+    box.setAttribute("aria-hidden", "true");
+    // 不用 visibility:hidden：Chromium 不推进隐藏 iframe 里的动画；放在视口里 1px 大、全透明
+    box.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1";
+    document.body.append(box);
+  }
+  return box;
+}
+async function startProbe(p) {
+  const key = probeKey(p);
+  if (S.screenProbes.has(key)) return;
+  const entry = { status: "pending" }, projectId = S.project.id;
+  S.screenProbes.set(key, entry);
+  let frame = null;
+  try {
+    const [mod, html] = await Promise.all([loadFrameModule(), fetchPageText(pageFileURL(S.project, p, stampOf(p.file)))]);
+    frame = mod.createPageFrame({ project: S.project, page: p, mode: "play", fast: true, countSteps: true, container: probeHost(), baseHref: pageBase(p), html, edits: clone(p.edits || []), timeout: 8000 });
+    const msg = await Promise.race([frame.ready, new Promise((done) => setTimeout(() => done(null), 20000))]);
+    entry.counted = Number.isInteger(msg?.countedSteps) && msg.countedSteps > 0 ? Math.min(30, msg.countedSteps) : 0;
+    entry.hasStep = !!msg?.hasStep;
+    entry.failed = !msg || !!msg.failed;
+  } catch {
+    entry.counted = 0;
+    entry.failed = true;
+  } finally {
+    try { frame?.destroy(); } catch {}
+    entry.status = "done";
+  }
+  if (S.view !== "editor" || S.project?.id !== projectId) return;
+  refreshScreenBar();
+  refreshPageViews();
+  if (page()?.id === p.id) refreshBoard();
 }
 function refreshHistoryButtons() {
   const undo = $('[data-action="undo"]'), redo = $('[data-action="redo"]');
-  if (undo) undo.disabled = !S.history.canUndo;
-  if (redo) redo.disabled = !S.history.canRedo;
+  if (undo) undo.disabled = drafts.active ? !drafts.canUndo : !S.history.canUndo;
+  if (redo) redo.disabled = drafts.active ? !drafts.canRedo : !S.history.canRedo;
 }
 // 布局开关（专注模式、折叠面板、网格 / 时间轴）：只切 class、换对应按钮、挂 / 卸对应容器
 function refreshLayout() {
@@ -493,6 +585,13 @@ function fitBoard() {
   if (stage.style.transform !== t) stage.style.transform = t;
   holder.style.width = `${Math.round(view.width * scale)}px`;
   holder.style.height = `${Math.round(view.height * scale)}px`;
+  // 草稿表单层、批注层：和 #artboard 同尺寸、同缩放；--vw-inv 让层里的字、把手保持屏幕像素大小
+  for (const layer of holder.querySelectorAll(":scope > .vw-layer")) {
+    if (layer.style.width !== w) layer.style.width = w;
+    if (layer.style.height !== h) layer.style.height = h;
+    if (layer.style.transform !== t) layer.style.transform = t;
+    layer.style.setProperty("--vw-inv", String(1 / scale));
+  }
   setText($("#zoom-label"), `${Math.round(scale * 100)}%`);
   // 运行时的选中框、把手按缩放补偿粗细
   if (F?.frame && F.uiScale !== scale) { F.uiScale = scale; F.frame.setUiScale?.(scale); }
@@ -504,8 +603,10 @@ async function refreshBoard({ force = false } = {}) {
   fitBoard();
   const p = page();
   stage.dataset.pageId = p.id;
+  // 草稿页：画布上盖着草稿表单（web/drafts.js），下面的 iframe 藏起来；草稿文件自己存出来的新版本不重载 iframe
+  stage.classList.toggle("is-draft", !!p.draft);
   const stamp = stampOf(p.file);
-  if (F && F.stage === stage && F.pageId === p.id && F.file === p.file && F.stamp === stamp && !force) {
+  if (F && F.stage === stage && F.pageId === p.id && F.file === p.file && (F.stamp === stamp || p.draft) && !force) {
     const sig = editsSig(p);
     if (F.sig !== sig) { F.sig = sig; F.frame?.setEdits(clone(p.edits || [])); if (S.mark && !markAlive(p)) clearMark(); }
     // 动效步数被改了（agent 改了 motion.steps）：屏号夹到范围内，画布换到对应的屏
@@ -534,7 +635,7 @@ async function refreshBoard({ force = false } = {}) {
     const edits = clone(p.edits || []);
     if (reuse) {
       F.pendingSelect = keep;
-      reuse.reload({ page: p, edits, html, project: S.project, screen });
+      reuse.reload({ page: framePage(p), edits, html, project: S.project, screen });
       F.uiScale = null;
       fitBoard();
     } else {
@@ -552,7 +653,7 @@ async function refreshBoard({ force = false } = {}) {
 function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false }) {
   let frame = null;
   frame = mod.createPageFrame({
-    project: S.project, page: p, mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
+    project: S.project, page: framePage(p), mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
     ...(screen ? { screen } : {}),
     onMessage: (msg) => { if (F?.frame === frame) onFrameMessage(token, msg); },
     onReady: (msg) => { if (F?.frame === frame) onFrameReady(token, msg); },
@@ -620,6 +721,7 @@ function onFrameReady(token, msg = {}) {
   const stage = $("#artboard");
   if (stage) stage.dataset.ready = "1";
   F.ready = msg;
+  if (msg.motion) noteMotion(S.project.pages.find((x) => x.id === F.pageId), msg.motion);
   const keep = F.pendingSelect;
   F.pendingSelect = null;
   if (keep && (msg.marks || []).some((m) => m.id === keep)) F.frame?.select(keep);
@@ -635,6 +737,7 @@ function onFrameMessage(token, msg = {}) {
       case "edit": return recordEdit(msg);
       case "select": return setMark(msg.id ? { id: msg.id, caps: msg.caps || [], values: msg.values || msg.style || null } : null);
       case "editing": S.editingText = !!msg.on; return;
+      case "motion": return noteMotion(S.project.pages.find((x) => x.id === F.pageId), msg);
       case "paste-image": return pasteImage(new File([msg.buffer], msg.name || "paste.png", { type: msg.type || msg.mime || "image/png" })).catch((e) => notice(e.message));
       case "menu": return imageMenu(msg);
       case "delete": return deleteUserImage(msg.id || msg.target);
@@ -707,6 +810,7 @@ function markValue(kind) {
 // 整页背景（页面文件里标在 <body> 上、只能改颜色的那条标记）：没选中东西时工具条给「页面底色」
 function pageBgMark() { return (F?.ready?.marks || []).find((m) => m.page && (m.caps || []).includes("background")) || null; }
 function quickbarHTML() {
+  if (drafts.active) return drafts.toolbarHTML(esc);
   const mark = S.mark;
   if (!mark) {
     const bg = pageBgMark();
@@ -724,11 +828,12 @@ function quickbarHTML() {
 function refreshQuickToolbar() {
   const bar = $(".ed-quickbar");
   if (!bar) return;
-  const html = quickbarHTML(), key = JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps]);
+  const html = quickbarHTML(), key = drafts.active ? JSON.stringify(["draft", drafts.pageId, drafts.canMerge()]) : JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps]);
   const hide = !html;
   if (bar.hidden !== hide) { bar.hidden = hide; queueMicrotask(() => syncGlass(app)); }
   if (hide) { bar.replaceChildren(); bar._key = null; return; }
-  if (bar._key !== key) { bar.innerHTML = html; bar._key = key; return; }
+  if (bar._key !== key) { bar.innerHTML = html; bar._key = key; }
+  if (drafts.active) { const select = bar.querySelector("[data-draft-level]"); if (select && select !== document.activeElement && drafts.level && select.value !== drafts.level) select.value = drafts.level; return; }
   const box = document.createElement("div");
   box.innerHTML = html;
   for (const fresh of box.querySelectorAll("[data-q]")) {
@@ -839,11 +944,16 @@ function schedule() {
   saveStatus(SAVE_TEXT.busy);
   S.timer = setTimeout(() => flush().catch(() => {}), 600);
 }
+// 先存草稿页（drafts.js 自己的 draft-update），再存项目
 async function flush() {
+  await drafts.flush();
+  return flushProject();
+}
+async function flushProject() {
   clearTimeout(S.timer);
   if (!S.project) return;
   if (S.assetPromise) await S.assetPromise.catch(() => {});
-  if (S.saving) { await S.savePromise.catch(() => {}); if (S.saved < S.dirty) return flush(); return; }
+  if (S.saving) { await S.savePromise.catch(() => {}); if (S.saved < S.dirty) return flushProject(); return; }
   if (S.conflict) throw new Error("请先处理保存冲突");
   if (S.saved === S.dirty) return;
   S.saving = true;
@@ -872,13 +982,14 @@ async function flush() {
     }
   })();
   await S.savePromise;
-  if (S.saved < S.dirty) return flush();
+  if (S.saved < S.dirty) return flushProject();
 }
 function conflictDialog() {
   const labels = S.lastConflict?.labels || [];
   modal(`<h2>你和 agent 改了同一处</h2><p class="g-sheet__note">已保留你的修改。agent 的其他修改已经并进来了。</p><div class="g-sheet__list">${labels.map((label) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon("alert", 15)}</span><span class="g-row__text">${esc(label)}</span></div>`).join("")}</div><div class="g-sheet__actions">${gbtn("export-local", "下载我的副本")}${gbtn("conflict-agent", "这几处改用 agent 的")}${gbtn("close", "保留我的", { cls: "g-btn--prism" })}</div>`);
 }
 function undo() {
+  if (S.view === "editor" && drafts.active) { drafts.undo(); return; }
   if (!S.history?.canUndo || S.view !== "editor") return;
   S.project = S.history.undo();
   keepSelection();
@@ -887,6 +998,7 @@ function undo() {
   updateEditor();
 }
 function redo() {
+  if (S.view === "editor" && drafts.active) { drafts.redo(); return; }
   if (!S.history?.canRedo || S.view !== "editor") return;
   S.project = S.history.redo();
   keepSelection();
@@ -896,10 +1008,14 @@ function redo() {
 }
 
 // ---------- 页面整理：增删、复制走服务端（页面文件一起处理），排序、改名走整份保存 ----------
-async function pagesOp(op, body) {
-  if (S.pagesBusy) return null;
-  await flush();
+// draft: 草稿页自己的保存（draft-update）——前一个页面操作没做完就等它，只先存项目（草稿那边正在发的就是这一个）
+async function pagesOp(op, body, { draft = false } = {}) {
+  if (draft) { while (S.pagesBusy) await S.pagesPromise?.catch(() => {}); await flushProject(); }
+  else { if (S.pagesBusy) return null; await flush(); }
+  if (S.pagesBusy) return pagesOp(op, body, { draft });
   S.pagesBusy = true;
+  let release;
+  S.pagesPromise = new Promise((done) => { release = done; });
   const before = new Set(S.project.pages.map((p) => p.id));
   try {
     const result = await api(`${path()}/pages`, "POST", { revision: S.revision, op, ...body });
@@ -917,6 +1033,7 @@ async function pagesOp(op, body) {
     throw e;
   } finally {
     S.pagesBusy = false;
+    release();
     checkEcho();
   }
 }
@@ -930,6 +1047,9 @@ async function addPage({ after = S.pageId, device } = {}) {
 }
 async function pageAction(name, { ids = [...S.checked], targetId = S.pageId, position = "after" } = {}) {
   if (!ids.length) ids = [targetId];
+  if (name === "add-draft") return draftDialog(targetId);
+  if (name === "add-from-project") return addFromProject(targetId);
+  if (name === "import-pages") return importPages({ after: targetId });
   if (name === "select-pages") { S.checked = new Set(S.project.pages.map((p) => p.id)); refreshPageViews(); return; }
   if (name === "copy-pages") {
     S.pageClipboard = pageClipboard(S.project, ids);
@@ -973,6 +1093,124 @@ async function pageAction(name, { ids = [...S.checked], targetId = S.pageId, pos
   if (!out) return;
   if (out.added.length) { S.checked = new Set(out.added); S.pageId = out.added[0]; }
   updateEditor();
+}
+
+// ---------- 第 13 轮：更多添加页面的方式 ----------
+// 「添加页面」菜单和页面栏右键共用：从文案添加草稿页、从其他项目添加、导入 HTML 成页面
+const MORE_ADD_ITEMS = [{ action: "add-draft", label: "从文案添加草稿页…" }, { action: "add-from-project", label: "从其他项目添加页面…" }, { action: "import-pages", label: "导入为页面…" }];
+function addPageMenu(x, y) {
+  const first = web() ? [{ action: "desktop", label: "电脑端页面" }, { action: "mobile", label: "手机端页面" }] : [{ action: "blank", label: "空白页面" }];
+  const items = [...first, { separator: true }, { action: "add-draft", label: "从文案添加草稿页…" }, { action: "add-from-project", label: "从其他项目…" }, { action: "import-pages", label: "导入为页面…" }];
+  showContextMenu({ x, y, items, onAction: (action) => {
+    const run = action === "blank" ? addPage() : action === "desktop" || action === "mobile" ? addPage({ device: action }) : pageAction(action, { targetId: S.pageId });
+    Promise.resolve(run).catch((error) => notice(error.message));
+  } });
+}
+// 页面栏空白处右键：粘贴 + 添加页面的几种方式
+function pageListMenu(e) {
+  if (S.view !== "editor" || !e.target.closest?.(".ed-pages .page-list, .ed-page-grid, .ed-page-timeline") || e.target.closest("[data-page-id]")) return;
+  e.preventDefault();
+  const last = S.project.pages.at(-1)?.id;
+  showContextMenu({ x: e.clientX, y: e.clientY, items: [{ action: "paste-pages", label: "粘贴", disabled: !S.pageClipboard?.pageIds?.length }, { action: "insert-page-after", label: "添加页面" }, { separator: true }, ...MORE_ADD_ITEMS], onAction: (action) => pageAction(action, { ids: [last], targetId: last }).catch((error) => notice(error.message)) });
+}
+function draftDialog(after = S.pageId) {
+  modal(`<h2>从文案添加草稿页</h2><p class="g-sheet__note">把分好页的文案贴进来，工作台按「---」或「## Page N ｜ 页名」分页：【核心信息】上页面，【辅助信息】【动效】进这一页的备注；没有记号的文字按空行和字数分页。草稿页之后可以直接改字、分页、合并，再「复制给 agent → 请设计」。</p><form id="draft-form"><label class="g-area"><span>文案</span><textarea name="text" rows="14" required data-draft-text placeholder="## Page 1 ｜ 封面&#10;大标题：……"></textarea></label><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit" data-draft-submit>分页</button></div></form>`);
+  const form = $("#draft-form");
+  form.text.focus();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = form.text.value;
+    if (!text.trim()) return;
+    form.querySelector("[data-draft-submit]").disabled = true;
+    try { if (await addDraftText(text, after)) closeModal(); }
+    catch (err) { notice(err.message); }
+    finally { const b = form.querySelector("[data-draft-submit]"); if (b) b.disabled = false; }
+  };
+}
+async function addDraftText(text, after = S.pageId) {
+  const out = await pagesOp("draft", { text, after });
+  if (!out) return null;
+  if (out.added[0]) { S.pageId = out.added[0]; S.screen = 1; }
+  S.checked.clear();
+  updateEditor();
+  notice(out.draft?.note || `已添加 ${out.added.length} 页草稿`);
+  return out;
+}
+function addFromProject(after = S.pageId) {
+  return openAddPagesDialog({ api, modal, closeModal, notice, project: S.project, after, pagesOp, onDone: (out) => {
+    if (out.added.length) { S.checked = new Set(out.added); S.pageId = out.added[0]; S.screen = 1; }
+    updateEditor();
+  } });
+}
+// 导入 HTML / 文件夹 / .zip 成页面（插进当前项目）：files 是拖进来的，不给就在弹窗里选
+function importPages({ files = null, after = S.pageId } = {}) {
+  const projectId = S.project.id;
+  importHtml.openImportDialog({ api, modal, closeModal, notice, ...(files ? { files, autoStart: true } : {}), intoProject: projectId, after, onDone: async (_id, pageIds = []) => {
+    if (S.view !== "editor" || S.project?.id !== projectId) return;
+    await reloadProject(pageIds);
+  } });
+}
+// 服务端改了项目（导入成页面）：重新取项目，选中新页
+async function reloadProject(selectIds = []) {
+  await flush();
+  const data = await api(path());
+  S.project = data.project;
+  ownRevision(data.revision);
+  S.base = clone(data.project);
+  S.history.commit(S.project);
+  S.saved = S.dirty;
+  const fresh = selectIds.filter((id) => S.project.pages.some((p) => p.id === id));
+  if (fresh.length) { S.checked = new Set(fresh); S.pageId = fresh[0]; S.screen = 1; }
+  keepSelection();
+  updateEditor();
+}
+// 页面栏接受拖进来的文件：.md / .txt → 从文案添加草稿页；.html / 文件夹 / .zip → 导入成页面
+const isTextFile = (name) => /\.(md|markdown|txt)$/i.test(name || "");
+function mountPageDrops() {
+  for (const col of app.querySelectorAll(".ed-pages, .ed-page-grid, .ed-page-timeline")) {
+    if (col._vwDrops) continue;
+    col._vwDrops = true;
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+    col.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; col.classList.add("is-file-over"); });
+    col.addEventListener("dragleave", (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove("is-file-over"); });
+    col.addEventListener("drop", (e) => {
+      col.classList.remove("is-file-over");
+      if (!hasFiles(e) || S.view !== "editor") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dt = e.dataTransfer, plain = [...(dt.files || [])];
+      const folders = [...(dt.items || [])].some((i) => i.webkitGetAsEntry?.()?.isDirectory);
+      if (plain.length && !folders && plain.every((f) => isTextFile(f.name))) {
+        Promise.all(plain.map((f) => f.text())).then((texts) => addDraftText(texts.join("\n\n---\n\n"))).catch((err) => notice(err.message));
+        return;
+      }
+      // 必须在 drop 事件里同步取（之后 DataTransfer 就读不到了）
+      const pending = typeof importHtml.filesFromDataTransfer === "function" ? importHtml.filesFromDataTransfer(dt) : Promise.resolve(plain.map((file) => ({ path: file.name, file })));
+      pending.then((files) => {
+        if (!files.length) return notice("拖进来的文件里没有 .html、.zip 或 .md / .txt");
+        importPages({ files });
+      }).catch((err) => notice(err.message));
+    });
+  }
+}
+// 「复制给 agent」分裂菜单：请处理修改单 / 请设计 / 请统一风格 / 请整理文件夹
+function briefMenu(button) {
+  const box = button.getBoundingClientRect();
+  const hasDraft = S.project.pages.some((p) => p.draft);
+  const hasForeign = S.project.pages.some((p) => p.origin?.project && p.origin.project !== S.project.id);
+  showContextMenu({ x: box.left, y: box.bottom + 6, items: [
+    { action: "edits", label: "请处理修改单" },
+    { action: "design", label: "请设计", disabled: !hasDraft },
+    { action: "unify", label: "请统一风格", disabled: !hasForeign },
+    { separator: true },
+    { action: "organize", label: "请整理文件夹" },
+  ], onAction: (intent) => copyBrief(intent).catch((err) => notice(err.message)) });
+}
+async function copyBrief(intent) {
+  await flush();
+  const { text } = intent === "organize" ? await api("/api/brief/organize") : await api(`${path()}/brief${intent && intent !== "edits" ? `?intent=${encodeURIComponent(intent)}` : ""}`);
+  await navigator.clipboard.writeText(text);
+  notice("已复制，开新的 agent 对话时直接粘贴");
 }
 
 // ---------- 素材库、版本、背景、复制、导出 ----------
@@ -1209,12 +1447,12 @@ function inspectorHTML() {
     const view = pageViewport(S.project, p), size = pageSize(S.project, p);
     return `<div class="ed-pair" data-web-page><label class="g-field"><span>设备</span><input type="text" value="${esc(WEB_DEVICES[p.device]?.label || "电脑端")}" readonly aria-label="设备" data-page-device></label><label class="g-field" title="整页内容长度，不小于窗口高 ${view.height}"><span>整页高度</span><input data-page-height type="number" min="${view.height}" step="10" value="${size.height}" aria-label="整页高度"></label></div><p class="g-sheet__note" data-web-note>窗口 ${view.width}×${view.height}，在画布上用鼠标滚轮上下浏览</p>`;
   })() : "";
-  return `<section class="ed-section" data-page-section><h3 class="ed-heading ed-heading--main">页面</h3><label class="g-field g-field--stack"><span>页面名</span><input data-page-name type="text" maxlength="200" value="${esc(p.name)}" aria-label="页面名"></label>${webFields}<p class="ed-note" data-edit-count>${count ? `你在这一页改了 ${count} 处` : "这一页还没有修改"}</p></section><section class="ed-section"><h3 class="ed-heading">备注</h3><p class="ed-note ed-notes" data-page-notes>${p.notes ? esc(p.notes) : "没有备注"}</p></section><section class="ed-section"><h3 class="ed-heading">版本</h3><div class="ed-actions">${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}</div></section><section class="ed-section"><h3 class="ed-heading">交给 agent</h3><div class="ed-actions">${tbtn("brief", "复制给 agent", "copy")}</div></section>`;
+  return `<section class="ed-section" data-page-section><h3 class="ed-heading ed-heading--main">页面</h3><label class="g-field g-field--stack"><span>页面名</span><input data-page-name type="text" maxlength="200" value="${esc(p.name)}" aria-label="页面名"></label>${webFields}<p class="ed-note" data-edit-count>${count ? `你在这一页改了 ${count} 处` : "这一页还没有修改"}</p>${p.draft ? `<p class="ed-note" data-draft-overflow>${draftOverflowText()}</p>` : ""}</section><section class="ed-section"><h3 class="ed-heading">备注</h3><p class="ed-note ed-notes" data-page-notes>${p.notes ? esc(p.notes) : "没有备注"}</p></section><section class="ed-section"><h3 class="ed-heading">版本</h3><div class="ed-actions">${tbtn("version", "存一版", "bookmark")}${tbtn("versions", "版本列表", "history")}</div></section><section class="ed-section"><h3 class="ed-heading">交给 agent</h3><div class="ed-actions">${tbtn("brief", "复制给 agent", "copy")}</div></section>`;
 }
 function refreshInspector() {
   const body = $(".ed-inspector__body");
   if (!body || !S.project) return;
-  const p = page(), key = JSON.stringify([p.id, web(), p.device]);
+  const p = page(), key = JSON.stringify([p.id, web(), p.device, !!p.draft]);
   if (body._key !== key) { body.innerHTML = inspectorHTML(); body._key = key; syncGlass(app); return; }
   const name = body.querySelector("[data-page-name]");
   if (name && name !== document.activeElement && name.value !== p.name) { name.value = p.name; name.defaultValue = p.name; }
@@ -1223,7 +1461,10 @@ function refreshInspector() {
   const count = (p.edits || []).length;
   setText(body.querySelector("[data-edit-count]"), count ? `你在这一页改了 ${count} 处` : "这一页还没有修改");
   setText(body.querySelector("[data-page-notes]"), p.notes || "没有备注");
+  setText(body.querySelector("[data-draft-overflow]"), draftOverflowText());
 }
+// 草稿页：文字比页面高出多少（只写数值，不做判断）
+const draftOverflowText = () => `文字超出页面 ${drafts.overflow ?? 0} px`;
 function renamePage(value) {
   const p = page(), name = String(value || "").trim();
   if (!name) { refreshInspector(); return; }
@@ -1251,7 +1492,7 @@ function switchPage(id, { clearChecked = false } = {}) {
 }
 function clearCheckedPages() { S.checked.clear(); S.pageAnchor = null; refreshPageViews(); }
 function pageViewContext(mode = S.pageViewMode) {
-  return { project: S.project, currentPageId: S.pageId, selectedPageIds: [...S.checked], anchorId: S.pageAnchor, mode, returnMode: readPageViewPreference(), canPaste: !!S.pageClipboard?.pageIds?.length };
+  return { project: S.project, currentPageId: S.pageId, selectedPageIds: [...S.checked], anchorId: S.pageAnchor, mode, returnMode: readPageViewPreference(), canPaste: !!S.pageClipboard?.pageIds?.length, screensOf, extraMenuItems: MORE_ADD_ITEMS };
 }
 function setPageView(mode) { S.pageViewMode = mode; writePageViewPreference(mode); refreshLayout(); }
 function mountEditorPageViews() {
@@ -1274,6 +1515,7 @@ function unmountPageView(root) { root._vwDispose?.(); root._vwDispose = null; S.
 function refreshPageViews() {
   for (const root of app.querySelectorAll("[data-page-view]")) patchPageItems(root, pageViewContext(root.dataset.pageView));
   mountEditorPageViews();
+  mountPageDrops();
   setText($(".ed-col-head .ed-count"), String(S.project.pages.length));
   refreshThumbnails();
 }
@@ -1299,14 +1541,10 @@ app.addEventListener("click", async (e) => {
       case "close": closeModal(); break;
       case "undo": undo(); break;
       case "redo": redo(); break;
-      case "add-page":
-        if (web()) {
-          const box = b.getBoundingClientRect();
-          showContextMenu({ x: box.left, y: box.bottom + 6, items: [{ action: "desktop", label: "电脑端页面" }, { action: "mobile", label: "手机端页面" }], onAction: (device) => addPage({ device }).catch((error) => notice(error.message)) });
-          break;
-        }
-        await addPage();
-        break;
+      case "add-page": { const box = b.getBoundingClientRect(); addPageMenu(box.left, box.bottom + 6); break; }
+      case "annotate": annotations.toggle(); break;
+      case "draft-split": await drafts.split(); break;
+      case "draft-merge": await drafts.mergeNext(); break;
       case "delete-user-image": if (S.mark) await deleteUserImage(S.mark.id); break;
       case "upload-library": $("#file-picker").click(); break;
       case "version": versionDialog(); break;
@@ -1319,13 +1557,7 @@ app.addEventListener("click", async (e) => {
         await navigator.clipboard.writeText(referenceText(S.project, { checkedPageIds: [...S.checked], currentPageId: S.pageId, markId: S.mark?.id }));
         notice("引用已复制");
         break;
-      case "brief": {
-        await flush();
-        const { text } = await api(`${path()}/brief`);
-        await navigator.clipboard.writeText(text);
-        notice("已复制，开新的 agent 对话时直接粘贴");
-        break;
-      }
+      case "brief": briefMenu(b); break;
       case "restore": restoreDialog(id, b.dataset.note || ""); break;
       case "restore-confirm": await restore(id); break;
       case "version-delete": deleteVersionDialog(id, b.dataset.note || ""); break;
@@ -1377,9 +1609,13 @@ app.addEventListener("click", async (e) => {
     notice(err.message);
   }
 });
+app.addEventListener("contextmenu", pageListMenu);
+// 草稿工具条的按钮：按下时不把焦点从草稿表单拿走（光标、选区留着）
+app.addEventListener("pointerdown", (e) => { if (e.target.closest?.(".qt-draft button")) e.preventDefault(); });
 app.addEventListener("change", (e) => {
   const t = e.target;
   if (t.matches("input[data-q]")) return quickChange(t);
+  if (t.matches("select[data-draft-level]")) return drafts.setLevel(t.value);
   if (t.matches("input[data-page-name]")) return renamePage(t.value);
   if (t.matches("input[data-page-height]")) return setPageHeight(t.value);
 });
@@ -1412,6 +1648,7 @@ window.addEventListener("keydown", (e) => {
     if ($("#modal-root")?.childElementCount) { e.preventDefault(); closeModal(); return; }
     if (S.view !== "editor") return;
     if (typing) { e.target.blur(); return; }
+    if (annotations.handleKey(e)) return;
     e.preventDefault();
     if (clearMark()) return;
     if (S.pageViewMode === "grid") { if (S.checked.size) { clearCheckedPages(); return; } setPageView(readPageViewPreference()); return; }
@@ -1432,6 +1669,7 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (["Backspace", "Delete"].includes(e.key)) {
+      if (annotations.handleKey(e)) return;
       if (S.mark && isUserImage(S.mark.id)) { e.preventDefault(); deleteUserImage(S.mark.id); return; }
       if (S.checked.size) { e.preventDefault(); pageAction("delete-pages").catch((err) => notice(err.message)); }
       return;
@@ -1448,6 +1686,33 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("resize", () => { if (S.view === "editor") fitBoard(); });
 
+// 草稿页编辑（web/drafts.js）：表单层挂在 #artboard-holder 里，fitBoard 让它和画布同缩放
+const drafts = createDraftEditor({
+  getProject: () => S.project,
+  getPageId: () => (S.view === "editor" && S.project ? page()?.id : null),
+  holder: () => (S.view === "editor" ? $("#artboard-holder") : null),
+  viewOf: (p) => (p ? viewOf(p) : null),
+  fetchText: (p) => fetchPageText(pageFileURL(S.project, p, stampOf(p.file))),
+  stampOf,
+  request: (op, body) => pagesOp(op, body, { draft: true }),
+  pagesOp,
+  notice,
+  status: (state) => saveStatus(state === "busy" ? SAVE_TEXT.busy : SAVE_TEXT.ok),
+  touch: (file) => { const stamp = Date.now(); S.stale.set(file, stamp); refreshThumbnails(); return stamp; },
+  selectPage: (id) => switchPage(id, { clearChecked: true }),
+  refresh: () => updateEditor(),
+  onState: () => { refreshHistoryButtons(); refreshQuickToolbar(); setText($("[data-draft-overflow]"), draftOverflowText()); },
+});
+// 批注（web/annotations.js）：只在编辑画布上，改动走 changed()（撤销 / 自动保存）
+const annotations = createAnnotations({
+  holder: () => (S.view === "editor" ? $("#artboard-holder") : null),
+  getProject: () => S.project,
+  getPage: () => (S.project ? page() : null),
+  scale: () => S.scale || 1,
+  changed,
+  notice,
+  onMode: (on) => { const b = $('.ed-tools [data-action="annotate"]'); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); } if (on) clearMark(); },
+});
 const projectManagement = createProjectManagement({ api, confirm: confirmAction, modal, closeModal, notice, refresh: home, onOpen: open, onDeleted: async () => {} });
 const homeUI = createHome({ api, S, app, $, esc, shell, head, modal, closeModal, notice, open, home, glassAttr, homeThumbs, liven, syncGlass, projectManagement: () => projectManagement });
 const workbenchClose = createWorkbenchClose({

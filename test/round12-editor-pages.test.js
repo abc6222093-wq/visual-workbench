@@ -10,7 +10,9 @@ const pagesOp=(page,op)=>page.waitForResponse(r=>r.request().method()==='POST'&&
 test('round12 页面：加页、创建副本、删除（确认后页面文件一起删）都经服务端，页面栏和磁盘一致',async t=>{
  const {page,errors,files}=await startWorkbench(t);await openProject(page);
  const root=dirname(files.demo);
- await Promise.all([pagesOp(page,'create'),page.locator('.ed-col-head [data-action="add-page"]').click()]);
+ // 第 13 轮：「添加页面」按钮弹菜单（空白页面 / 从文案添加草稿页… / 从其他项目… / 导入为页面…）
+ await page.locator('.ed-col-head [data-action="add-page"]').click();
+ await Promise.all([pagesOp(page,'create'),page.locator('.g-context-menu button',{hasText:'空白页面'}).click()]);
  await page.waitForFunction(()=>document.querySelectorAll('.page-list .ed-page').length===4);
  let project=disk(files.demo);assert.equal(project.pages.length,4);
  const added=project.pages[1];assert.ok(existsSync(join(root,added.file)),'新页的文件');
