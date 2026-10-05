@@ -171,11 +171,11 @@ test('createFromMaster：复制动效代码等附属文件，不复制 versions/
   });
 });
 
-test('createFromMaster：附属文件里的符号链接被跳过', () => {
+test('createFromMaster：附属文件里的符号链接被跳过', (t) => {
   withTmp((tmp) => {
     const masterDir = makeMaster(tmp);
-    symlinkSync(join(masterDir, 'code', 'intro.js'), join(masterDir, 'code', 'link.js'));
-    symlinkSync(join(masterDir, 'motion'), join(masterDir, 'motion-link'));
+    try { symlinkSync(join(masterDir, 'code', 'intro.js'), join(masterDir, 'code', 'link.js')); symlinkSync(join(masterDir, 'motion'), join(masterDir, 'motion-link')); }
+    catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; t.diagnostic('Windows 未开启开发者模式或管理员权限，无法创建符号链接；本用例只省略链接部分，其余断言照常执行'); const r = create(tmp, masterDir); assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); return; }
     const r = create(tmp, masterDir);
     assert.deepEqual(r.copiedExtra, ['README.md', 'code/intro.js', 'motion/a/b.js']); // README.md 来自示例项目，也是附属文件
     assert.equal(existsSync(join(r.destProjectDir, 'code', 'link.js')), false);

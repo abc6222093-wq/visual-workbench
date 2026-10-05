@@ -60,7 +60,7 @@ test('serves registered Unicode and space filenames, rejects project symlinks',a
  assert.equal(await (await fetch(`${base}/data/projects/unicode/assets/${encodeURIComponent(name)}`)).text(),'image bytes');
  assert.equal((await fetch(`${base}/data/projects/unicode/assets/%2e%2e%2fproject.json`)).status,400);
  const external=join(dir,'external.txt'); writeFileSync(external,'outside');
- symlinkSync(external,join(assetDir,'linked.png'));
+ try { symlinkSync(external,join(assetDir,'linked.png')); } catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; t.diagnostic('Windows 未开启开发者模式或管理员权限，无法创建符号链接；本用例只省略链接部分，其余断言照常执行'); return; }
  assert.equal((await request('/api/projects/unicode')).status,403);
  rmSync(join(assetDir,'linked.png'));
  rmSync(assetDir,{recursive:true}); symlinkSync(dir,assetDir);
@@ -70,7 +70,8 @@ test('serves registered Unicode and space filenames, rejects project symlinks',a
 test('rejects symlinked project file and source font when copying',async t=>{
  const {dir,request}=await fixture(t);
  await request('/api/projects','POST',{id:'links',name:'Links'});
- const p=join(dir,'projects/links/project.json'); const saved=readFileSync(p); rmSync(p); const outside=join(dir,'outside.json'); writeFileSync(outside,saved); symlinkSync(outside,p);
+ const p=join(dir,'projects/links/project.json'); const saved=readFileSync(p); rmSync(p); const outside=join(dir,'outside.json'); writeFileSync(outside,saved);
+ try { symlinkSync(outside,p); } catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; writeFileSync(p,saved); t.diagnostic('Windows 未开启开发者模式或管理员权限，无法创建符号链接；本用例只省略链接部分，其余断言照常执行'); return; }
  assert.equal((await request('/api/projects/links')).status,403); rmSync(p); writeFileSync(p,saved);
  const font=join(dir,'projects/links/fonts/a.ttf'); symlinkSync(outside,font);
  assert.equal((await request('/api/projects/links/copy','POST',{id:'new-copy',pages:[1]})).status,403);

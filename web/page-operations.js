@@ -45,7 +45,8 @@ export function movePages(project, ids, targetId, position='before') {
   return {project:out,selectedPageIds:moving.map(p=>p.id)};
 }
 export function insertPage(project,targetId,position='after') {
-  const out=clone(project), id=allocator(out)('page_'), page={id,name:'新页面',background:clone(project.pages.find(p=>p.id===targetId)?.background || '#ffffff'),elements:[]};
+  const out=clone(project), id=allocator(out)('page_'), target=project.pages.find(p=>p.id===targetId), page={id,name:'新页面',background:clone(target?.background || '#ffffff'),elements:[]};
+  if(target?.device&&target?.size)Object.assign(page,{device:target.device,size:clone(target.size)}); // 网页页面：沿用相邻页的设备与尺寸
   let index=out.pages.findIndex(p=>p.id===targetId); if(index<0)index=out.pages.length; else if(position==='after')index++; out.pages.splice(index,0,page);
   return {project:out,selectedPageIds:[id],currentPageId:id};
 }

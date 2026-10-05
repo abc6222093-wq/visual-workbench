@@ -1,0 +1,74 @@
+name: desktop
+
+# 桌面应用（Electron 壳）：在 macOS 和 Windows 上制作、自测启动，并上传可下载的构建产物。
+# 不签名（没有 Apple 开发者账号）；第一次打开时的系统提示见 README「第一次打开时的安全提示」。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            pack: pack:mac
+            out: 视觉工作台-darwin-universal
+            exe: 视觉工作台-darwin-universal/视觉工作台.app/Contents/MacOS/视觉工作台
+            artifact: visual-workbench-mac
+          - os: windows-latest
+            pack: pack:win
+            out: 视觉工作台-win32-x64
+            exe: 视觉工作台-win32-x64/视觉工作台.exe
+            artifact: visual-workbench-windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      # 应用壳启动的是仓库里的工作台服务，所以仓库本身的依赖也要装
+      - run: npm ci
+      - run: npm ci
+        working-directory: desktop
+      # 图标已提交进 git：这里只校验能被正确解析，不重新生成
+      - name: 校验图标
+        run: node scripts/make-icons.mjs --check
+        working-directory: desktop
+      - name: 应用壳单元测试
+        run: node --test test/round11-desktop-core.test.js test/round11-desktop-icons.test.js
+      - name: 制作应用
+        run: npm run ${{ matrix.pack }}
+        working-directory: desktop
+      # 自测：启动服务 → 页面加载完成 → 正常关闭（先保存、POST /api/shutdown、等服务退出），退出码 0 才算通过
+      - name: 启动自测（--smoke）
+        run: |
+          "./dist/${{ matrix.exe }}" --smoke
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            powershell -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort 4173 -ErrorAction SilentlyContinue) { Write-Error '4173 仍被占用'; exit 1 }"
+          elif lsof -nP -iTCP:4173 -sTCP:LISTEN; then echo "4173 仍被占用"; exit 1; fi
+        working-directory: desktop
+      - name: 打包下载文件（Mac）
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/${{ matrix.out }}/视觉工作台.app" "dist/${{ matrix.artifact }}.zip"
+        working-directory: desktop
+      - name: 打包下载文件（Windows）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/${{ matrix.out }}" -DestinationPath "dist/${{ matrix.artifact }}.zip"
+        working-directory: desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: desktop/dist/${{ matrix.artifact }}.zip
+          retention-days: 14

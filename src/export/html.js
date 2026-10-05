@@ -14,6 +14,7 @@ export const SIZE_LIMIT = 15 * 1024 * 1024;
 
 // 放映要用到的工作台代码（原样内嵌，保证和工作台行为一致）
 const RUNTIME = [
+  ['/project-kinds.js', join(WEB_ROOT, 'project-kinds.js')], // 第 11 轮：render.js 按页尺寸取宽高要用
   ['/render.js', join(WEB_ROOT, 'render.js')],
   ['/motion-runtime.js', join(WEB_ROOT, 'motion-runtime.js')],
   ['/playback.js', join(WEB_ROOT, 'playback.js')],

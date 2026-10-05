@@ -57,7 +57,43 @@ export function rootSelection(page, ids) {
   const set = new Set(ids);
   return ids.filter(id => { const found = findElement(page, id); return found && !found.ancestors.some(parent => set.has(parent.id)); });
 }
-export function resizeGroup(target, original, width, height) {
+// ---------- 整体等比缩放（第 11 轮）：分组、多选、文字框拖角、「整体缩放 %」共用同一套规则 ----------
+// 缩放外观数值：字号、字距、描边粗细、投影偏移 / 模糊、圆角（old 是缩放前的样子，target 写入结果）
+const r2 = value => Math.round(value * 100) / 100;
+export function scaleStyle(target, old, factor) {
+  if (old.fontSize != null) target.fontSize = Math.max(1, r2(old.fontSize * factor));
+  if (old.letterSpacing != null) target.letterSpacing = r2(old.letterSpacing * factor);
+  if (old.cornerRadius != null) target.cornerRadius = Math.max(0, r2(old.cornerRadius * factor));
+  if (old.stroke && typeof old.stroke === "object") target.stroke = { ...old.stroke, width: Math.max(0, r2((old.stroke.width || 0) * factor)) };
+  if (old.shadow && typeof old.shadow === "object") target.shadow = { ...old.shadow, x: r2((old.shadow.x || 0) * factor), y: r2((old.shadow.y || 0) * factor), blur: Math.max(0, r2((old.shadow.blur || 0) * factor)) };
+}
+// 元素本身按比例缩放：宽高、外观数值；分组里的子元素位置（即组内间距）、尺寸、外观一起变。不动 target 自己的 x / y
+export function scaleElement(target, old, factor) {
+  target.width = Math.max(0, Math.round(old.width * factor));
+  target.height = Math.max(0, Math.round(old.height * factor));
+  scaleStyle(target, old, factor);
+  (old.children || []).forEach((child, index) => {
+    const next = target.children?.[index];
+    if (!next) return;
+    next.x = Math.round(child.x * factor); next.y = Math.round(child.y * factor);
+    scaleElement(next, child, factor);
+  });
+}
+// 纯函数：一组同一坐标系里的元素以 origin 为基准整体缩放 factor 倍，返回新的元素（不改传入的）。
+// 以元素中心换算位置，旋转过的元素也保持相对位置。
+export function scaleElements(elements, factor, origin) {
+  return elements.map(old => {
+    const next = clone(old), cx = old.x + old.width / 2, cy = old.y + old.height / 2;
+    scaleElement(next, old, factor);
+    next.x = Math.round(origin.x + (cx - origin.x) * factor - next.width / 2);
+    next.y = Math.round(origin.y + (cy - origin.y) * factor - next.height / 2);
+    return next;
+  });
+}
+// 分组缩放：factor 给定（拖角、整体缩放）时等比，子元素的字号、描边、投影、圆角、组内间距一起按比例变；
+// 不给 factor（拖边）时两个方向各自缩放（旧行为）
+export function resizeGroup(target, original, width, height, factor = null) {
+  if (factor != null) { scaleElement(target, original, factor); target.width = Math.round(width); target.height = Math.round(height); return; }
   const sx = original.width ? width / original.width : 1;
   const sy = original.height ? height / original.height : 1;
   target.width = Math.round(width); target.height = Math.round(height);
@@ -66,7 +102,7 @@ export function resizeGroup(target, original, width, height) {
     item.x = Math.round(old.x * sx); item.y = Math.round(old.y * sy);
     item.width = Math.max(0, Math.round(old.width * sx));
     item.height = Math.max(0, Math.round(old.height * sy));
-    if (item.type === 'text') { item.fontSize = Math.max(1, +(old.fontSize * Math.min(sx, sy)).toFixed(2)); if (old.letterSpacing != null) item.letterSpacing = +(old.letterSpacing * sx).toFixed(2); }
+    if (item.type === "text") { item.fontSize = Math.max(1, +(old.fontSize * Math.min(sx, sy)).toFixed(2)); if (old.letterSpacing != null) item.letterSpacing = +(old.letterSpacing * sx).toFixed(2); }
     if (item.children) resize(item.children, old.children);
   });
   resize(target.children, original.children);

@@ -117,7 +117,8 @@ test('在访达中显示：只允许 exports 里面的路径', async t => {
   // 不存在的文件 → 404
   assert.equal((await request('/api/reveal', 'POST', { path: join(out.outDir, 'missing.pdf') })).status, 404);
   // exports 里的符号链接指向外面 → 拒绝
-  symlinkSync(projectDir, join(dir, 'exports', 'demo', 'escape'));
+  try { symlinkSync(projectDir, join(dir, 'exports', 'demo', 'escape')); }
+  catch (e) { if (process.platform !== 'win32' || e.code !== 'EPERM') throw e; t.diagnostic('Windows 未开启开发者模式或管理员权限，无法创建符号链接；本用例只省略链接部分，其余断言照常执行'); assert.equal(calls.reveal.length, 2); return; }
   assert.equal((await request('/api/reveal', 'POST', { path: join(dir, 'exports', 'demo', 'escape') })).status, 403);
   assert.equal((await request('/api/reveal', 'POST', { path: join(dir, 'exports', 'demo', 'escape', 'project.json') })).status, 403);
   assert.equal(calls.reveal.length, 2);

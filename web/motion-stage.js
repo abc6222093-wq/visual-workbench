@@ -1,5 +1,6 @@
 import { renderPage } from './render.js';
 import { createPlayback } from './playback.js';
+import { pageSize, pageViewport } from './project-kinds.js';
 
 // Scaling belongs to the stage, leaving both page roots free for agent transitions.
 // 后退（新页序号小于旧页）时，新页先在隐藏状态下快进到最后一步，再由旧页的 transition 过渡；前进仍从第 0 步开始。
@@ -11,17 +12,23 @@ export async function showMotionPage(state, id, { stage, label, assetBase, onErr
   const oldRoot = stage.querySelector('[data-page-id]');
   const page = state.project.pages.find(p => p.id === id);
   const board = renderPage(state.project, page, { assetBase });
-  const scale = Math.min(innerWidth / state.project.artboard.width, (innerHeight - 90) / state.project.artboard.height);
+  // 第 11 轮：按页自己的尺寸放映；网页页面按设备窗口缩放，整页在舞台里上下滚动
+  const { width: PW, height: PH } = pageSize(state.project, page), view = pageViewport(state.project, page);
+  const scale = Math.min(innerWidth / view.width, (innerHeight - 90) / view.height);
   let layer = stage.firstElementChild;
   if (!layer || !oldRoot) {
     stage.replaceChildren();
     layer = document.createElement('div');
-    layer.style.cssText = `position:relative;width:${state.project.artboard.width}px;height:${state.project.artboard.height}px;transform:scale(${scale});transform-origin:top left`;
+    layer.style.cssText = `position:relative;transform:scale(${scale});transform-origin:top left`;
     stage.append(layer);
   }
   layer.style.transform = `scale(${scale})`;
-  stage.style.width = `${state.project.artboard.width * scale}px`;
-  stage.style.height = `${state.project.artboard.height * scale}px`;
+  layer.style.width = `${PW}px`;
+  layer.style.height = `${PH}px`;
+  stage.style.width = `${PW * scale}px`;
+  stage.style.height = `${Math.min(PH, view.height) * scale}px`;
+  stage.style.overflowY = PH > view.height ? 'auto' : '';
+  if (PH > view.height) stage.scrollTop = 0;
   board.style.position = 'absolute';
   board.style.inset = '0';
   board.style.visibility = oldRoot ? 'hidden' : 'visible';

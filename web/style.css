@@ -205,7 +205,15 @@ button:disabled {
 .ed-page-timeline {flex:none;max-height:190px;border-top:1px solid rgba(80,70,100,.12)}
 .ed-grid.is-page-timeline .ed-pages > :not([data-action="toggle-pages"]) {display:none}
 .ed-grid.is-page-timeline #canvas-well {min-height:140px}
-.ed-col-head {flex-wrap:wrap}
+/* 页面栏表头不折行（折行后「添加页面」按钮会被列表盖住）：栏窄时「网格」「时间轴」只显示图标 */
+.ed-pages {container-type:inline-size;container-name:vw-pages}
+.ed-col-head {flex-wrap:nowrap;min-width:0}
+.ed-col-head > * {flex-shrink:0}
+.ed-col-head > .ed-spacer {flex:1 1 0;min-width:0}
+@container vw-pages (max-width: 300px) {
+  .ed-col-head .ed-tbtn {padding:0 7px}
+  .ed-col-head .ed-tbtn > span {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+}
 .ed-marquee {position:absolute;border:1px solid #38bdf8;background:rgba(56,189,248,.12);pointer-events:none;z-index:10000}
 .ed-guide {position:absolute;pointer-events:none;z-index:9998;border-color:#d673ba;border-style:solid;border-width:0}
 .ed-guide[data-axis=x] {border-left-width:1px}
@@ -234,3 +242,22 @@ html.glass-mode .ed-toolbar {height:auto;min-height:40px;flex-wrap:wrap}
 .rotate-handle { position: absolute; box-sizing: border-box; border-radius: 50%; background: #fff; color: #5b5470; display: grid; place-items: center; cursor: grab; box-shadow: 0 0 0 1.5px rgba(120, 110, 145, 0.55), 0 2px 6px rgba(20, 20, 30, 0.35); z-index: 1; }
 .rotate-handle svg { width: 62%; height: 62%; pointer-events: none; }
 .rotate-handle:active { cursor: grabbing; }
+
+/* 第 11 轮：从快捷工具条跳到属性栏某一区时短暂高亮 */
+.ed-section.is-flash {border-radius:12px;box-shadow:0 0 0 2px #38bdf8;transition:box-shadow .3s}
+
+/* 第 11 轮：网页项目的画布窗口（固定比例的「浏览器窗口」，滚轮浏览整页） */
+#artboard-holder.ed-viewport {position:relative;overflow:hidden;flex:none;border-radius:6px;box-shadow:0 0 0 1px rgba(120,110,145,.35),0 0 0 6px rgba(255,255,255,.55),0 18px 40px -22px rgba(20,20,30,.45)}
+.ed-page__device {margin-left:6px;font-size:10.5px;padding:1px 6px;vertical-align:1px}
+/* 第 11 轮：变体份数、并排对比弹层 */
+.vw-variant-count {margin:6px 0 4px}
+.vw-compare {position:fixed;inset:0;z-index:9000;display:flex;flex-direction:column;gap:14px;padding:20px 24px;background:rgba(236,233,244,.72);backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3)}
+.vw-compare__head {display:flex;align-items:center;gap:14px;flex:none}
+.vw-compare__head h2 {margin:0;font-size:17px;color:var(--g-ink,#2b2738)}
+.vw-compare__head p {margin:0;font-size:12.5px;color:var(--g-ink-3,#6b6680)}
+.vw-compare__spacer {flex:1}
+.vw-compare__row {flex:1;min-height:0;display:flex;gap:16px;align-items:flex-start;justify-content:safe center;overflow:auto}
+.vw-compare__card {display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px;border-radius:16px;background:rgba(255,255,255,.6);box-shadow:0 0 0 1px rgba(120,110,145,.18)}
+.vw-compare__frame-box {max-height:calc(100vh - 190px);overflow:auto;border-radius:8px}
+.vw-compare__frame {position:relative;overflow:hidden;background:#fff;box-shadow:0 0 0 1px rgba(120,110,145,.25)}
+.vw-compare__foot {display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--g-ink-2,#4a4558)}

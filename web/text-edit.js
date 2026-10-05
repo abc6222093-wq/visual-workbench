@@ -64,7 +64,34 @@ function insertPlain(text) {
   }
 }
 
-export function startTextEdit(node, { text = '', point = null, selectAll = false, onInput, onCommit } = {}) {
+// 词的范围：按浏览器的分词（中文、日文按词典分词）；点在空白上就选这段空白
+export function wordRange(text, offset) {
+  if (!text) return [0, 0];
+  const at = Math.min(Math.max(0, offset), text.length);
+  try {
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)];
+    // 点在词尾（光标落在词和后面空白之间）时优先选前面的词
+    let hit = segments.find(s => at >= s.index && at < s.index + s.segment.length) || segments.at(-1);
+    const before = segments.find(s => s.index + s.segment.length === at);
+    if (before?.isWordLike && !hit.isWordLike) hit = before;
+    if (hit.segment === '\n' && before) hit = before;
+    return [hit.index, hit.index + hit.segment.length];
+  } catch {
+    let start = at, end = at;
+    while (start > 0 && /\S/.test(text[start - 1])) start--;
+    while (end < text.length && /\S/.test(text[end])) end++;
+    return [start, end];
+  }
+}
+// 段的范围：两个换行之间（不含换行本身）
+export function paragraphRange(text, offset) {
+  const at = Math.min(Math.max(0, offset), text.length);
+  const start = text.lastIndexOf('\n', at - 1) + 1;
+  const next = text.indexOf('\n', at);
+  return [start, next < 0 ? text.length : next];
+}
+
+export function startTextEdit(node, { text = '', point = null, selectAll = false, selectWord = false, onInput, onCommit } = {}) {
   sessions.get(node)?.finish();
   const host = node.querySelector(':scope > [data-vw-flip]') || node;
   const initial = String(text ?? '');
@@ -126,6 +153,18 @@ export function startTextEdit(node, { text = '', point = null, selectAll = false
     try { onCommit?.({ text: value, changed: value !== initial }); } catch (error) { console.error(error); }
   }
 
+  // 选中点到位置所在的词（unit="word"）或整段（unit="paragraph"，以换行分段）
+  function selectAround(x, y, unit) {
+    if (finished) return;
+    const at = caretAt(host, x, y), text = host.firstChild;
+    if (!at || !text || text.nodeType !== 3 || at.node !== text) return;
+    const [start, end] = unit === 'paragraph' ? paragraphRange(text.data, at.offset) : wordRange(text.data, at.offset);
+    const range = document.createRange(); range.setStart(text, start); range.setEnd(text, end);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  }
+  // 三击：选中整段（浏览器自己的三击在不同浏览器里范围不一，这里统一成换行之间的一段）
+  host.addEventListener('click', e => { if (e.detail >= 3) { e.preventDefault(); selectAround(e.clientX, e.clientY, 'paragraph'); } }, { signal });
+
   host.focus({ preventScroll: true });
   const sel = getSelection(), range = document.createRange();
   if (selectAll) range.selectNodeContents(host);
@@ -135,8 +174,10 @@ export function startTextEdit(node, { text = '', point = null, selectAll = false
     range.collapse(true);
   }
   sel.removeAllRanges(); sel.addRange(range);
+  if (point && selectWord) selectAround(point.clientX, point.clientY, 'word');
 
-  const session = { finish, get active() { return !finished; }, get text() { return current(); }, host };
+  const session = { finish, get active() { return !finished; }, get text() { return current(); }, host,
+    selectWordAt: (x, y) => selectAround(x, y, 'word'), selectParagraphAt: (x, y) => selectAround(x, y, 'paragraph') };
   sessions.set(node, session);
   return session;
 }

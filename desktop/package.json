@@ -1,0 +1,19 @@
+{
+  "name": "visual-workbench-desktop",
+  "productName": "视觉工作台",
+  "version": "0.1.0",
+  "private": true,
+  "description": "视觉工作台桌面应用壳：启动仓库里的本机服务并在独立窗口中打开",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke",
+    "icons": "node scripts/make-icons.mjs",
+    "pack:win": "node scripts/pack.mjs --platform win32 --arch x64",
+    "pack:mac": "node scripts/pack.mjs --platform darwin --arch universal"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.5.1"
+  }
+}

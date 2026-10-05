@@ -17,6 +17,8 @@ import { copyPages } from './copy-pages.js';
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief } from './brief.js';
+import { exportHandoff, defaultHandoffDir } from './export/changes.js';
+import { WEB_DEVICES, WEB_DEFAULT_ARTBOARD, webPageDefaults } from '../web/project-kinds.js';
 import { cleanupTrash, listTrash, deleteProject, restoreProject, purgeProject, duplicateProject } from './project-management.js';
 import { createImportJobs, IMPORT_MAX_BYTES } from './import-html/jobs.js';
 
@@ -179,6 +181,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         let out; try { out=createFromMaster({masterDir:projectPath(dataDir,b.fromMaster),destProjectDir:dir,newId:id,newName:b.name.trim()}); } catch(e) { throw e.status?e:fail(400,e.message); }
         return json(res,201,{project:out.project,revision:readProject(dir).revision,fromMaster:b.fromMaster});
       }
+      if(b.kind==='web') { // 第 11 轮：网页项目——画板只当默认窗口；初始两页：首页的电脑端（窗口高 ×2）与手机端（窗口高 ×2）
+        mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString();
+          const pages=[{id:'page_home_desk',name:'首页 · 电脑端',background:'#ffffff',...webPageDefaults('desktop',WEB_DEVICES.desktop.height*2),elements:[]},{id:'page_home_mob',name:'首页 · 手机端',background:'#ffffff',...webPageDefaults('mobile',WEB_DEVICES.mobile.height*2),elements:[]}];
+          const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),kind:'web',createdAt:now,updatedAt:now,artboard:{...WEB_DEFAULT_ARTBOARD},assets:[],fonts:[],pages}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;}
+      }
       const preset=b.preset||'slide-16x9'; if(!PRESETS[preset]) throw fail(400,'Invalid preset'); const [dw,dh]=PRESETS[preset], width=b.width??dw,height=b.height??dh; dims({width,height}); mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString(); const project={format:'visual-workbench/project',formatVersion:2,id,name:b.name.trim(),createdAt:now,updatedAt:now,artboard:{preset,width,height},assets:[],fonts:[],pages:[blankPage('#ffffff')]}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
     if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]) { const id=parts[2],dir=projectPath(dataDir,id);
       if(parts.length===3&&req.method==='DELETE') {
@@ -214,6 +221,12 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         }
       }
       if(parts[3]==='brief'&&parts.length===4&&req.method==='GET') return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project:readProject(dir).project})});
+      // 第 11 轮：交接包（改动清单 + 改前改后对比图 + 复制给 agent 的文字）；改前基准是 import/baseline.json
+      if(parts[3]==='handoff'&&parts.length===4&&req.method==='POST') {
+        const b=await checkedBody(req); const outDir=defaultHandoffDir(dataDir,id);
+        try { return json(res,200,await exportHandoff({projectDir:dir,outDir,images:b.images!==false})); }
+        catch(e) { if(e.code==='NO_BASELINE') throw fail(409,e.message); throw fail(500,`交接包生成失败：${e.message}`); }
+      }
       if(parts[3]==='master'&&parts.length===4&&req.method==='PUT') { const b=await checkedBody(req); if(typeof b.master!=='boolean') throw fail(400,'Invalid master flag'); setMaster(dataDir,id,b.master); return json(res,200,{id,master:b.master}); }
       if(parts[3]==='versions'&&parts.length===6&&parts[5]==='restore'&&req.method==='POST') { // 退回到某个版本：先自动存一版当前状态
         const vid=parts[4]; if(!VERSION_ID.test(vid)) throw fail(400,'Invalid version id'); if(!existsSync(join(dir,'versions',vid,'project.json'))) throw fail(404,'Version not found');

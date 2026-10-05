@@ -16,3 +16,9 @@
 .import-html__msg--warn{color:#9a5b00;font-size:13px}
 .import-html__msg--error{color:#b42318}
 @media (prefers-reduced-motion:reduce){.import-html__fill{transition:none}}
+.import-html [hidden]{display:none!important}
+.import-html__kind{display:flex;flex-wrap:wrap;gap:8px 20px;margin:0;padding:0;border:0}
+.import-html__kind legend{padding:0;margin-bottom:6px;font-size:13px;opacity:.75}
+.import-html__kind label{display:inline-flex;align-items:center;gap:6px;font-size:14px;cursor:pointer}
+.import-html textarea{min-height:80px}
+.import-html__skipped{margin:0;padding-left:18px}
