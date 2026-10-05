@@ -1,7 +1,9 @@
-// 旧 HTML 导入 · 后台浏览器分析：本地临时 http 服务挂上传的文件，Chromium 逐页打开（视口 = 画板尺寸），
-// 每页单独渲染、播完动画后取元素，转不了的块截图。网络请求只许访问本地服务，网络字体和 CDN 一律不下载。
+// 旧 HTML 导入（第 12 轮）· 后台浏览器：本地临时 http 服务挂上传的文件，Chromium 打开入口（视口 = 画板尺寸）识别分页，
+// 再按页切开：每页取原文（未执行脚本的原 HTML）里属于这一页的那一块，保留原来的样式、脚本和动画，标出可改的文字和图片，
+// 资源复制进项目。网络请求只许访问本地服务，CDN 和网络字体不下载（保留原地址并写进迁移说明）。
 import http from 'node:http';
 import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import { createStore, mapRefs, newLog } from './resources.js';
 import { resolve, sep, extname, join, dirname, posix } from 'node:path';
 import { launchBrowser } from '../browser.js';
 import { install } from './inpage.js';
@@ -51,44 +53,38 @@ export function deckData(html) {
 
 /** 只读访问：所有不是 GET 的请求（表单提交、POST 打点、sendBeacon 等）一律放弃。 */
 export const onlyGet = route => (route.request().method() === 'GET' ? null : route.abort('blockedbyclient'));
-
-/**
- * 在已经注入分析代码的页面里取一页：isolate → analyze → 逐个截图块截图。kind 'web' 时整页一页。
- * 返回 inpage.js analyze 的结果，截图块带 png。
- */
-export async function analyzeOpenedPage(page, { kind, index = 0, width, deck = false, check = () => {}, isolate = {}, limit }) {
-  // 每页一份文档的课件常用 End 键跳到最后一步（取「最后一步的画面」）
-  if (deck) { await page.keyboard.press('End').catch(() => {}); await page.waitForTimeout(100); }
-  await page.evaluate(([k, n, o]) => window.__vwImport.isolate(k, n, o), [kind, index, isolate]);
-  const res = await page.evaluate(o => window.__vwImport.analyze(o), { width, ...(limit ? { limit } : {}) });
-  for (const item of res.items) {
-    if (item.kind !== 'shot') continue; check();
-    const c = item.clip, x = Math.max(0, Math.floor(c.x)), y = Math.max(0, Math.floor(c.y));
-    const w = Math.min(res.doc.width, Math.ceil(c.x + c.width)) - x, h = Math.min(res.doc.height, Math.ceil(c.y + c.height)) - y;
-    if (w < 1 || h < 1) continue;
-    // canvas / video 等和背景层：底色取页面背景；叠在别的内容上的块：透明底，混合模式另写进 effects.blend
-    const opaque = item.opaque || item.role === 'background';
-    await page.evaluate(o => window.__vwImport.shotOn(o), { marks: item.marks || [item.mark], own: item.own, background: opaque ? res.background : null });
-    item.png = await page.screenshot({ clip: { x, y, width: w, height: h }, fullPage: true, caret: 'hide', omitBackground: !opaque });
-    await page.evaluate(() => window.__vwImport.shotOff());
-  }
-  return res;
-}
-
-const DECK_LABEL = '课件 JSON（application/json 脚本里的 slides[].html，每页一份完整文档）';
 export const withTimeout = (promise, ms, message) => { let t; return Promise.race([promise, new Promise((_, reject) => { t = setTimeout(() => reject(new Error(message)), ms); })]).finally(() => clearTimeout(t)); };
 
 /**
- * 分析入口 HTML。返回 { kind, label, pages: [分析结果] }；每页结果见 inpage.js analyze，截图块带 png。
- * onPages(n) 识别完页数时回调；onPage(i, n) 每页开始时回调；onBrowser(browser) 交出浏览器以便取消时立即关闭。
+ * 在已经注入 install 的页面里生成一页 HTML：prepare（取原文、标记、只留这一页、资源换绝对地址）→ 复制资源 → finish（改写引用、序列化）。
+ * 返回 { html, heading, title, stats, notes, log }。
  */
-export async function analyzeHtml({ srcDir, entry, width, height, signal, onPages = () => {}, onPage = () => {}, onBrowser = () => {}, pageTimeout = 90000 }) {
+export async function renderPage(page, { source = null, sourceUrl = null, spec, width, height, snapshot = false, store }) {
+  const log = newLog();
+  const prep = await page.evaluate(o => window.__vwImport.prepare(o), { source, sourceUrl, spec, width, height, snapshot });
+  const map = await mapRefs(store, prep.refs, log);
+  const css = [];
+  for (const text of prep.css) css.push(await store.rewriteCss(text, prep.base, log));
+  const html = await page.evaluate(o => window.__vwImport.finish(o), { map, css });
+  return { html, heading: prep.heading, title: prep.title, stats: prep.stats, notes: prep.notes, log };
+}
+export const failedHtml = message => `<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body><p style="font:24px/1.5 sans-serif;padding:40px">这一页导入失败：${String(message).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p></body></html>\n`;
+
+const DECK_LABEL = '课件 JSON（application/json 脚本里的 slides[].html，每页一份完整文档）';
+const FRAMEWORKS = new Set(['reveal', 'impress', 'swiper']);
+
+/**
+ * 分析入口 HTML 并生成每页。返回 { kind, label, pages: [{ html, heading, title, stats, notes, log, clue, index, error? }], names, store }。
+ * projectDir：临时项目文件夹（资源直接复制进去）。onPages(n) 识别完页数时回调；onPage(i, n) 每页开始时回调；onBrowser(browser) 交出浏览器以便取消时立即关闭。
+ */
+export async function analyzeHtml({ srcDir, entry, width, height, projectDir, signal, onPages = () => {}, onPage = () => {}, onBrowser = () => {}, pageTimeout = 90000 }) {
   const check = () => { if (signal?.aborted) throw cancelledError(); };
-  const entryFile = join(srcDir, entry);
-  const deck = deckData(readFileSync(entryFile, 'utf8'));
-  const urls = [];
-  if (deck) deck.slides.forEach((html, i) => { const name = `__vw_slide_${i + 1}.html`; writeFileSync(join(dirname(entryFile), name), html); urls.push(posix.join(posix.dirname(entry), name)); });
+  const entryFile = join(srcDir, entry), entryText = readFileSync(entryFile, 'utf8');
+  const deck = deckData(entryText);
+  const slides = [];
+  if (deck) deck.slides.forEach((html, i) => { const name = `__vw_slide_${i + 1}.html`; writeFileSync(join(dirname(entryFile), name), html); slides.push({ path: posix.join(posix.dirname(entry), name), html }); });
   const { server, origin } = await startStatic(srcDir);
+  const store = createStore({ projectDir, srcDir, origin });
   let browser;
   try {
     check();
@@ -103,25 +99,34 @@ export async function analyzeHtml({ srcDir, entry, width, height, signal, onPage
       await page.evaluate(`(${install})()`);
       return page;
     };
-    let kind = 'deck', label = DECK_LABEL, count = urls.length;
-    if (!deck) { const page = await open(entry); try { ({ kind, label, count } = await page.evaluate(() => window.__vwImport.detect())); } finally { await page.close(); } }
-    check(); onPages(count);
     const pages = [];
-    for (let i = 0; i < count; i++) {
+    const one = async (i, count, page, make) => {
       check(); onPage(i, count);
-      const page = await open(deck ? urls[i] : entry);
-      try {
-        const work = analyzeOpenedPage(page, { kind, index: deck ? 0 : i, width, deck: !!deck, check });
-        work.catch(() => {});
-        pages.push(await withTimeout(work, pageTimeout, `第 ${i + 1} 页分析超时`));
-      } catch (error) {
-        if (signal?.aborted) throw cancelledError();
-        // 这一页分析失败：整页截一张图兜底，迁移说明里写原因
-        let png = null; try { png = await page.screenshot({ clip: { x: 0, y: 0, width, height } }); } catch {}
-        pages.push({ items: png ? [{ kind: 'shot', x: 0, y: 0, width, height, png, reason: '整页分析失败', name: '[截图] 整页' }] : [], background: null, clue: null, error: String(error.message || error), scale: 1, fonts: { faces: [], remote: [] } });
-      } finally { await page.close().catch(() => {}); }
+      try { const work = make(); work.catch(() => {}); pages.push({ index: i, ...(await withTimeout(work, pageTimeout, `第 ${i + 1} 页导入超时`)) }); }
+      catch (error) { if (signal?.aborted || error.cancelled) throw cancelledError(); pages.push({ index: i, html: failedHtml(error.message || error), heading: '', title: '', stats: { text: 0, image: 0 }, notes: null, log: newLog(), clue: null, error: String(error.message || error) }); }
+    };
+    if (deck) {
+      onPages(slides.length);
+      for (const [i, slide] of slides.entries()) {
+        const page = await open(slide.path);
+        try { await one(i, slides.length, page, async () => ({ clue: await page.evaluate(() => window.__vwImport.clues()), ...(await renderPage(page, { source: slide.html, sourceUrl: href(slide.path), spec: { mode: 'whole' }, width, height, store })) })); }
+        finally { await page.close().catch(() => {}); }
+      }
+      return { kind: 'deck', label: DECK_LABEL, pages, names: deck.names, store, origin };
     }
-    return { kind, label, pages, names: deck?.names || [], origin, generated: urls };
+    const page = await open(entry);
+    try {
+      const { kind, label, count } = await page.evaluate(() => window.__vwImport.detect());
+      check(); onPages(count);
+      const list = kind === 'fallback' ? [] : await page.evaluate(k => window.__vwImport.pages(k), kind);
+      for (let i = 0; i < count; i++) {
+        const slide = list[i];
+        const spec = kind === 'fallback' ? { mode: count > 1 ? 'fallback' : 'whole', index: i }
+          : { mode: 'section', path: slide.path, framework: FRAMEWORKS.has(kind) ? kind : null, zoom: slide.width > 0 ? width / slide.width : 1 };
+        await one(i, count, page, async () => ({ clue: await page.evaluate(p => window.__vwImport.clues(p), slide?.path || null), zoom: spec.zoom, ...(await renderPage(page, { source: entryText, sourceUrl: href(entry), spec, width, height, store })) }));
+      }
+      return { kind, label, pages, names: [], store, origin };
+    } finally { await page.close().catch(() => {}); }
   } finally {
     await browser?.close().catch(() => {});
     await new Promise(ok => server.close(ok));

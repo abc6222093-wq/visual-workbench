@@ -14,5 +14,5 @@ canvas{display:block;width:400px;height:200px}
 <section><section><h2>纵向一</h2><p>嵌套第一页</p></section><section><h2>纵向二</h2><canvas id="c" width="400" height="200"></canvas></section></section>
 <section><h2>结束页</h2></section>
 </div></div>
-<script>const c=document.getElementById('c').getContext('2d');c.fillStyle='#e11d48';c.fillRect(0,0,400,200);c.fillStyle='#fff';c.fillRect(50,50,100,100);</script>
+<script>const el=document.getElementById('c');if(el){const c=el.getContext('2d');c.fillStyle='#e11d48';c.fillRect(0,0,400,200);c.fillStyle='#fff';c.fillRect(50,50,100,100);}</script>
 </body></html>
