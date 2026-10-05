@@ -28,6 +28,13 @@ export const WINDOWS_TEST_FILES = Object.freeze([
   'test/version-gc.test.js',
   'test/version-store.test.js',
   'test/version.test.js',
+  'test/round13-draft-model.test.js', // Draft parsing is pure logic.
+  'test/round13-server-organize.test.js', // Folders, organize backup / restore over the real server.
+  'test/round13-server-drafts.test.js', // Draft page operations write page files.
+  'test/round13-cli-organize.test.js', // organize / annotations CLIs (spawn node).
+  'test/round13-fonts-library.test.js', // Font catalog, aliases, manifest reading.
+  'test/round13-fonts-cli.test.js', // Font install CLI against a local http server.
+  'test/round13-fonts-export.test.js', // Export embeds library fonts (subset-font).
   'test/watch.test.js',
   'test/windows-test-selection.test.js',
 ]);

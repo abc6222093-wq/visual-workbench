@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { WINDOWS_TEST_FILES, windowsTestArgs, runWindowsTests } from '../scripts/test-windows.js';
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const expected = ['browser','config','copy-pages','data-dir','round12-export-images','launcher','machine-config','platform','portable-export-name','project-management','round12-handoff','round11-desktop-core','round11-desktop-icons','round12-desktop-menu','round12-format','round12-server-pages','shutdown','session','sync-conflicts','two-devices-server','version-gc','version-store','version','watch','windows-test-selection'].map(name => `test/${name}.test.js`);
+const expected = ['browser','config','copy-pages','data-dir','round12-export-images','launcher','machine-config','platform','portable-export-name','project-management','round12-handoff','round11-desktop-core','round11-desktop-icons','round12-desktop-menu','round12-format','round12-server-pages','shutdown','session','sync-conflicts','two-devices-server','version-gc','version-store','version','round13-draft-model','round13-server-organize','round13-server-drafts','round13-cli-organize','round13-fonts-library','round13-fonts-cli','round13-fonts-export','watch','windows-test-selection'].map(name => `test/${name}.test.js`);
 
 test('Windows selection is explicit, unique, real and includes browser/PNG/PDF integration', () => {
   assert.deepEqual(WINDOWS_TEST_FILES, expected);

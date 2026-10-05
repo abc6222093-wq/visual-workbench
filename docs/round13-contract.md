@@ -162,3 +162,15 @@ import { DRAFT_LEVELS, parseDraftText, draftPageHtml, blocksFromDraftHtml, isDra
 - 只用临时数据目录和临时 home（`test/helpers/`）。动到系统剪贴板的测试先存后还原。
 - 0b 改了点击方式：旧断言逐条改并在报告里列出（文件、测试名、原断言 → 新断言）。
 - 每组至少一个走真实服务 + 真实浏览器的测试（`startWorkbench` / `createServer` + `launchBrowser`）。
+
+## 14. 做完后的最终形状（和上面约定的出入，以这里为准）
+- `POST /api/folders` 回 **201**；重名 409；`PATCH` / `DELETE /api/folders/:name` 找不到 404（名字要 `encodeURIComponent`）。`PATCH /api/projects/:id` 的 `name` / `folder` 至少给一个；`folder` 为空串时**删掉**字段；`GET /api/projects` 里没文件夹的项目 `folder: ""`。
+- `POST /api/organize/restore` 没备份时 404；`restored` 只算真有变动的项目。`organize` 命令行：没有备份时第一次 `folder` / `move` / `rename` 自动先 `begin`；`move <项目> /` 表示移出。`annotations` 命令行多一个 `--json`。
+- 从文案新建：响应 `draft.pages` 是**页数**；`draft` 不能和 `fromMaster` 同给（400）；空文案 / 分不出页 / 没有 `#` 标题也没给 `name` → 400，不建文件夹。`draft-split` 新页没有 `notes` 字段；`draft-merge` 把下一页的批注也并过来。`intent=design` / `unify` 不带 `pageIds` 时只列草稿页 / 拼进来的页；`intent` 不认识 400。
+- `copyPagesInto` 加 `now`、`markOrigin = true`；`copyPages`（命令行复制成新项目）、从母版新建、导入成页面都传 `markOrigin: false`，只有编辑器里「从其他项目添加页面」（`op: 'copy-from'`）写 `origin.project`。
+- 导入成页面：原文件复制进目标项目 `import/<YYYYMMDD-HHMMSS>/`，`notes` 里的路径跟着改；任务结果 `projectId` = 目标项目、另有 `pageIds`、`intoProject`；`summary.intoProject = true`。「导入为页面」模式下任务一完成就调 `onDone(projectId, pageIds)`，弹窗留着显示结果；页面模式不支持网址来源。
+- 运行时：boot `hold: true`（只在 play 且没有 `countSteps` 时生效）、`countSteps: true`（强制 `mode: 'play'`、`fast: true`）；`loaded` 加 `held`；父 → 页面 `{ vw: 'start' }`；edit 模式 `ready.motion = { registered, hasStep, animations, scripts }`；晚登记补发 `{ vw: 'motion', registered: true, hasStep }`；`countSteps` 的 `ready` 带 `countedSteps`、`hasStep`（停止条件：画面和上一步相同、最多 30 步、`step` 出错）。`createPageFrame` 加 `hold` / `countSteps` / `fontLibrary`、`start()`、`held`；`fontNamesInHtml(html)`、`fontLibraryStyle(html, fontLibrary)` 为纯函数导出；`staticDocument` 也接受 `fontLibrary`。
+- 0b：双击未选中的文字直接进入改字（Chromium 不会自己选词，运行时用 `Intl.Segmenter` 补选点到的词）；有 `move` 的文字悬停指针是 `move`。
+- 字体回退用的是 **CSS 分段回退**（字体库 face 同名先声明，页面自己的子集后声明）；Chromium 实测字集外的字落到字体库完整字体。多字符串开着 kerning 时宽度和完整字体差约 1%。
+- 字体库：简体用 Adobe 仓库的 **CN** 文件（`SourceHanSerifCN-VF.otf`、`SourceHanSansCN-VF.otf`，仓库里没有 SC 命名），key / family 仍叫 SC，别名含 CN 写法；`fonts.json` 的 `files` 含许可证（`kind: 'license'`）。`GET /api/fonts` 回 `{ dir, exists, families: [...], fontLibrary: [...] }`，`fontLibrary` 是装好的全部字族（给浏览器侧 `createPageFrame` 用，`web/font-library.js` 的 `loadFontLibrary()` 取并缓存；编辑画布、放映页、导出渲染页都传）；`exportHtml` 加 `dataDir` 选项，不传时按 `projectDir` 上两级推断。
+- 界面：屏按钮在 `.ed-foot .ed-screens`，说明在 `[data-screens-note]`，页面栏 chip `[data-chip="screens"]` / `[data-chip="draft"]`；草稿编辑层 `.vw-draft-layer main[contenteditable]`，层级下拉 `select[data-draft-level]`，`[data-action="draft-split"]` / `[data-action="draft-merge"]`，超出提示 `[data-draft-overflow]`；批注按钮 `[data-action="annotate"]`，批注框 `.vw-annot`，输入框 `.vw-annot-input input`；拼页弹窗 `.ap-sheet`（`[data-ap-project]`、`[data-ap-check]`、`[data-ap-after]`、`[data-ap-add]`）；总览文件夹卡片 `.hm-cell--folder[data-folder]`、面包屑 `.hm-crumb`、新建文件夹表单 `[data-folder-form]`、设计卡片 `[data-action="design-card"]` / `[data-dcard-copy]`、草稿 chip `.hm-chip--draft`、新建对话框 `#new-form textarea[name="draft"]`。草稿页的「分页」「合并」不进撤销历史（撤销只管页内文字）。

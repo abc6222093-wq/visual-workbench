@@ -36,13 +36,15 @@
 | `scroll` | `top` | 网页页面滚到某个位置 |
 | `settle` | `timeout` | 等字体、图片、有限动画结束，无限动画暂停（截图前用） |
 | `uiScale` | `scale` | 画布缩放时发，让把手、框线保持屏幕像素大小 |
+| `start` | — | 第 13 轮：`hold: true` 启动的页面收到后才跑 `init`（放映壳在显示新页之后发） |
 | `screen` | `screen` | 编辑时切到第 k 屏：k ≥ 当前屏在原地快进，回 `screen-done { screen, applied: true }`；k 小于当前屏不能回退，回 `applied: false`，父页面另建 iframe（双缓冲）重载 |
 
 页面 → 父：
 | type | 字段 | 说明 |
 |---|---|---|
-| `loaded` | `pageId, height` | 只在 play 模式：文档加载完、修改单叠完、`init` 还没跑（或刚开始跑）。放映壳收到就把 iframe 显示出来（`frame.loaded`） |
-| `ready` | `pageId, height, marks: [{ id, caps, page?, values? }], steps, screen` | 文档加载完、修改单叠完。`height` 是整页内容高度（网页页面）；`marks[].page: true` 表示标在 `<html>` / `<body>` 上的整页背景（画布上点不中、不悬停，父页面在没选中东西时给「页面底色」控件，`values.background` 是当前底色）；`screen` 是当前停在第几屏（没给时 null） |
+| `loaded` | `pageId, height, held` | 只在 play 模式：文档加载完、修改单叠完、`init` 还没跑（或刚开始跑）。放映壳收到就把 iframe 显示出来（`frame.loaded`）。`held` 为真表示 boot 带了 `hold: true`，要等父页面发 `start` 才跑 `init`（第 13 轮，预加载的下一页用） |
+| `motion` | `registered, hasStep` | 第 13 轮：edit 模式 ready 之后页面才调用 `vw.motion` 时补发 |
+| `ready` | `pageId, height, marks: [{ id, caps, page?, values? }], steps, screen, motion?, countedSteps?, hasStep?` | 文档加载完、修改单叠完。`height` 是整页内容高度（网页页面）；`marks[].page: true` 表示标在 `<html>` / `<body>` 上的整页背景（画布上点不中、不悬停，父页面在没选中东西时给「页面底色」控件，`values.background` 是当前底色）；`screen` 是当前停在第几屏（没给时 null） |
 | `screen-done` | `screen, applied` | 对 `screen` 的回复 |
 | `edit` | `target, kind, before, after` | 用户做了一个修改（运行时已经叠上）。父页面用 `upsertEdit` 记进 `project.pages[].edits`，走撤销 / 自动保存 |
 | `select` | `id|null, caps, rect:{x,y,width,height}` | 选中状态变化（rect 是页面坐标，父页面放浮动小控件用） |

@@ -9,6 +9,7 @@ import { createProjectManagement } from "./project-management.js";
 import { createWorkbenchClose } from "./workbench-close.js";
 import { mountRuntimeSettings, desktopShellStatus } from "./runtime-settings.js";
 import { createHome } from "./home.js";
+import { loadFontLibrary } from "./font-library.js";
 import { createThumbnails, fetchPageText, pageFileURL, loadFrameModule } from "./thumbnails.js";
 import { patchPageItems } from "./page-items.js";
 import { upsertEdit, removeUserImage, newUserImageId, isUserImage } from "./edits-model.js";
@@ -653,7 +654,7 @@ async function refreshBoard({ force = false } = {}) {
 function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false }) {
   let frame = null;
   frame = mod.createPageFrame({
-    project: S.project, page: framePage(p), mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
+    project: S.project, page: framePage(p), mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1, fontLibrary: S.fontLibrary || [],
     ...(screen ? { screen } : {}),
     onMessage: (msg) => { if (F?.frame === frame) onFrameMessage(token, msg); },
     onReady: (msg) => { if (F?.frame === frame) onFrameReady(token, msg); },
@@ -1714,7 +1715,10 @@ const annotations = createAnnotations({
   onMode: (on) => { const b = $('.ed-tools [data-action="annotate"]'); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); } if (on) clearMark(); },
 });
 const projectManagement = createProjectManagement({ api, confirm: confirmAction, modal, closeModal, notice, refresh: home, onOpen: open, onDeleted: async () => {} });
-const homeUI = createHome({ api, S, app, $, esc, shell, head, modal, closeModal, notice, open, home, glassAttr, homeThumbs, liven, syncGlass, projectManagement: () => projectManagement });
+const homeUI = createHome({ api, S, app, $, esc, shell, head, modal, closeModal, confirm: confirmAction, notice, open, home, glassAttr, homeThumbs, liven, syncGlass, projectManagement: () => projectManagement });
+// 常用字体库（第 13 轮）：装好的五套字体，编辑画布注入给页面；取不到就当没有
+S.fontLibrary = [];
+loadFontLibrary().then((list) => { S.fontLibrary = list; });
 const workbenchClose = createWorkbenchClose({
   api, flush, confirm: confirmAction, notice,
   renderClosed() { S.pageViewsDispose?.(); disconnectEvents(); S.project = null; S.view = "closed"; shell("home", '<section class="hm-panel"><h1>工作台已关闭，可以关掉这个窗口了</h1></section>'); },

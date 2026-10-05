@@ -8,6 +8,7 @@
 //   - html：可选，页面文件文本；不给时按 assetBase + page.file 取（assetBase 是项目根目录的 URL）。
 //   - 页面脚本的错误会让结果为 ok:false（与动效检查一致）。
 import { createPageFrame, frameSize } from './page-frame.js';
+import { loadFontLibrary } from './font-library.js';
 
 function bounded(promise, label, timeout) {
   let timer;
@@ -24,7 +25,8 @@ window.vwExportPage = async function vwExportPage(project, pageId, { assetBase =
   stage.replaceChildren();
   const size = frameSize(project, page);
   const errors = [];
-  const frame = currentFrame = createPageFrame({ project, page, mode: 'play', container: stage, html, edits: page.edits || [], fast: true, assetBase, timeout, onError: msg => errors.push(msg) });
+  const fontLibrary = await loadFontLibrary();
+  const frame = currentFrame = createPageFrame({ project, page, mode: 'play', container: stage, html, edits: page.edits || [], fast: true, assetBase, timeout, fontLibrary, onError: msg => errors.push(msg) });
   const setHeight = h => { frame.iframe.style.height = `${h}px`; };
   if (size.kind === 'web') setHeight(size.contentHeight);
   try {

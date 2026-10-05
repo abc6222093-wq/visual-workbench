@@ -129,5 +129,14 @@ export function fontsApi(dataDir) {
     const installed = !!listed && !missing.length && fontFaces({ files: wanted }).length > 0;
     return { key: entry.key, family: entry.family, installed, files, missing };
   });
-  return { dir, exists: existsSync(dir), families };
+  const fontLibrary = (() => { try { return allFontLibrary(dataDir); } catch { return []; } })();
+  return { dir, exists: existsSync(dir), families, fontLibrary };
+}
+
+/** 装好的全部字族（不按页面过滤），给浏览器侧的 createPageFrame 用；页面没用到的由 fontLibraryStyle 过滤 */
+export function allFontLibrary(dataDir, { urlFor = (key, file) => `${URL_BASE}/${encodeURIComponent(key)}/${encodeURIComponent(file)}` } = {}) {
+  return readFontLibrary(dataDir).families.map(family => ({
+    key: family.key, family: family.family, aliases: family.aliases,
+    faces: family.faces.map(face => ({ url: urlFor(family.key, face.file), file: face.file, weight: face.weight, style: face.style, format: face.format })),
+  }));
 }
