@@ -216,3 +216,17 @@ html .ed-work > .ed-quickbar[hidden] { display: none; }
 .ed-quickbar .qt-field input {width:var(--qt-w,56px);flex:none}
 .ed-quickbar .qt-color input {width:26px;height:20px;padding:0;cursor:pointer}
 .ed-quickbar .qt-btn {flex:none;height:30px}
+/* 第 12 轮修正：第 N 屏。画布上方工具条左侧一排「第 k 屏」按钮；换屏时新 iframe 先藏在旧的后面加载 */
+.ed-screens {display:flex;gap:4px;flex:0 1 auto;min-width:0;overflow-x:auto;margin-left:10px;scrollbar-width:none}
+.ed-screens[hidden] {display:none}
+.ed-screens::-webkit-scrollbar {display:none}
+.ed-screen {flex:none}
+.ed-screen[aria-pressed="true"] {background:var(--g-raised);color:var(--g-ink)}
+#artboard.vw-stage > iframe.vw-frame-pending {position:absolute;left:0;top:0;visibility:hidden;pointer-events:none}
+/* 第 12 轮修正：导出进度条（弹窗里，沿用玻璃弹窗的配色） */
+.ex-progress {margin:12px 0 0}
+.ex-progress progress {display:block;width:100%;height:8px;border:0;border-radius:999px;overflow:hidden;appearance:none;-webkit-appearance:none;background:var(--g-hover, rgba(0,0,0,.08))}
+.ex-progress progress::-webkit-progress-bar {background:var(--g-hover, rgba(0,0,0,.08));border-radius:999px}
+.ex-progress progress::-webkit-progress-value {background:var(--g-accent);border-radius:999px;transition:width .2s ease}
+.ex-progress progress::-moz-progress-bar {background:var(--g-accent);border-radius:999px}
+.ex-progress__label {margin:6px 0 0}

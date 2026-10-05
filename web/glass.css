@@ -1572,3 +1572,32 @@ html.glass-mode .ed-focus-exit {
 .is-pages-collapsed .ed-pages { padding:8px 5px; align-items:center; }
 .is-pages-collapsed .ed-pages > :not([data-action="toggle-pages"]) { display:none; }
 .ed-shell.is-focus .ed-grid.is-pages-collapsed { grid-template-columns:minmax(0,1fr); }
+/* 暂时不显示的玻璃片（工具条隐藏时）：节点保留在玻璃效果里，只是不画 */
+.gl-plate--hidden {
+  visibility: hidden;
+}
+
+/* ---------- 顶部提示条（旧版桌面应用等）：和提示条同样的白底，放在顶部中间，可关闭 ---------- */
+.vw-shell-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1900;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 0 6px 0 16px;
+  min-height: 38px;
+  border-radius: 12px;
+  color: var(--g-ink);
+  font: 600 12.5px/1.4 var(--g-font);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    3px 8px 14px -6px rgba(60, 52, 92, 0.4);
+}
+.vw-shell-notice .ed-ibtn {
+  flex: none;
+}

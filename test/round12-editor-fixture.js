@@ -21,11 +21,11 @@ export function writeProject(dataDir,project,html=(p)=>pageHTML(p.name)){
  return join(root,'project.json');
 }
 /** 起服务 + 浏览器；projects 是要写进去的项目列表。 */
-export async function startWorkbench(t,{projects=[v3Project()],viewport={width:1600,height:1000},html}={}){
- const dir=mkdtempSync(join(tmpdir(),'vw-round12-editor-'));let server,browser;
+export async function startWorkbench(t,{projects=[v3Project()],viewport={width:1600,height:1000},html,prefix='vw-round12-editor-',serverOptions={}}={}){
+ const dir=mkdtempSync(join(tmpdir(),prefix));let server,browser;
  t.after(async()=>{await browser?.close();if(server?.listening)await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});});
  const files=Object.fromEntries(projects.map(p=>[p.id,writeProject(dir,p,html)]));
- server=createServer({dataDir:dir});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+ server=createServer({dataDir:dir,...serverOptions});await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
  browser=await launchBrowser();const page=await browser.newPage({viewport});const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const url=`http://127.0.0.1:${server.address().port}`;await page.goto(url);
  return {dir,page,errors,url,files,browser,server};

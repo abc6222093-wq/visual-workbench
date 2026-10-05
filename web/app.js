@@ -7,7 +7,7 @@ import { renderPageItems, mountPageViews, readPageViewPreference, writePageViewP
 import { showContextMenu, closeContextMenu } from "./context-menu.js";
 import { createProjectManagement } from "./project-management.js";
 import { createWorkbenchClose } from "./workbench-close.js";
-import { mountRuntimeSettings } from "./runtime-settings.js";
+import { mountRuntimeSettings, desktopShellStatus } from "./runtime-settings.js";
 import { openImportDialog } from "./import-html.js";
 import { mountHomeSelection } from "./home-selection.js";
 import { createThumbnails, fetchPageText, pageFileURL, loadFrameModule } from "./thumbnails.js";
@@ -55,6 +55,7 @@ const S = {
   mark: null, // 画布里选中的可改元素 { id, caps, values }
   editingText: false, // 运行时正在改字
   scrollTop: 0, // 网页页面：窗口里往下浏览了多少（运行时回报）
+  screen: 1, // 带动效的页面：画布停在第几屏（换页回到 1）
 };
 const web = () => isWebProject(S.project);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -64,6 +65,7 @@ async function api(path, method = "GET", body) {
   if (!r.ok) {
     const e = new Error(data.error || data.message || `请求失败 ${r.status}`);
     e.status = r.status;
+    e.data = data;
     if (r.status === 423) window.dispatchEvent(new Event("vw-session-blocked"));
     throw e;
   }
@@ -125,7 +127,25 @@ function shell(active, body) {
   closeModalGlass();
   const nav = (a, name, title) => `<button class="ed-ibtn ${active === a ? "is-on" : ""}" data-action="${a}" title="${title}" aria-label="${title}" ${active === a ? 'aria-current="page"' : ""}>${icon(name, 18)}</button>`;
   const focus = active === "editor" && S.focus ? " is-focus" : "";
+  showDesktopNotice();
   app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="用户">用</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+}
+// 旧版桌面应用（没有右键菜单等）：顶部一条可关闭的提示，关掉后这次打开不再出现
+function showDesktopNotice() {
+  if (showDesktopNotice.closed || document.querySelector("#desktop-notice")) return;
+  if (!desktopShellStatus(navigator.userAgent).outdated) return;
+  try { if (sessionStorage.getItem("vw-desktop-notice-closed") === "1") return; } catch {}
+  const bar = document.createElement("div");
+  bar.id = "desktop-notice";
+  bar.className = "vw-shell-notice";
+  bar.setAttribute("role", "status");
+  bar.innerHTML = `<span>桌面应用是旧版本，右键菜单等功能要重新制作应用才有，见 docs/desktop.md</span><button class="ed-ibtn" data-close-desktop-notice title="关闭提示" aria-label="关闭提示">${icon("x", 16)}</button>`;
+  bar.querySelector("[data-close-desktop-notice]").onclick = () => {
+    showDesktopNotice.closed = true;
+    try { sessionStorage.setItem("vw-desktop-notice-closed", "1"); } catch {}
+    bar.remove();
+  };
+  document.body.append(bar);
 }
 function head(name, count, action) {
   return `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(name)}</h1>${count ? `<span class="ed-count ed-count--bg">${count}</span>` : ""}</div><div class="ed-spacer"></div>${action}</header>`;
@@ -393,7 +413,7 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span>${screenBar()}<div class="ed-tools">${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
   );
   if (saveState === "busy") saveStatus(SAVE_TEXT.busy);
   const well = $("#canvas-well");
@@ -447,6 +467,27 @@ function refreshToolbar() {
   setText(crumb, p.name);
   if (crumb && crumb.title !== p.name) crumb.title = p.name;
   setHTML($(".ed-foot"), footText());
+  refreshScreenBar();
+}
+// ---------- 第 N 屏：带动效的页面，画布停在选定那一屏播完的样子，照常修改 ----------
+// 屏数 = motion.steps + 1；第 1 屏 = 初始化完成、还没执行第 1 步。
+const screenTotal = (p = page()) => { const n = Number(p?.motion?.steps); return Number.isInteger(n) && n > 0 ? n + 1 : 0; };
+const clampScreen = (k, p = page()) => Math.min(Math.max(1, Math.round(Number(k)) || 1), Math.max(1, screenTotal(p)));
+// 给画布 iframe 的 screen 选项：没有动效的页面不给（照原样显示，不跑初始化）
+const screenOption = (p = page()) => (screenTotal(p) ? clampScreen(S.screen, p) : null);
+function screenButtons(p = page()) {
+  const total = screenTotal(p);
+  let html = "";
+  for (let k = 1; k <= total; k++) html += `<button class="ed-tbtn ed-screen" data-action="screen" data-screen="${k}" aria-pressed="${k === S.screen}" title="画布停在第 ${k} 屏${k === 1 ? "（动效开始前）" : `（第 ${k - 1} 步播完）`}"><span>第 ${k} 屏</span></button>`;
+  return html;
+}
+const screenBar = () => { const html = screenButtons(); return `<div class="ed-screens" role="group" aria-label="画布显示第几屏" ${html ? "" : "hidden"}>${html}</div>`; };
+function refreshScreenBar() {
+  const bar = $(".ed-screens");
+  if (!bar) return;
+  const html = screenButtons();
+  if (bar.hidden !== !html) bar.hidden = !html;
+  setHTML(bar, html);
 }
 function refreshHistoryButtons() {
   const undo = $('[data-action="undo"]'), redo = $('[data-action="redo"]');
@@ -529,12 +570,21 @@ async function refreshBoard({ force = false } = {}) {
   if (F && F.stage === stage && F.pageId === p.id && F.file === p.file && F.stamp === stamp && !force) {
     const sig = editsSig(p);
     if (F.sig !== sig) { F.sig = sig; F.frame?.setEdits(clone(p.edits || [])); if (S.mark && !markAlive(p)) clearMark(); }
+    // 动效步数被改了（agent 改了 motion.steps）：屏号夹到范围内，画布换到对应的屏
+    const want = screenOption(p);
+    if (want !== F.screen) goScreen(want);
+    refreshScreenBar();
     return;
   }
+  if (!F || F.pageId !== p.id) S.screen = 1;
+  S.screen = clampScreen(S.screen, p);
+  refreshScreenBar();
   const keep = F && F.pageId === p.id ? S.mark?.id : null;
   const token = ++frameToken;
+  screenToken++;
   const reuse = F && F.stage === stage && F.frame ? F.frame : null;
-  F = { frame: reuse, stage, pageId: p.id, file: p.file, sig: editsSig(p), stamp, token };
+  const screen = screenOption(p);
+  F = { frame: reuse, stage, pageId: p.id, file: p.file, sig: editsSig(p), stamp, token, screen, html: null };
   S.mark = null;
   S.editingText = false;
   refreshQuickToolbar();
@@ -542,25 +592,84 @@ async function refreshBoard({ force = false } = {}) {
   try {
     const [mod, html] = await Promise.all([loadFrameModule(), fetchPageText(pageFileURL(S.project, p, stamp))]);
     if (token !== frameToken || !F || F.token !== token) return;
+    F.html = html;
     const edits = clone(p.edits || []);
     if (reuse) {
       F.pendingSelect = keep;
-      reuse.reload({ page: p, edits, html, project: S.project });
+      reuse.reload({ page: p, edits, html, project: S.project, screen });
       F.uiScale = null;
       fitBoard();
     } else {
       stage.replaceChildren();
       F.pendingSelect = keep;
       F.uiScale = S.scale || 1;
-      F.frame = mod.createPageFrame({
-        project: S.project, page: p, mode: "edit", container: stage, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
-        onMessage: (msg) => onFrameMessage(token, msg),
-        onReady: (msg) => onFrameReady(token, msg),
-        onError: (err) => { if (F?.token === token) console.warn("页面显示出错", err); },
-      });
+      F.frame = mountFrame({ mod, stage, p, html, edits, screen, token });
     }
   } catch (error) {
     if (token === frameToken) notice(`这一页显示不出来：${error.message}`);
+  }
+}
+// 在 #artboard 里放一个编辑用的 iframe。消息只认当前显示的那个（F.frame）：
+// 换屏时新 iframe 先藏在旧的后面加载，加载好之前它的消息不处理。
+function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false }) {
+  let frame = null;
+  frame = mod.createPageFrame({
+    project: S.project, page: p, mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
+    ...(screen ? { screen } : {}),
+    onMessage: (msg) => { if (F?.frame === frame) onFrameMessage(token, msg); },
+    onReady: (msg) => { if (F?.frame === frame) onFrameReady(token, msg); },
+    onError: (err) => { if (F?.frame === frame && F?.token === token) console.warn("页面显示出错", err); },
+  });
+  if (pending) frame.iframe.classList.add("vw-frame-pending");
+  stage.append(frame.iframe);
+  return frame;
+}
+// 选屏：往后（k ≥ 当前屏）在原 iframe 里原地快进；往回不能原地退，另建一个 iframe（双缓冲，不闪白）
+let screenToken = 0;
+function goScreen(k) {
+  const p = page();
+  const want = screenTotal(p) && k != null ? clampScreen(k, p) : null;
+  if (want != null) S.screen = want;
+  refreshScreenBar();
+  if (!F?.frame || !F.html) return;
+  if (want === F.screen) return;
+  const my = ++screenToken, frame = F.frame;
+  if (want != null && F.screen != null && want > F.screen) {
+    F.screen = want;
+    frame.screen(want).then((msg) => {
+      if (my !== screenToken || F?.frame !== frame) return;
+      if (!msg?.applied) swapFrame(want, my);
+    });
+    return;
+  }
+  swapFrame(want, my);
+}
+async function swapFrame(screen, my) {
+  if (!F?.frame) return;
+  const old = F.frame, stage = F.stage, token = F.token, p = S.project.pages.find((x) => x.id === F.pageId);
+  if (!p || !stage) return;
+  F.screen = screen;
+  try {
+    const mod = await loadFrameModule();
+    if (my !== screenToken || F?.frame !== old) return;
+    const sig = editsSig(p);
+    const next = mountFrame({ mod, stage, p, html: F.html, edits: clone(p.edits || []), screen, token, pending: true });
+    const ready = await next.ready;
+    if (my !== screenToken || F?.frame !== old || !next.iframe.isConnected) { next.destroy(); return; }
+    // 加载期间修改单变了（比如撤销）：补上
+    if (editsSig(p) !== sig) next.setEdits(clone(p.edits || []));
+    const keep = S.mark?.id;
+    F.frame = next;
+    next.iframe.classList.remove("vw-frame-pending");
+    old.destroy();
+    S.editingText = false;
+    F.uiScale = null;
+    fitBoard();
+    onFrameReady(token, ready || {});
+    if (keep && (ready?.marks || []).some((m) => m.id === keep)) next.select(keep);
+    else if (S.mark) { S.mark = null; refreshQuickToolbar(); }
+  } catch (error) {
+    notice(`这一屏显示不出来：${error.message}`);
   }
 }
 function markAlive(p) {
@@ -1051,6 +1160,18 @@ function chooseExportKind(kind) {
     row.setAttribute("aria-checked", on ? "true" : "false");
   });
 }
+// 导出进度（docs/round12-contract.md 约定 2）：先连进度流，再发导出请求；弹窗里显示进度条和「取消」
+const newProgressId = () => (crypto.randomUUID?.() || `${Date.now()}${Math.random()}`).replace(/[^A-Za-z0-9]/g, "").slice(0, 32).padEnd(12, "0");
+function exportProgressHTML() {
+  return `<div class="ex-progress" id="export-progress"><progress id="export-progress-bar" max="1" aria-label="导出进度"></progress><p class="g-sheet__note ex-progress__label" id="export-progress-label" role="status">正在准备导出…</p></div>`;
+}
+function showExportProgress(sheet, { current, total, label } = {}) {
+  const bar = sheet.querySelector("#export-progress-bar"), text = sheet.querySelector("#export-progress-label");
+  if (!bar || !text) return;
+  const t = Math.max(0, Number(total) || 0), c = Math.min(t, Math.max(0, Number(current) || 0));
+  if (t > 0) { bar.max = t; bar.value = c; }
+  text.textContent = label || (t > 0 ? `正在导出第 ${c} / ${t} 页` : "正在导出…");
+}
 async function startExport(button) {
   if (S.exporting) return;
   const kind = S.exportKind, label = EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind, sheet = button.closest(".g-sheet");
@@ -1059,22 +1180,62 @@ async function startExport(button) {
   controls.forEach((c) => (c.disabled = true));
   button.innerHTML = `${icon("loader", 17)}正在导出…`;
   sheet.setAttribute("aria-busy", "true");
+  sheet.querySelector("#export-progress")?.remove();
+  sheet.querySelector(".g-sheet__actions")?.insertAdjacentHTML("beforebegin", exportProgressHTML());
+  // 交接包没有分页进度：进度条只转圈；放映版 / 图片 / PDF 带进度编号，可以看进度、可以取消
+  const progressId = kind === "handoff" ? null : newProgressId();
+  const base = `${path()}/export`;
+  let stream = null;
+  const cancelButton = sheet.querySelector('.g-sheet__actions [data-action="close"]');
+  if (progressId && cancelButton) {
+    cancelButton.dataset.action = "export-cancel";
+    cancelButton.dataset.progressId = progressId;
+    cancelButton.textContent = "取消导出";
+    cancelButton.disabled = false;
+  }
+  const restore = () => {
+    controls.forEach((c) => (c.disabled = false));
+    button.innerHTML = `${icon("upload", 17)}开始导出`;
+    sheet.removeAttribute("aria-busy");
+    if (cancelButton) { cancelButton.dataset.action = "close"; delete cancelButton.dataset.progressId; cancelButton.textContent = "关闭"; }
+  };
   try {
     await flush();
-    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(`${path()}/export`, "POST", { kind });
+    if (progressId && typeof EventSource === "function") {
+      stream = new EventSource(`${base}/progress/${progressId}`);
+      stream.addEventListener("progress", (event) => { try { showExportProgress(sheet, JSON.parse(event.data)); } catch {} });
+      stream.addEventListener("done", () => stream?.close());
+      stream.onerror = () => {}; // 进度只是提示：连不上不影响导出本身
+      // 等进度流连上（最多 1 秒）再发导出，开头几页的进度不会漏
+      await new Promise((done) => { const t = setTimeout(done, 1000); stream.addEventListener("open", () => { clearTimeout(t); done(); }, { once: true }); stream.addEventListener("error", () => { clearTimeout(t); done(); }, { once: true }); });
+    }
+    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(base, "POST", progressId ? { kind, progressId } : { kind });
     if (!sheet.isConnected) notice(`${label}已导出到：${result.outDir}`);
     else if (kind === "handoff") handoffResult(result);
     else exportResult(result, label);
   } catch (err) {
+    const cancelled = err.status === 409 && (err.data?.cancelled || /取消/.test(err.message));
     if (sheet.isConnected) {
-      controls.forEach((c) => (c.disabled = false));
-      button.innerHTML = `${icon("upload", 17)}开始导出`;
-      sheet.removeAttribute("aria-busy");
+      restore();
+      const bar = sheet.querySelector("#export-progress-bar"), text = sheet.querySelector("#export-progress-label");
+      if (cancelled) { bar?.remove(); if (text) text.textContent = "已取消"; }
+      else sheet.querySelector("#export-progress")?.remove();
     }
-    notice(err.message);
+    if (cancelled) { if (!sheet.isConnected) notice("已取消导出"); }
+    else notice(err.message);
   } finally {
+    stream?.close();
     S.exporting = false;
   }
+}
+async function cancelExport(button) {
+  const id = button.dataset.progressId;
+  if (!id) return closeModal();
+  button.disabled = true;
+  const text = button.closest(".g-sheet")?.querySelector("#export-progress-label");
+  if (text) text.textContent = "正在取消…";
+  try { await api(`${path()}/export/cancel/${id}`, "POST", {}); }
+  catch (err) { button.disabled = false; notice(err.message); }
 }
 function exportResult({ outDir, files }, label) {
   const target = files.length === 1 ? files[0].path : outDir;
@@ -1136,6 +1297,7 @@ function setPageHeight(value) {
 // ---------- 页面栏：三种视图共用同一份选择 ----------
 function switchPage(id, { clearChecked = false } = {}) {
   if (!S.project.pages.some((p) => p.id === id)) return;
+  if (S.pageId !== id) S.screen = 1;
   S.pageId = id;
   S.scrollTop = 0;
   if (clearChecked) S.checked.clear();
@@ -1177,6 +1339,7 @@ app.addEventListener("click", async (e) => {
   const a = b.dataset.action, id = b.dataset.id;
   try {
     switch (a) {
+      case "screen": goScreen(Number(b.dataset.screen)); break;
       case "page-grid": setPageView(S.pageViewMode === "grid" ? readPageViewPreference() : "grid"); break;
       case "page-timeline":
         if (S.pageViewMode === "timeline") { S.pagesCollapsed = false; localStorage.setItem("vw-pages-collapsed", "false"); }
@@ -1251,6 +1414,7 @@ app.addEventListener("click", async (e) => {
       case "export-kind": chooseExportKind(b.dataset.kind); break;
       case "copy-handoff": await navigator.clipboard.writeText(S.handoffText || ""); notice("已复制，开新的 agent 对话时直接粘贴"); break;
       case "export-start": await startExport(b); break;
+      case "export-cancel": await cancelExport(b); break;
       case "data-settings": await runtimeSettings.showSettings(); break;
       case "reveal": await api("/api/reveal", "POST", { path: b.dataset.path }); break;
       case "play": await play(); break;
