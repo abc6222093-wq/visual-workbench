@@ -1,0 +1,228 @@
+{
+  "format": "visual-workbench/project",
+  "formatVersion": 2,
+  "id": "v2-web",
+  "name": "v2 web fixture",
+  "createdAt": "2026-10-01T00:00:00.000Z",
+  "updatedAt": "2026-10-01T00:00:00.000Z",
+  "kind": "web",
+  "artboard": {
+    "preset": "web-mobile",
+    "width": 390,
+    "height": 844
+  },
+  "assets": [
+    {
+      "id": "asset_photo1",
+      "kind": "image",
+      "file": "assets/photo.png",
+      "name": "photo",
+      "width": 640,
+      "height": 360,
+      "pendingLayout": false,
+      "addedAt": "2026-10-01T00:00:00.000Z",
+      "source": {
+        "type": "upload"
+      }
+    }
+  ],
+  "fonts": [
+    {
+      "id": "font_inter",
+      "family": "Inter",
+      "file": "fonts/Inter-600-ascii.woff2",
+      "weight": 600,
+      "style": "normal"
+    }
+  ],
+  "pages": [
+    {
+      "id": "page_mob1",
+      "name": "mobile",
+      "device": "mobile",
+      "size": {
+        "width": 390,
+        "height": 700
+      },
+      "origin": {
+        "url": "https://example.com/",
+        "capturedAt": "2026-10-01T00:00:00.000Z"
+      },
+      "background": "#ffffff",
+      "elements": [
+        {
+          "id": "el_nav1",
+          "type": "group",
+          "name": "nav",
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 56,
+          "zIndex": 3,
+          "origin": {
+            "selector": "header > nav",
+            "tag": "nav"
+          },
+          "children": [
+            {
+              "id": "el_navbg1",
+              "type": "shape",
+              "name": "el_navbg1",
+              "x": 0,
+              "y": 0,
+              "width": 390,
+              "height": 56,
+              "zIndex": 0,
+              "shape": "rect",
+              "fill": "#0f172a",
+              "stroke": null
+            },
+            {
+              "id": "el_navt1",
+              "type": "text",
+              "name": "el_navt1",
+              "x": 16,
+              "y": 14,
+              "width": 200,
+              "height": 28,
+              "zIndex": 1,
+              "text": "Brand",
+              "font": "font_inter",
+              "fontSize": 20,
+              "fontWeight": 600,
+              "lineHeight": 1.3,
+              "letterSpacing": 0,
+              "align": "left",
+              "color": "#ffffff"
+            }
+          ]
+        },
+        {
+          "id": "el_hero1",
+          "type": "image",
+          "name": "el_hero1",
+          "x": 0,
+          "y": 56,
+          "width": 390,
+          "height": 260,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover",
+          "origin": {
+            "selector": "main img",
+            "tag": "img"
+          }
+        },
+        {
+          "id": "el_title1",
+          "type": "text",
+          "name": "el_title1",
+          "x": 24,
+          "y": 340,
+          "width": 342,
+          "height": 80,
+          "zIndex": 2,
+          "text": "Arrange ideas into pages",
+          "font": "font_inter",
+          "fontSize": 30,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#0f172a",
+          "origin": {
+            "selector": "main h1",
+            "tag": "h1"
+          }
+        },
+        {
+          "id": "el_card1",
+          "type": "shape",
+          "name": "el_card1",
+          "x": 24,
+          "y": 450,
+          "width": 342,
+          "height": 200,
+          "zIndex": 1,
+          "shape": "rect",
+          "fill": "#e2e8f0",
+          "stroke": null,
+          "cornerRadius": 16
+        },
+        {
+          "id": "el_cardt1",
+          "type": "text",
+          "name": "el_cardt1",
+          "x": 48,
+          "y": 480,
+          "width": 294,
+          "height": 32,
+          "zIndex": 2,
+          "text": "Section one",
+          "font": "font_inter",
+          "fontSize": 22,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#334155"
+        }
+      ]
+    },
+    {
+      "id": "page_desk1",
+      "name": "desktop",
+      "device": "desktop",
+      "size": {
+        "width": 1440,
+        "height": 500
+      },
+      "background": "#f8fafc",
+      "elements": [
+        {
+          "id": "el_dnav",
+          "type": "shape",
+          "name": "el_dnav",
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 72,
+          "zIndex": 1,
+          "shape": "rect",
+          "fill": "#0f172a",
+          "stroke": null
+        },
+        {
+          "id": "el_dtitle",
+          "type": "text",
+          "name": "el_dtitle",
+          "x": 120,
+          "y": 140,
+          "width": 900,
+          "height": 72,
+          "zIndex": 2,
+          "text": "Desktop page",
+          "font": "font_inter",
+          "fontSize": 56,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#0f172a"
+        },
+        {
+          "id": "el_dimg",
+          "type": "image",
+          "name": "el_dimg",
+          "x": 900,
+          "y": 120,
+          "width": 400,
+          "height": 225,
+          "zIndex": 1,
+          "asset": "asset_photo1",
+          "fit": "cover"
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "name": "visual-workbench-desktop",
   "productName": "视觉工作台",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "视觉工作台桌面应用壳：启动仓库里的本机服务并在独立窗口中打开",
   "main": "main.cjs",

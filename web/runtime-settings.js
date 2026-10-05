@@ -32,3 +32,20 @@ export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass
   window.addEventListener('pagehide',()=>{clearInterval(timer);clearInterval(pending);});
   return {ready,showSettings,get revealLabel(){return settings?.revealLabel||'在文件管理器中显示';}};
 }
+
+// 桌面应用版本（docs/round12-contract.md 约定 3）：桌面壳在 User-Agent 末尾加「VisualWorkbenchDesktop/版本」。
+// 是 Electron 但没有这个标记、或版本低于 0.2.0 → 旧版桌面应用（没有右键菜单等），界面顶部提示重新制作应用。
+export const DESKTOP_MIN_VERSION = '0.2.0';
+const versionParts = v => String(v).split('.').map(n => Number.parseInt(n, 10) || 0);
+function versionLess(a, b) {
+  const x = versionParts(a), y = versionParts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); }
+  return false;
+}
+export function desktopShellStatus(userAgent = '') {
+  const ua = String(userAgent || '');
+  const marked = /VisualWorkbenchDesktop\/(\d+(?:\.\d+){0,2})/.exec(ua);
+  const desktop = !!marked || /\bElectron\//.test(ua);
+  const version = marked ? marked[1] : null;
+  return { desktop, version, outdated: desktop && (!version || versionLess(version, DESKTOP_MIN_VERSION)) };
+}

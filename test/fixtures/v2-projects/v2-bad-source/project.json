@@ -1,0 +1,52 @@
+{
+  "format": "visual-workbench/project",
+  "formatVersion": 2,
+  "id": "v2-bad-source",
+  "name": "bad source",
+  "createdAt": "2026-10-01T00:00:00.000Z",
+  "updatedAt": "2026-10-01T00:00:00.000Z",
+  "artboard": {
+    "preset": "custom",
+    "width": 640,
+    "height": 360
+  },
+  "assets": [],
+  "fonts": [],
+  "pages": [
+    {
+      "id": "page_ok1",
+      "name": "ok",
+      "background": "#ffffff",
+      "elements": [
+        {
+          "id": "el_okay",
+          "type": "text",
+          "name": "el_okay",
+          "x": 10,
+          "y": 10,
+          "width": 200,
+          "height": 40,
+          "zIndex": 2,
+          "text": "ok",
+          "font": null,
+          "fontSize": 24,
+          "fontWeight": 600,
+          "lineHeight": 1.3,
+          "letterSpacing": 0,
+          "align": "left",
+          "color": "#ffffff"
+        }
+      ]
+    },
+    {
+      "id": "page_bad2",
+      "name": "bad",
+      "background": "#ffffff",
+      "motion": {
+        "steps": 1,
+        "source": 42
+      },
+      "elements": []
+    }
+  ]
+}

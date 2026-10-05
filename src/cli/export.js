@@ -42,12 +42,15 @@ try {
   for (const kind of EXPORT_KINDS.filter(k => args.kinds.has(k))) {
     console.log(`正在导出${KIND_LABEL[kind]}：${project.name}`);
     try {
-      const result = await exportProject({ projectDir, kind, outDir });
+      // 进度行：例如「正在导出第 1 / 3 页」；同一句不重复打印
+      let last = '';
+      const onProgress = ({ label }) => { if (label && label !== last) { last = label; console.log(`  ${label}`); } };
+      const result = await exportProject({ projectDir, kind, outDir, onProgress });
       for (const file of result.files) console.log(`  ${shown(file.path)}  ${formatBytes(file.bytes)}`);
       if (result.breakdown) console.log(`  组成：${describeBreakdown(result.breakdown)}`);
       for (const item of result.items || []) {
         if (item.kind === 'library') continue;
-        console.log(`    ${item.kind === 'font' ? '字体' : '图片'} ${item.name}：${formatBytes(item.original)} → ${formatBytes(item.bytes)}（${item.note}）`);
+        console.log(`    ${{ font: '字体', image: '图片', file: '文件' }[item.kind] || item.kind} ${item.name}：${formatBytes(item.original)} → ${formatBytes(item.bytes)}（${item.note}）`);
       }
       if (result.skipped?.length) console.log(`  没有用到、未打包的素材：${result.skipped.join('、')}`);
       for (const warning of result.warnings || []) console.warn(`  ⚠ ${warning}`);

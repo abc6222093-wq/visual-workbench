@@ -1,4 +1,5 @@
-// 旧 HTML 导入任务：上传的文件先落到 <数据目录>/.import-tmp/<任务>/src/，后台分析，项目先写在 .import-tmp/<任务>/project/，
+// 旧 HTML / 网页导入任务：上传的文件先落到 <数据目录>/.import-tmp/<任务>/src/，后台浏览器按页切开（保留原 HTML、CSS、脚本、动画），
+// 资源和页面文件先写在 .import-tmp/<任务>/project/，
 // 全部完成并通过校验后才一次改名进 projects/。取消或失败时关浏览器、删临时文件，不留半个项目。导入永远新建项目，不碰原文件。
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, rmSync, existsSync, renameSync, readdirSync, statSync, lstatSync } from 'node:fs';
@@ -97,22 +98,23 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = 
     const signal = job.controller.signal, startedAt = Date.now();
     const step = (progress, text) => { if (job.state === 'running') { job.progress = Math.max(job.progress, progress); job.step = text; } };
     const check = () => { if (signal.aborted) throw cancelledError(); };
+    const tmpProject = join(job.dir, 'project');
     try {
+      mkdirSync(tmpProject, { recursive: true });
       step(0.05, '正在启动后台浏览器');
       const hooks = { signal, pageTimeout,
         onBrowser: b => { job.browser = b; if (signal.aborted) b.close().catch(() => {}); },
         onPages: n => { job.pages = n; step(0.1, opts.kind === 'web' ? `共 ${n} 页要抓取` : `识别出 ${n} 页`); },
-        onPage: (i, n) => step(0.1 + 0.75 * i / n, opts.kind === 'web' ? `正在抓取第 ${i + 1} / ${n} 页` : `正在分析第 ${i + 1} / ${n} 页`) };
-      const analysis = opts.source === 'urls' ? await capture({ urls: opts.urls, devices: opts.devices, ...(urlTimeout ? { timeout: urlTimeout } : {}), ...hooks })
-        : opts.kind === 'web' ? await analyzeWeb({ srcDir: join(job.dir, 'src'), entry: opts.entry, devices: opts.devices, ...hooks })
-        : await analyze({ srcDir: join(job.dir, 'src'), entry: opts.entry, width: opts.width, height: opts.height, ...hooks });
+        onPage: (i, n) => step(0.1 + 0.75 * i / n, opts.kind === 'web' ? `正在抓取第 ${i + 1} / ${n} 页` : `正在切出第 ${i + 1} / ${n} 页`) };
+      const analysis = opts.source === 'urls' ? await capture({ urls: opts.urls, devices: opts.devices, projectDir: tmpProject, ...(urlTimeout ? { timeout: urlTimeout } : {}), ...hooks })
+        : opts.kind === 'web' ? await analyzeWeb({ srcDir: join(job.dir, 'src'), entry: opts.entry, devices: opts.devices, projectDir: tmpProject, ...hooks })
+        : await analyze({ srcDir: join(job.dir, 'src'), entry: opts.entry, width: opts.width, height: opts.height, projectDir: tmpProject, ...hooks });
       check();
       // 网址全部被跳过：任务失败，并列出原因
       if (opts.kind === 'web' && !analysis.pages.length) throw new Error(`没有导入任何网页：${analysis.skipped.map(s => `${s.url}（${s.reason}）`).join('；') || '没有可用的网址'}`);
-      step(0.86, '正在整理素材与字体');
+      step(0.86, '正在写页面文件');
       const projectsDir = join(dataDir, 'projects'); let id;
       do id = `import-${randomUUID().slice(0, 8)}`; while (existsSync(join(projectsDir, id)) || !ID.test(id));
-      const tmpProject = join(job.dir, 'project');
       const { project, summary } = await buildProject({ analysis, srcDir: opts.source === 'urls' ? null : join(job.dir, 'src'), projectDir: tmpProject, id, name: opts.name, preset: opts.preset, width: opts.width, height: opts.height, entry: opts.entry, files: opts.files, startedAt, check });
       check(); step(0.96, '正在校验并写入项目');
       const result = validateProjectData(project, { projectDir: tmpProject });

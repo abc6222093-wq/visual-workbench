@@ -733,59 +733,7 @@ html.glass-mode #toast {
 
 /* ---------- 放映：作品四周铺背景图（和其他页面一样蒙一层白纱），控制条是磨砂白 ---------- */
 /* 放映会进全屏，全屏里看不到玻璃层，所以背景图直接铺在放映画面上 */
-html.glass-mode .g-player {
-  position: relative;
-  z-index: 1;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.22)),
-    var(--g-player-bg, none) center / cover no-repeat,
-    #e9ebef !important;
-}
 /* 作品画面本身不透明，只给一圈柔和的投影 */
-html.glass-mode .g-player #player-stage {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.5),
-    4px 18px 40px -16px rgba(60, 52, 92, 0.45);
-}
-.g-player-bar,
-html.glass-mode .g-player-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 48px;
-  padding: 0 8px 0 6px;
-  border-radius: 24px;
-  color: var(--g-ink-2);
-  font: 600 12.5px/1 var(--g-font);
-  background: rgba(255, 255, 255, 0.6);
-  -webkit-backdrop-filter: blur(18px) saturate(0.7);
-  backdrop-filter: blur(18px) saturate(0.7);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
-    2px 10px 18px -8px rgba(60, 52, 92, 0.34);
-}
-.g-player-bar[hidden] {
-  display: none !important;
-}
-.g-player-bar .ed-add {
-  margin-left: 4px;
-}
-.g-player-bar__page {
-  padding: 0 8px 0 4px;
-  color: var(--g-ink-3);
-  white-space: nowrap;
-}
-.g-player-bar__page b {
-  margin-left: 8px;
-  color: var(--g-ink);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
 
 /* ---------- 打开失败时的提示 ---------- */
 html.glass-mode .startup-error {
@@ -1158,11 +1106,6 @@ html.glass-mode .startup-error {
   overflow: hidden;
   contain: strict;
 }
-.miniature > .vw-artboard {
-  position: absolute !important;
-  top: 0;
-  left: 0;
-}
 .ed-page.active .ed-page__thumb {
   box-shadow:
     0 0 0 3px rgba(255, 255, 255, 0.95),
@@ -1260,24 +1203,6 @@ html.glass-mode .startup-error {
   overflow: auto;
   padding: 28px;
 }
-html.glass-mode .vw-artboard {
-  box-shadow:
-    0 0 0 1px rgba(20, 20, 24, 0.05),
-    0 2px 4px rgba(20, 20, 24, 0.06),
-    0 22px 50px -24px rgba(20, 20, 24, 0.4);
-}
-html.glass-mode .resize-handle {
-  width: 12px;
-  height: 12px;
-  right: -6px;
-  bottom: -6px;
-  border-radius: 50%;
-  border: 0;
-  background: #fff;
-  box-shadow:
-    0 0 0 1.5px rgba(120, 110, 145, 0.55),
-    0 2px 6px rgba(20, 20, 30, 0.35);
-}
 .ed-foot {
   flex: none;
   display: flex;
@@ -1315,14 +1240,6 @@ html.glass-mode .resize-handle {
   flex-direction: column;
   gap: 14px;
   padding: 2px 2px 10px;
-}
-.ed-layers {
-  display: grid;
-  gap: 1px;
-  max-height: 34vh;
-  overflow: auto;
-  padding: 2px;
-  flex: none;
 }
 .ed-heading {
   margin: 0;
@@ -1614,13 +1531,6 @@ button.hm-card--add:hover {
 }
 
 /* ---------- 步骤视图（第 5 轮）：工具条里的小下拉 ---------- */
-.ed-stepview {
-  height: 30px;
-  margin-right: 4px;
-}
-.ed-stepview select {
-  min-width: 78px;
-}
 
 /* ---------- 专注模式（第 5 轮）：藏起顶栏和左右面板，只留画布 ---------- */
 .ed-shell.is-focus {
@@ -1654,13 +1564,40 @@ html.glass-mode .ed-focus-exit {
 .is-inspector-collapsed .ed-inspector { padding: 8px 5px; align-items: center; }
 .is-inspector-collapsed .ed-inspector > .g-seg,
 .is-inspector-collapsed .ed-inspector__body { display: none; }
-html.glass-mode .resize-handle { right: auto; bottom: auto; transform: translate(-50%, -50%); }
-.resize-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
-.resize-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
-.resize-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
-.resize-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
-.resize-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
-.resize-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
-.resize-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
-.resize-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 .ed-shell.is-focus .ed-grid.is-inspector-collapsed { grid-template-columns: minmax(0, 1fr); }
+/* 左栏折叠（原在 outline-panel.css，第 12 轮大纲删除后搬到这里） */
+.ed-pages > [data-action="toggle-pages"] { align-self:flex-end; flex:none; }
+.ed-grid.is-pages-collapsed { grid-template-columns:48px minmax(0,1fr) 288px; }
+.ed-grid.is-pages-collapsed.is-inspector-collapsed { grid-template-columns:48px minmax(0,1fr) 48px; }
+.is-pages-collapsed .ed-pages { padding:8px 5px; align-items:center; }
+.is-pages-collapsed .ed-pages > :not([data-action="toggle-pages"]) { display:none; }
+.ed-shell.is-focus .ed-grid.is-pages-collapsed { grid-template-columns:minmax(0,1fr); }
+/* 暂时不显示的玻璃片（工具条隐藏时）：节点保留在玻璃效果里，只是不画 */
+.gl-plate--hidden {
+  visibility: hidden;
+}
+
+/* ---------- 顶部提示条（旧版桌面应用等）：和提示条同样的白底，放在顶部中间，可关闭 ---------- */
+.vw-shell-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1900;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+  padding: 0 6px 0 16px;
+  min-height: 38px;
+  border-radius: 12px;
+  color: var(--g-ink);
+  font: 600 12.5px/1.4 var(--g-font);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    3px 8px 14px -6px rgba(60, 52, 92, 0.4);
+}
+.vw-shell-notice .ed-ibtn {
+  flex: none;
+}

@@ -1,0 +1,36 @@
+{
+  "format": "visual-workbench/project",
+  "formatVersion": 2,
+  "id": "v2-bad-asset",
+  "name": "bad asset",
+  "createdAt": "2026-10-01T00:00:00.000Z",
+  "updatedAt": "2026-10-01T00:00:00.000Z",
+  "artboard": {
+    "preset": "custom",
+    "width": 640,
+    "height": 360
+  },
+  "assets": [],
+  "fonts": [],
+  "pages": [
+    {
+      "id": "page_ok1",
+      "name": "ok",
+      "background": "#ffffff",
+      "elements": [
+        {
+          "id": "el_missing",
+          "type": "image",
+          "name": "el_missing",
+          "x": 0,
+          "y": 0,
+          "width": 100,
+          "height": 100,
+          "zIndex": 1,
+          "asset": "asset_missing",
+          "fit": "cover"
+        }
+      ]
+    }
+  ]
+}

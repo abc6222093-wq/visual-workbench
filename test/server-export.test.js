@@ -65,7 +65,7 @@ test('导出：调用导出器，输出放在 数据目录/exports/<项目>/<时
   assert.notEqual(again.body.outDir, r.body.outDir);
   assert.ok(existsSync(r.body.files[0].path));
   // 项目文件夹里没有多出导出文件
-  assert.deepEqual(readdirSync(projectDir).sort(), ['assets', 'fonts', 'project.json', 'README.md', 'versions'].sort());
+  assert.deepEqual(readdirSync(projectDir).sort(), [...readdirSync(SAMPLE), 'versions'].sort()); // 导出不往项目文件夹里写东西
 });
 
 test('导出：类型不对 → 400；项目不存在 → 404；导出器出错 → 500 且清掉空文件夹', async t => {

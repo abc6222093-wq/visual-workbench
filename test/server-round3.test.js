@@ -9,7 +9,28 @@ import { createServer } from './helpers/isolated-server.js';
 import { validateProject } from '../src/validate.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SAMPLE = join(ROOT, 'examples', 'sample-deck');
+// 格式 v3 的示例项目（测试自己生成，不依赖 examples/）：两页 HTML、一张照片、一个 logo、一份较大的字体
+import { after as afterAll } from 'node:test';
+import { mkdirSync as mkdirSample, writeFileSync as writeSample, mkdtempSync as mkdtempSample, rmSync as rmSample } from 'node:fs';
+import { tmpdir as tmpSample } from 'node:os';
+import { join as joinSample } from 'node:path';
+function writeV3Sample(dir, id = 'sample-deck') {
+  for (const sub of ['pages', 'assets', 'fonts']) mkdirSample(joinSample(dir, sub), { recursive: true });
+  const font = Buffer.alloc(300_000); for (let i = 0; i < font.length; i++) font[i] = (i * 2654435761) >>> 24;
+  writeSample(joinSample(dir, 'fonts/Inter-Variable.ttf'), font);
+  writeSample(joinSample(dir, 'assets/photo-city.png'), Buffer.from('城市照片的内容'.repeat(50)));
+  writeSample(joinSample(dir, 'assets/logo.png'), Buffer.from('logo'));
+  writeSample(joinSample(dir, 'pages/page_cover.html'), '<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:Inter;src:url(../fonts/Inter-Variable.ttf)} body{background:#123456;color:#fafafa}</style></head><body><h1 data-vw-id="title" data-vw="text move color">视觉工作台</h1><img data-vw-id="hero" data-vw="move resize crop" src="../assets/photo-city.png"></body></html>\n');
+  writeSample(joinSample(dir, 'pages/page_two.html'), '<!doctype html><html><body><img data-vw-id="logo" data-vw="move" src="../assets/logo.png"><p data-vw-id="body" data-vw="text">第二页</p></body></html>\n');
+  const now = '2026-10-01T12:00:00.000Z';
+  const project = { format: 'visual-workbench/project', formatVersion: 3, id, name: '示例课件', createdAt: now, updatedAt: now,
+    artboard: { preset: 'slide-16x9', width: 1920, height: 1080 },
+    assets: [{ id: 'asset_photo', kind: 'image', file: 'assets/photo-city.png', name: '城市' }, { id: 'asset_logo', kind: 'image', file: 'assets/logo.png', name: 'logo' }],
+    fonts: [{ id: 'font_inter', family: 'Inter', file: 'fonts/Inter-Variable.ttf', weight: 'variable' }],
+    pages: [{ id: 'page_cover', name: '封面', file: 'pages/page_cover.html', motion: { steps: 1 }, edits: [] }, { id: 'page_two', name: '第二页', file: 'pages/page_two.html', edits: [] }] };
+  writeSample(joinSample(dir, 'project.json'), JSON.stringify(project, null, 2) + '\n');
+  return dir;
+}
 
 async function fixture(t, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vw-r3-'));
@@ -74,11 +95,7 @@ async function fixture(t, options = {}) {
   };
   const installSample = (id) => {
     const target = join(dir, 'projects', id);
-    cpSync(SAMPLE, target, { recursive: true });
-    const file = join(target, 'project.json');
-    const project = JSON.parse(readFileSync(file, 'utf8'));
-    project.id = id;
-    writeFileSync(file, JSON.stringify(project, null, 2) + '\n');
+    writeV3Sample(target, id);
     mkdirSync(join(target, 'versions'), { recursive: true });
     return target;
   };
@@ -147,13 +164,13 @@ test('版本退回：内容回到那一版，并自动多出一份「退回前�
   const original = readFileSync(join(target, 'project.json'));
   const loaded = await request('/api/projects/rollback');
   const edited = structuredClone(loaded.body.project);
-  edited.pages[0].elements[1].text = '用户后来改的标题';
+  edited.pages[0].edits = [{ id: 'ed_title001', target: 'title', kind: 'text', before: { html: '视觉工作台', text: '视觉工作台' }, after: { html: '用户后来改的标题', text: '用户后来改的标题' } }];
   const saved = await request('/api/projects/rollback', 'PUT', { project: edited, revision: loaded.body.revision });
   assert.equal(saved.status, 200);
   const restored = await request(`/api/projects/rollback/versions/${first.body.id}/restore`, 'POST', {});
   assert.equal(restored.status, 200);
   assert.deepEqual(readFileSync(join(target, 'project.json')), original);
-  assert.equal(restored.body.project.pages[0].elements[1].text, '视觉工作台');
+  assert.deepEqual(restored.body.project.pages[0].edits, []);
   assert.equal(validateProject(target).ok, true);
   const versions = (await request('/api/projects/rollback/versions')).body;
   assert.equal(versions.length, 2);
@@ -161,7 +178,7 @@ test('版本退回：内容回到那一版，并自动多出一份「退回前�
   assert.match(backup.note, /^退回前/);
   assert.equal(backup.by, 'system');
   const kept = JSON.parse(readFileSync(join(dir, 'projects/rollback/versions', backup.id, 'project.json'), 'utf8'));
-  assert.equal(kept.pages[0].elements[1].text, '用户后来改的标题');
+  assert.equal(kept.pages[0].edits[0].after.text, '用户后来改的标题');
   assert.equal((await request('/api/projects/rollback/versions/20200101-000000/restore', 'POST', {})).status, 404);
   assert.equal((await request('/api/projects/rollback/versions/..%2F..%2Fx/restore', 'POST', {})).status, 400);
 });
@@ -190,7 +207,7 @@ test('通过接口连存 5 版：字体在磁盘上只有一份', async (t) => {
   assert.equal((await request('/api/projects/dedupe/versions')).body.length, 5);
 });
 
-test('系列母版：标记、列表里看得到、从母版新建（不带页面内容，母版不变）', async (t) => {
+test('系列母版：标记、列表里看得到、从母版新建（起始页是母版第 1 页的副本，母版不变）', async (t) => {
   const { dir, request, installSample } = await fixture(t);
   const master = installSample('autumn-master');
   mkdirSync(join(master, 'code'), { recursive: true });
@@ -205,7 +222,12 @@ test('系列母版：标记、列表里看得到、从母版新建（不带页�
   assert.equal(validateProject(target).ok, true);
   const project = made.body.project;
   assert.equal(project.pages.length, 1);
-  assert.deepEqual(project.pages[0].elements, []);
+  assert.equal(readFileSync(join(target, project.pages[0].file), 'utf8'), readFileSync(join(master, 'pages/page_cover.html'), 'utf8'));
+  assert.ok(existsSync(join(target, 'assets/photo-city.png')));
+  const series = JSON.parse(readFileSync(join(target, 'series.json'), 'utf8'));
+  assert.deepEqual(series.pages.map((p) => p.pageId), ['page_cover', 'page_two']);
+  for (const p of series.pages) assert.ok(existsSync(join(target, p.file)), p.file);
+  assert.equal(series.motions, undefined);
   assert.deepEqual(project.artboard, JSON.parse(before).artboard);
   assert.deepEqual(project.fonts.map((f) => f.id), ['font_inter']);
   assert.ok(existsSync(join(target, 'fonts/Inter-Variable.ttf')));
@@ -222,6 +244,6 @@ test('给 agent 的开场白：包含代码文件夹、规则文档、项目编�
   await request('/api/projects', 'POST', { id: 'autumn-deck', name: '秋季课程' });
   const { status, body } = await request('/api/projects/autumn-deck/brief');
   assert.equal(status, 200);
-  for (const piece of [ROOT, join(ROOT, 'CLAUDE.md'), join(ROOT, 'AGENTS.md'), join(ROOT, 'docs/format.md'), 'autumn-deck', '秋季课程', join(dir, 'projects/autumn-deck'), 'npm run save-version -- autumn-deck', 'npm run validate'])
+  for (const piece of [ROOT, join(ROOT, 'CLAUDE.md'), join(ROOT, 'AGENTS.md'), join(ROOT, 'docs/format.md'), 'autumn-deck', '秋季课程', join(dir, 'projects/autumn-deck'), join(dir, 'projects/autumn-deck/pages/page_first.html'), 'npm run save-version -- autumn-deck', 'npm run validate', 'npm run check-motion', 'npm run edits -- autumn-deck --clear'])
     assert.ok(body.text.includes(piece), `开场白里应该有：${piece}`);
 });

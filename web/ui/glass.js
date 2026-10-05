@@ -98,6 +98,9 @@ const plates = new Map(); // 名字 -> 玻璃片
 let lastScope = null;
 let lastRects = "";
 const lastPlateRect = new Map(); // 名字 -> 上次的位置，用来只重画动过的玻璃
+// 玻璃效果启动 / 销毁的次数（测试用来确认点一下画布不会重建玻璃）
+const stats = { inits: 0, destroys: 0, attached: 0, busy: false };
+if (typeof window !== "undefined") window.__vwGlassStats = stats;
 
 function libConfig(radius, frost = false) {
   return {
@@ -261,23 +264,46 @@ export function syncGlass(scope = document) {
   const targets = [...scope.querySelectorAll("[data-glass]")].filter(
     (t) => !t.closest(".modal-backdrop"),
   );
+  const present = [...new Set(targets.map((t) => t.dataset.glass))];
+  // 换画面（总览 ↔ 编辑器 ↔ 素材库）：界面上的玻璃和现有玻璃片一块都对不上，才整个重建。
+  // 同一个画面里玻璃片的增减（工具条显示 / 隐藏、专注模式的退出按钮）只在原地增减，不重建：
+  // 重建要重新截取整层内容，重建完之前所有玻璃都会消失（点一下画布就闪一下）。
+  const newScene = !present.some((key) => plates.has(key));
+  if (newScene) {
+    for (const [key, plate] of plates) {
+      plate.remove();
+      plates.delete(key);
+      lastPlateRect.delete(key);
+    }
+  }
   const seen = new Set();
   const floorRects = [],
     upperRects = [];
   const moved = [];
+  const added = [];
   let sig = "";
   for (const t of targets) {
     const key = t.dataset.glass;
-    const r = t.getBoundingClientRect();
-    if (!r.width || !r.height) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
+    const r = t.getBoundingClientRect();
     const isControl = t.dataset.glassLayer === "control";
     let plate = plates.get(key);
     if (!plate) {
       plate = document.createElement("div");
       plate.dataset.key = key;
-      layer.append(plate);
+      // 先按钮后面板：面板插在第一块按钮玻璃前面（按钮折射的是面板）
+      const firstControl = !isControl && [...plates.values()].find((p) => p.classList.contains("gl-plate--control"));
+      if (firstControl) layer.insertBefore(plate, firstControl);
+      else layer.append(plate);
       plates.set(key, plate);
+      added.push(plate);
+    }
+    const shown = r.width > 0 && r.height > 0;
+    if (!shown) {
+      hidePlate(key, plate, isControl);
+      sig += `${key}:-;`;
+      continue;
     }
     const cls = `gl-plate ${isControl ? "gl-plate--control" : "gl-plate--panel"}`;
     if (plate.className !== cls) plate.className = cls;
@@ -292,11 +318,11 @@ export function syncGlass(scope = document) {
     lastPlateRect.set(key, one);
     sig += `${key}:${one};`;
   }
+  // 界面上已经没有的玻璃（比如退出了专注模式）：玻璃片留着，只藏起来
   for (const [key, plate] of plates) {
     if (!seen.has(key)) {
-      plate.remove();
-      plates.delete(key);
-      lastPlateRect.delete(key);
+      hidePlate(key, plate, plate.classList.contains("gl-plate--control"));
+      sig += `${key}:-;`;
     }
   }
   sig += `|${innerWidth}x${innerHeight}@${window.devicePixelRatio}`;
@@ -309,16 +335,67 @@ export function syncGlass(scope = document) {
     if (sizeChanged) instance?.markChanged();
     else for (const plate of moved) instance?.markChanged(plate);
   }
-  const keys = [...plates.keys()].sort().join(",");
-  if (keys !== initKeys) start(keys);
+  // 只在换画面（或第一次）时启动；启动失败（比如没有 WebGL）也不反复重试
+  if (newScene || !initKeys) {
+    start([...plates.keys()].sort().join(","));
+    return;
+  }
+  // 同一画面里新出现的玻璃片：加进正在运行的玻璃效果（还在启动中的，等启动完再加）
+  if (added.length) {
+    if (instance) for (const plate of added) attachPlate(instance, plate);
+    else pendingPlates.push(...added);
+  }
+}
+
+// 藏起来的玻璃片：节点保留（玻璃效果里的登记不动），挪到屏幕外、1×1、不可见，
+// 不参与其他玻璃的折射，也不画投影
+const HIDDEN_STYLE = "left:-10000px;top:-10000px;width:1px;height:1px;border-radius:0px";
+function hidePlate(key, plate, isControl) {
+  const cls = `gl-plate ${isControl ? "gl-plate--control" : "gl-plate--panel"} gl-plate--hidden`;
+  if (plate.className !== cls) plate.className = cls;
+  if (plate.getAttribute("style") !== HIDDEN_STYLE) {
+    plate.setAttribute("style", HIDDEN_STYLE);
+    // 原来位置上叠着它的玻璃要重画
+    instance?.markChanged();
+  }
+  lastPlateRect.delete(key);
+}
+
+/*
+ * 把一块新玻璃片加进正在运行的玻璃效果，不重建。
+ * LiquidGlass 只在启动时登记玻璃片；这里照它启动时的做法补登记一块
+ * （_setupGlassElements 里给每块玻璃垫一张画布、_start 里监听玻璃片内容的变化），
+ * 渲染循环下一帧就会量尺寸、截内容、画出来。
+ */
+const pendingPlates = [];
+function attachPlate(inst, plate) {
+  if (!inst || inst.glassSet.has(plate) || plate.parentElement !== inst.root) return;
+  inst.glassSet.add(plate);
+  if (getComputedStyle(plate).position === "static") plate.style.position = "relative";
+  plate.style.overflow = "visible";
+  const canvas = document.createElement("canvas");
+  canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:-1;";
+  plate.insertBefore(canvas, plate.firstChild);
+  inst.glassCanvases.set(plate, canvas);
+  inst._glassSubtreeObserver?.observe(plate, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["data-config"],
+  });
+  inst._glassContentDirty?.add(plate);
+  inst.markChanged();
+  stats.attached++;
 }
 
 async function start(keys) {
   initKeys = keys;
   if (initializing) await initializing.catch(() => {});
   if (initKeys !== keys) return;
-  instance?.destroy();
+  if (instance) { instance.destroy(); stats.destroys++; }
   instance = null;
+  pendingPlates.length = 0;
   // 这一页没有玻璃（比如放映的加载画面）：只留背景图
   if (!keys) return;
   initializing = (async () => {
@@ -328,15 +405,20 @@ async function start(keys) {
       (a, b) =>
         a.classList.contains("gl-plate--control") - b.classList.contains("gl-plate--control"),
     );
+    stats.inits++;
     instance = await LiquidGlass.init({ root: layer, glassElements: ordered });
   })();
+  stats.busy = true;
   try {
     await initializing;
   } catch (err) {
     console.error("玻璃效果没能启动", err);
   } finally {
     initializing = null;
+    stats.busy = false;
   }
+  // 启动期间同一画面里新出现的玻璃片
+  if (instance && initKeys === keys) for (const plate of pendingPlates.splice(0)) if (plate.isConnected) attachPlate(instance, plate);
 }
 
 /* 当前背景图的地址（放映时铺在作品四周用：全屏时玻璃层在全屏画面外面，看不到） */

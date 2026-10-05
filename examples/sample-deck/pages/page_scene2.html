@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>连续推进：联动、跨步变色与粒子</title>
+<style>
+  @font-face { font-family: "Inter"; src: url("../fonts/Inter-Variable.ttf"); font-weight: 100 900; }
+  html, body { margin: 0; width: 1920px; height: 1080px; }
+  body {
+    position: relative; overflow: hidden;
+    background: linear-gradient(90deg, #1e293b, #0f172a);
+    font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif; color: #e2e8f0;
+  }
+  .stage { position: absolute; left: 200px; top: 200px; width: 1560px; height: 440px; }
+  .photo-frame { position: absolute; left: 0; top: 0; width: 640px; height: 360px; }
+  .photo { display: block; width: 640px; height: 360px; object-fit: cover; }
+  .warm { position: absolute; inset: 0; background: #f59e0b; mix-blend-mode: multiply; pointer-events: none; }
+  .card {
+    position: absolute; top: 0; width: 360px; height: 240px; box-sizing: border-box;
+    padding: 32px; border-radius: 24px; border: 2px solid #94a3b8; background: #334155;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 36px; }
+  .card p { margin: 0; font-size: 26px; line-height: 1.5; color: #cbd5e1; }
+  .card-a { left: 800px; }
+  .card-b { left: 1200px; }
+  .marker { position: absolute; left: 800px; top: 360px; width: 80px; height: 80px; border-radius: 50%; background: #22c55e; }
+  .caption { position: absolute; left: 200px; top: 700px; width: 1520px; margin: 0; font-size: 36px; line-height: 1.4; }
+  .spark { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; pointer-events: none; z-index: 10; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="photo-frame" data-vw-id="photoFrame" data-vw="move">
+      <img class="photo" data-vw-id="photo" data-vw="resize crop" src="../assets/photo-city.png" alt="城市照片">
+      <div class="warm"></div>
+    </div>
+    <section class="card card-a" data-vw-id="cardA" data-vw="move resize background">
+      <h2 data-vw-id="cardATitle" data-vw="text color">联动</h2>
+      <p data-vw-id="cardAText" data-vw="text color">一次点击，照片和卡片一起推进。</p>
+    </section>
+    <section class="card card-b" data-vw-id="cardB" data-vw="move resize background">
+      <h2 data-vw-id="cardBTitle" data-vw="text color">跨步</h2>
+      <p data-vw-id="cardBText" data-vw="text color">同一个标记点，每一步换位置和颜色。</p>
+    </section>
+    <div class="marker" data-vw-id="marker" data-vw="move background"></div>
+  </div>
+  <p class="caption" data-vw-id="caption" data-vw="text move color">点一下：照片和卡片一起推进；再点：标记点移动并变色；再点：照片变黑白，粒子散开</p>
+
+<script type="module">
+  // 三步：① 照片与两张卡片联动左移、卡片错落上浮；② 标记点右移并变黄、再变红；③ Anime.js 粒子从标记点当前位置散开，照片变黑白。
+  // 位移都是相对当前位置的 transform，用户拖过的元素从新位置出发。
+  const $ = id => document.querySelector(`[data-vw-id="${id}"]`);
+  const frame = $('photoFrame'), photo = $('photo'), cardA = $('cardA'), cardB = $('cardB'), marker = $('marker');
+  const warm = document.querySelector('.warm');
+  let sparks = [];
+  const clearSparks = () => { for (const s of sparks) { s.animation?.revert?.(); s.node.remove(); } sparks = []; };
+
+  window.vw?.motion({
+    async step(index, ctx) {
+      if (index === 0) {
+        const push = 'translateX(-120px) scale(.85)';
+        await Promise.all([frame, cardA, cardB].map(node => ctx.animate(node, [{ transform: 'none' }, { transform: push }], { duration: 640, easing: 'ease-in-out', fill: 'forwards' })));
+        await Promise.all([
+          ctx.animate(cardA, [{ transform: push }, { transform: 'translateX(-120px) translateY(-30px) scale(.85)' }], { duration: 420, fill: 'forwards' }),
+          ctx.animate(cardB, [{ transform: push }, { transform: 'translateX(-120px) translateY(-60px) scale(.85) rotate(-6deg)' }], { duration: 420, fill: 'forwards' }),
+        ]);
+      } else if (index === 1) {
+        const start = getComputedStyle(marker).backgroundColor;
+        await ctx.animate(marker, [{ transform: 'none', backgroundColor: start }, { transform: 'translate(160px, -40px)', backgroundColor: '#facc15' }], { duration: 490, fill: 'forwards' });
+        await ctx.animate(marker, [{ transform: 'translate(160px, -40px)', backgroundColor: '#facc15' }, { transform: 'translate(440px, -40px)', backgroundColor: '#ef4444' }], { duration: 490, fill: 'forwards' });
+      } else if (index === 2) {
+        const { animate } = await ctx.importModule('/vendor/anime.esm.min.js');
+        const box = marker.getBoundingClientRect();
+        const cx = box.left + box.width / 2, cy = box.top + box.height / 2;
+        for (let i = 0; i < 20; i++) {
+          const node = document.createElement('span');
+          node.className = 'spark';
+          node.style.cssText = `left:${cx}px;top:${cy}px;background:${i % 2 ? '#facc15' : '#38bdf8'}`;
+          document.body.append(node);
+          const angle = i * Math.PI * 2 / 20;
+          sparks.push({ node, animation: animate(node, { x: Math.cos(angle) * (70 + i * 3), y: Math.sin(angle) * (70 + i * 3), opacity: [1, 0], scale: [1, .25], duration: 720, ease: 'out(3)' }) });
+        }
+        ctx.signal.addEventListener('abort', clearSparks, { once: true });
+        await Promise.all([
+          ctx.animate(photo, [{ filter: 'none' }, { filter: 'grayscale(1)' }], { duration: 720, fill: 'forwards' }),
+          ctx.animate(warm, [{ opacity: 1 }, { opacity: 0 }], { duration: 720, fill: 'forwards' }),
+          ctx.timer(730),
+        ]);
+        clearSparks();
+      }
+    },
+    dispose: clearSparks,
+  });
+</script>
+</body>
+</html>

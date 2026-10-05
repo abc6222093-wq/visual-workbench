@@ -1,6 +1,6 @@
-// 总览「导入旧 HTML」弹窗：选项目类型（课件 / 网页）→ 选单个 .html / 文件夹 / .zip，或（网页）输入网址 →
+// 总览「导入 HTML / 网页」弹窗（第 12 轮：保留原网页，标出可改的文字和图片）：选项目类型（课件 / 网页）→ 选单个 .html / 文件夹 / .zip，或（网页）输入网址 →
 // 项目名称、画板（课件尽量从 HTML 自动识别；网页固定电脑端 1440×900 / 手机端 390×844 窗口）→ 分块读文件、上传建任务 →
-// 轮询进度（可取消）→ 完成摘要与「打开项目」。分析在服务端后台浏览器里做，这里只负责选文件和显示进度，工作台不会卡住。
+// 轮询进度（可取消）→ 完成摘要与「打开项目」。按页切开在服务端后台浏览器里做，这里只负责选文件和显示进度，工作台不会卡住。
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // 与新建项目的画板类型同一顺序
 export const IMPORT_PRESETS = [
@@ -50,14 +50,14 @@ function readChunk(blob) { return new Promise((resolve, reject) => { const fr = 
 export function openImportDialog({ api, modal, closeModal = () => {}, notice = () => {}, onDone = () => {}, onCreated = () => {}, pollMs = 500, fetchImpl = (...args) => fetch(...args) }) {
   ensureStyle();
   const presetOptions = IMPORT_PRESETS.map(p => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join('');
-  const host = modal(`<h2>导入旧 HTML</h2><div class="import-html">
+  const host = modal(`<h2>导入 HTML / 网页</h2><div class="import-html">
     <form class="import-html__form">
       <fieldset class="import-html__kind"><legend>项目类型</legend>
         <label><input type="radio" name="kind" value="deck" checked> 课件 / 海报</label>
         <label><input type="radio" name="kind" value="web"> 网页</label>
       </fieldset>
-      <p class="g-sheet__note" data-note-deck>自动拆页，把文字、图片、背景变成可以拖动修改的元素；原来的动画不搬，之后交给 agent 按新格式重写。导入会新建一个项目，原文件不会被修改。</p>
-      <p class="g-sheet__note" data-note-web hidden>每个网页导入成「电脑端」「手机端」各一页（整页长度），导航栏、卡片、按钮等组件变成分组。只读取网页，不提交、不登录、不点击，原网站和原文件都不受影响；需要登录才能看的页面会跳过。</p>
+      <p class="g-sheet__note" data-note-deck>保留原网页，标出可改的文字和图片：自动按页切开，每页保留原来的 HTML、样式、脚本和动画；看得出的文字可以直接改，图片可以裁切。导入会新建一个项目，原文件原样复制一份，不会被修改。</p>
+      <p class="g-sheet__note" data-note-web hidden>保留原网页，标出可改的文字和图片：每个网页导入成「电脑端」「手机端」各一页（整页长度），样式和图片复制进项目。只读取网页，不提交、不登录、不点击，原网站和原文件都不受影响；需要登录才能看的页面会跳过。</p>
       <fieldset class="import-html__kind" data-web-only hidden><legend>来源</legend>
         <label><input type="radio" name="source" value="files" checked> 本地网页文件</label>
         <label><input type="radio" name="source" value="urls"> 网址</label>
@@ -210,27 +210,26 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
 }
 
 const DEVICE_NAMES = { desktop: '电脑端', mobile: '手机端' };
+const listOrNone = (items, n = 6) => (items?.length ? esc(items.length > n ? `${items.slice(0, n).join('、')} 等 ${items.length} 个` : items.join('、')) : '无');
 function summaryHtml(s) {
+  const common = `<dt>可改的文字</dt><dd data-sum="texts">${s.texts} 处</dd>
+    <dt>可裁切的图片</dt><dd data-sum="images">${s.images} 张</dd>
+    <dt>复制的素材 / 字体</dt><dd data-sum="assets">${s.assets} 个 / ${s.fonts} 个</dd>
+    <dt>没下载到的外链</dt><dd data-sum="remote">${listOrNone(s.remote, 4)}</dd>
+    <dt>缺失字体</dt><dd data-sum="fonts">${listOrNone(s.missingFonts)}</dd>
+    <dt>耗时</dt><dd>${s.seconds} 秒</dd>`;
   if (s.kind === 'web') {
     const skipped = (s.skipped || []).map(x => `<li>${esc(x.url)}（${esc((x.devices || []).map(d => DEVICE_NAMES[d] || d).join('、'))}）：${esc(x.reason)}</li>`).join('');
-    return `<p class="import-html__msg">导入完成，新网页项目已建好。</p><dl class="import-html__summary">
+    return `<p class="import-html__msg">导入完成，新网页项目已建好：原网页保留，可改的文字和图片已标出。</p><dl class="import-html__summary">
     <dt>页数</dt><dd data-sum="pages">${s.pages}</dd>
     <dt>电脑端 / 手机端</dt><dd data-sum="devices">电脑端 ${s.devices?.desktop || 0} 页，手机端 ${s.devices?.mobile || 0} 页</dd>
-    <dt>分组</dt><dd data-sum="groups">${s.groups}</dd>
-    <dt>元素</dt><dd data-sum="elements">${s.elements}</dd>
-    <dt>截图块</dt><dd data-sum="shots">${s.shots}</dd>
     <dt>跳过的网址</dt><dd data-sum="skipped">${skipped ? `<ul class="import-html__skipped">${skipped}</ul>` : '无'}</dd>
-    <dt>缺失字体</dt><dd data-sum="fonts">${s.missingFonts?.length ? esc(s.missingFonts.join('、')) : '无'}</dd>
-    <dt>耗时</dt><dd>${s.seconds} 秒</dd>
-  </dl>${(s.truncated || []).length ? `<p class="import-html__msg import-html__msg--warn">有网页超过 20000 像素高，下面的部分没有导入（见每页备注）。</p>` : ''}<p class="g-sheet__note">${s.source === 'urls' ? '导入时的网页快照在项目的 import/pages/ 里' : '原文件复制在项目的 import/ 文件夹里'}；import/baseline.json 是导入那一刻的项目，用来对照改动。</p>`;
+    ${common}
+  </dl>${(s.truncated || []).length ? `<p class="import-html__msg import-html__msg--warn">有网页超过 20000 像素高，工作台只显示到 20000（见每页备注）。</p>` : ''}<p class="g-sheet__note">${s.source === 'urls' ? '导入时的网页快照在项目的 import/pages/ 里' : '原文件原样复制在项目的 import/ 文件夹里'}；每页备注是给 agent 的迁移说明。</p>`;
   }
-  const reasons = Object.entries(s.shotReasons || {}).map(([k, v]) => `${k} ×${v}`).join('、');
-  return `<p class="import-html__msg">导入完成，新项目已建好。</p><dl class="import-html__summary">
+  return `<p class="import-html__msg">导入完成，新项目已建好：原网页保留，可改的文字和图片已标出。</p><dl class="import-html__summary">
     <dt>页数</dt><dd data-sum="pages">${s.pages}</dd>
-    <dt>分页方式</dt><dd>${esc(s.methodLabel)}</dd>
-    <dt>元素</dt><dd data-sum="elements">${s.elements}</dd>
-    <dt>截图块</dt><dd data-sum="shots">${s.shots}${reasons ? `（${esc(reasons)}）` : ''}</dd>
-    <dt>缺失字体</dt><dd data-sum="fonts">${s.missingFonts?.length ? esc(s.missingFonts.join('、')) : '无'}</dd>
-    <dt>耗时</dt><dd>${s.seconds} 秒</dd>
-  </dl>${s.message ? `<p class="import-html__msg import-html__msg--warn">${esc(s.message)}</p>` : ''}<p class="g-sheet__note">原文件复制在项目的 import/ 文件夹里；每页备注是给 agent 的迁移说明。</p>`;
+    <dt>分页方式</dt><dd data-sum="method">${esc(s.methodLabel)}</dd>
+    ${common}
+  </dl>${s.message ? `<p class="import-html__msg import-html__msg--warn">${esc(s.message)}</p>` : ''}<p class="g-sheet__note">原文件原样复制在项目的 import/ 文件夹里；每页备注是给 agent 的迁移说明。</p>`;
 }

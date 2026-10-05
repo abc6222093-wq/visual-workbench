@@ -34,3 +34,21 @@ jobs:
         run: node scripts/test-windows.js
       - run: npm run validate
       - run: npm run check-motion -- examples/sample-deck
+
+  # Safari 内核：Mac 上双击导出的放映版 .html 默认用 Safari 打开。Playwright WebKit 跑 scripts/test-webkit.js 的清单
+  # （也装 Chromium：清单里的导入 / 导出图片步骤按桌面应用的 Chromium 内核做，只有打开放映文件用 WebKit）。
+  webkit:
+    timeout-minutes: 45
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps webkit chromium
+      - name: WebKit browser tests
+        run: node scripts/test-webkit.js
+        env:
+          VW_BROWSER: webkit

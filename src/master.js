@@ -1,6 +1,6 @@
-// 系列母版：把满意的项目标为母版，新建项目时从母版继承画板、背景、字体、配色、动效代码和通用素材，但不带页面内容。
+// 系列母版：把满意的项目标为母版，新建项目时从母版继承画板、字体、配色和通用素材，起始页是母版第 1 页的副本。
 // 母版和新项目之间全部是复制，不互相引用；母版文件夹里的任何文件都不会被修改。
-// 项目文件格式本轮不变，所以「是不是母版」记在数据目录的 workbench-state.json，配色、来源与母版各页的动效代码记在新项目的 series.json。
+// 「是不是母版」记在数据目录的 workbench-state.json；配色、来源与母版各页（HTML 参考放在 series/pages/）记在新项目的 series.json。
 import {
   copyFileSync,
   existsSync,
@@ -15,7 +15,8 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { PROJECT_LAYOUT, STATE_FILE, initProjectDir } from './data-dir.js';
-import { formatResult, validateProject, walkElements } from './validate.js';
+import { formatResult, validateProject, readPageHtml, isLegacyProject, FORMAT_VERSION } from './validate.js';
+import { copyPagesInto } from './copy-pages.js';
 
 const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
@@ -23,7 +24,7 @@ const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 export const SERIES_FILE = 'series.json';
 
 // 从母版复制附属文件时跳过的顶层名字（另有：以 . 开头的一律跳过）
-const SKIP_TOP = new Set([PROJECT_LAYOUT.file, PROJECT_LAYOUT.assets, PROJECT_LAYOUT.fonts, PROJECT_LAYOUT.versions]);
+const SKIP_TOP = new Set([PROJECT_LAYOUT.file, PROJECT_LAYOUT.pages, PROJECT_LAYOUT.assets, PROJECT_LAYOUT.fonts, PROJECT_LAYOUT.versions, 'import', 'series']);
 
 function isFile(abs) {
   return existsSync(abs) && statSync(abs).isFile();
@@ -75,9 +76,9 @@ export function setMaster(dataDir, projectId, on) {
   return masters;
 }
 
-/** 新项目的空白第 1 页（服务器新建项目、从母版新建都用它）。 */
-export function blankPage(background = '#ffffff') {
-  return { id: 'page_first', name: '第 1 页', background, elements: [] };
+/** 新项目的空白第 1 页条目（服务器新建课件项目用）；页面文件内容见 blankPageHtml。 */
+export function blankPage() {
+  return { id: 'page_first', name: '第 1 页', file: 'pages/page_first.html', edits: [] };
 }
 
 /** 把颜色统一成小写 #rrggbb / #rrggbbaa；#rgb / #rgba 展开；不认识的返回 null。 */
@@ -90,36 +91,19 @@ function normalizeColor(c) {
 }
 
 /**
- * 提取项目配色：页面背景、文字颜色、形状填充与描边、渐变各色标。
- * 按出现次数从多到少排序，次数相同按首次出现顺序，最多 limit 个。
+ * 提取项目配色：设计卡片的颜色 + 各页 HTML / CSS 里写的十六进制颜色。
+ * 按出现次数从多到少排序，次数相同按首次出现顺序，最多 limit 个。projectDir 不给时只看设计卡片。
  */
-export function extractPalette(project, limit = 12) {
-  const counts = new Map(); // 颜色 -> 次数（Map 保留首次插入顺序）
-  const add = (c) => {
-    const n = normalizeColor(c);
-    if (n) counts.set(n, (counts.get(n) || 0) + 1);
-  };
-  const addFill = (fill) => {
-    if (typeof fill === 'string') add(fill);
-    else if (fill && typeof fill === 'object' && Array.isArray(fill.stops)) {
-      for (const s of fill.stops) if (s && typeof s === 'object') add(s.color);
-    }
-  };
-
-  for (const page of (project && Array.isArray(project.pages) ? project.pages : [])) {
-    if (!page || typeof page !== 'object') continue;
-    addFill(page.background);
-    walkElements(page.elements, (el) => {
-      if (el.type === 'text') add(el.color);
-      if (el.type === 'shape') {
-        addFill(el.fill);
-        if (el.stroke && typeof el.stroke === 'object') add(el.stroke.color);
-      }
-    });
+export function extractPalette(project, limit = 12, projectDir = null) {
+  const counts = new Map();
+  const add = (c) => { const n = normalizeColor(c); if (n) counts.set(n, (counts.get(n) || 0) + 1); };
+  for (const c of (project?.designCard?.colors || [])) add(c);
+  for (const page of (Array.isArray(project?.pages) ? project.pages : [])) {
+    const html = projectDir ? readPageHtml(projectDir, page) : null;
+    if (!html) continue;
+    for (const m of html.matchAll(/#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b/g)) add(m[0]);
   }
-
-  const order = [...counts.keys()];
-  return order
+  return [...counts.keys()]
     .map((color, i) => ({ color, n: counts.get(color), i }))
     .sort((a, b) => b.n - a.n || a.i - b.i)
     .slice(0, limit)
@@ -145,7 +129,7 @@ function copyTree(fromDir, toDir, relBase, out) {
   return out;
 }
 
-/** 复制母版文件夹里除 project.json、assets/、fonts/、versions/、series.json、隐藏项之外的所有文件和目录。 */
+/** 复制母版文件夹里除 project.json、pages/、assets/、fonts/、versions/、import/、series/、series.json、隐藏项之外的所有文件和目录。 */
 function copyExtras(masterDir, destProjectDir) {
   const out = [];
   for (const ent of readdirSync(masterDir, { withFileTypes: true })) {
@@ -163,8 +147,12 @@ function copyExtras(masterDir, destProjectDir) {
   return out.sort();
 }
 
+/** 新项目里放母版各页 HTML 参考的文件夹（不进 pages 列表）。 */
+export const SERIES_PAGES_DIR = 'series/pages';
+
 /**
- * 从母版新建项目：继承画板、全部字体、素材库来的素材、第 1 页背景和附属文件（如动效代码），不带页面内容。
+ * 从母版新建项目（格式 v3）：继承画板、全部字体、素材库来的素材、附属文件；起始页 = 母版第 1 页的副本（文件 + 资源 + 修改单）；
+ * 母版各页 HTML 复制到 series/pages/ 做参考，series.json 记 master、palette、pages。
  * @returns {{destProjectDir: string, project: object, copiedFonts: string[], copiedAssets: string[], copiedExtra: string[], palette: string[]}}
  */
 export function createFromMaster({ masterDir, destProjectDir, newId, newName, now = new Date() }) {
@@ -177,7 +165,7 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
   } catch (e) {
     throw new Error(`母版项目文件不是合法 JSON：${masterFile}（${e.message}）`);
   }
-
+  if (isLegacyProject(master)) throw new Error('母版还是旧格式：先在工作台里打开一次母版（会自动转换），再从它新建');
   if (typeof newId !== 'string' || !PROJECT_ID_RE.test(newId)) {
     throw new Error(`新项目编号不合法：“${newId}”（只能用小写字母、数字、连字符，2–64 位，且不能以连字符开头）`);
   }
@@ -189,42 +177,32 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
     throw new Error(`新项目文件夹不能放在母版文件夹里：${destProjectDir}`);
   }
   if (existsSync(destProjectDir)) throw new Error(`目标项目已存在，不会覆盖：${destProjectDir}`);
-
   const masterPages = Array.isArray(master.pages) ? master.pages : [];
-  const firstBg = masterPages.length && masterPages[0] && masterPages[0].background !== undefined
-    ? structuredClone(masterPages[0].background)
-    : '#ffffff';
+  if (!masterPages.length) throw new Error('母版没有页面');
 
   const newFonts = (Array.isArray(master.fonts) ? master.fonts : []).map((f) => structuredClone(f));
   const newAssets = (Array.isArray(master.assets) ? master.assets : [])
     .filter((a) => a && a.source && a.source.type === 'library')
-    .map((a) => ({ ...structuredClone(a), pendingLayout: false }));
+    .map((a) => { const c = structuredClone(a); delete c.pendingLayout; return c; });
 
   const iso = now.toISOString();
-  const project = {
+  const base = {
     format: master.format,
-    formatVersion: master.formatVersion,
+    formatVersion: FORMAT_VERSION,
     id: newId,
     name: newName.trim(),
+    ...(master.kind ? { kind: master.kind } : {}),
+    ...(master.designCard ? { designCard: structuredClone(master.designCard) } : {}),
     createdAt: iso,
     updatedAt: iso,
     artboard: structuredClone(master.artboard),
     assets: newAssets,
     fonts: newFonts,
-    pages: [blankPage(firstBg)],
+    pages: [],
   };
-  const palette = extractPalette(master);
-  // 格式 v2 的动效写在页面里，新项目只有一张空白页，页面动效引用的元素都不存在，不能直接搬进页面；
-  // 原样记进 series.json 的 motions，供 agent 排新页面时复用这套系列动效代码
-  const motions = masterPages
-    .filter((page) => page && typeof page === 'object' && page.motion && typeof page.motion === 'object')
-    .map((page) => ({
-      pageId: page.id,
-      pageName: page.name,
-      steps: page.motion.steps,
-      source: page.motion.source,
-    }));
-  const series = { master: master.id, masterName: master.name, createdFromAt: iso, palette, motions };
+  const palette = extractPalette(master, 12, masterDir);
+  const seriesPages = masterPages.map((page) => ({ pageId: page.id, name: page.name, file: `${SERIES_PAGES_DIR}/${page.id}.html` }));
+  const series = { master: master.id, masterName: master.name, createdFromAt: iso, palette, pages: seriesPages };
 
   mkdirSync(dirname(destProjectDir), { recursive: true });
   mkdirSync(destProjectDir);
@@ -235,28 +213,42 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
     for (const f of newFonts) {
       const from = join(masterDir, f.file);
       if (!isFile(from)) throw new Error(`母版的字体文件不存在：${f.file}`);
+      mkdirSync(dirname(join(destProjectDir, f.file)), { recursive: true });
       copyFileSync(from, join(destProjectDir, f.file));
-      // 许可证若是 fonts/ 下的文件，一并带走
       if (typeof f.license === 'string' && /^fonts\/[^/\\]+$/.test(f.license) && isFile(join(masterDir, f.license))) {
         copyFileSync(join(masterDir, f.license), join(destProjectDir, f.license));
       }
       copiedFonts.push(f.id);
     }
-
     const copiedAssets = [];
     for (const a of newAssets) {
       const from = join(masterDir, a.file);
       if (!isFile(from)) throw new Error(`母版的素材文件不存在：${a.file}`);
+      mkdirSync(dirname(join(destProjectDir, a.file)), { recursive: true });
       copyFileSync(from, join(destProjectDir, a.file));
       copiedAssets.push(a.id);
     }
-
     const copiedExtra = copyExtras(masterDir, destProjectDir);
+
+    // 起始页 = 母版第 1 页的副本（页面文件 + 引用的资源 + 修改单）
+    const first = copyPagesInto({ srcDir: masterDir, src: master, pageIds: [masterPages[0].id], destDir: destProjectDir, dest: base, keepIds: true });
+    const project = first.project;
+    for (const id of first.copiedAssets) if (!copiedAssets.includes(id)) copiedAssets.push(id);
+    for (const id of first.copiedFonts) if (!copiedFonts.includes(id)) copiedFonts.push(id);
+
+    // 母版各页 HTML 做参考
+    for (const [i, page] of masterPages.entries()) {
+      const from = join(masterDir, page.file);
+      if (!isFile(from)) continue;
+      const to = join(destProjectDir, seriesPages[i].file);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+    }
 
     writeFileSync(join(destProjectDir, PROJECT_LAYOUT.file), JSON.stringify(project, null, 2) + '\n');
     writeFileSync(join(destProjectDir, SERIES_FILE), JSON.stringify(series, null, 2) + '\n');
 
-    const result = validateProject(destProjectDir);
+    const result = validateProject(destProjectDir, { structural: true });
     if (!result.ok) throw new Error(`新项目校验未通过：\n${formatResult(result)}`);
 
     return { destProjectDir, project, copiedFonts, copiedAssets, copiedExtra, palette };
@@ -265,4 +257,3 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
     throw e;
   }
 }
-

@@ -1,11 +1,12 @@
 {
   "format": "visual-workbench/project",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "sample-deck",
   "name": "示例课件 · 格式演示",
-  "description": "代码动效示例：联动连续推进、同一元素跨步移动变色、Anime.js 粒子与自定义换页。静态元素保留可编辑。",
+  "description": "示例课件（格式 v3）：每页一个网页文件。三页分别演示逐项出现、点击连续推进（联动、跨步变色、Anime.js 粒子）、可裁切图片与卡片分组；文字里有局部加粗和变色。",
+  "kind": "deck",
   "createdAt": "2026-10-01T12:00:00.000Z",
-  "updatedAt": "2026-10-01T12:00:00.000Z",
+  "updatedAt": "2026-10-05T00:00:00.000Z",
   "artboard": {
     "preset": "slide-16x9",
     "width": 1920,
@@ -19,11 +20,7 @@
       "name": "城市照片",
       "width": 640,
       "height": 360,
-      "pendingLayout": false,
-      "addedAt": "2026-10-01T12:00:00.000Z",
-      "source": {
-        "type": "upload"
-      }
+      "addedAt": "2026-10-01T12:00:00.000Z"
     },
     {
       "id": "asset_logo01",
@@ -32,12 +29,7 @@
       "name": "标志",
       "width": 256,
       "height": 256,
-      "pendingLayout": false,
-      "addedAt": "2026-10-01T12:00:00.000Z",
-      "source": {
-        "type": "library",
-        "from": "logo.png"
-      }
+      "addedAt": "2026-10-01T12:00:00.000Z"
     },
     {
       "id": "asset_newpic1",
@@ -46,11 +38,7 @@
       "name": "用户新拖进来的照片（待排版）",
       "width": 400,
       "height": 300,
-      "pendingLayout": true,
-      "addedAt": "2026-10-01T12:30:00.000Z",
-      "source": {
-        "type": "upload"
-      }
+      "addedAt": "2026-10-01T12:30:00.000Z"
     }
   ],
   "fonts": [
@@ -66,394 +54,31 @@
   "pages": [
     {
       "id": "page_cover1",
-      "name": "1 封面：逐项出现与擦拭换页",
-      "background": "#0f172a",
-      "elements": [
-        {
-          "id": "el_bgphoto",
-          "type": "image",
-          "name": "背景照片（渐变遮罩）",
-          "x": 0,
-          "y": 0,
-          "width": 1920,
-          "height": 1080,
-          "zIndex": 0,
-          "asset": "asset_city01",
-          "fit": "cover",
-          "opacity": 0.8,
-          "effects": {
-            "mask": {
-              "type": "linear",
-              "angle": 180,
-              "stops": [
-                {
-                  "offset": 0,
-                  "opacity": 1
-                },
-                {
-                  "offset": 1,
-                  "opacity": 0
-                }
-              ]
-            }
-          }
-        },
-        {
-          "id": "el_title1",
-          "type": "text",
-          "name": "标题",
-          "x": 160,
-          "y": 300,
-          "width": 1600,
-          "height": 144,
-          "zIndex": 10,
-          "text": "视觉工作台",
-          "font": "font_inter",
-          "fontSize": 120,
-          "fontWeight": 700,
-          "lineHeight": 1.2,
-          "align": "left",
-          "color": "#ffffff"
-        },
-        {
-          "id": "el_subtitle1",
-          "type": "text",
-          "name": "副标题",
-          "x": 160,
-          "y": 480,
-          "width": 1600,
-          "height": 68,
-          "zIndex": 10,
-          "text": "agent 生成 · 用户微调 · agent 继续",
-          "font": "font_inter",
-          "fontSize": 48,
-          "fontWeight": 400,
-          "align": "left",
-          "color": "#cbd5e1"
-        },
-        {
-          "id": "el_bullet1",
-          "type": "text",
-          "name": "要点 1",
-          "x": 160,
-          "y": 640,
-          "width": 1200,
-          "height": 56,
-          "zIndex": 10,
-          "text": "① 双击文字直接改，拖动元素不闪",
-          "font": "font_inter",
-          "fontSize": 40,
-          "color": "#ffffff"
-        },
-        {
-          "id": "el_bullet2",
-          "type": "text",
-          "name": "要点 2",
-          "x": 160,
-          "y": 730,
-          "width": 1200,
-          "height": 56,
-          "zIndex": 10,
-          "text": "② agent 写动效，用户只管微调",
-          "font": "font_inter",
-          "fontSize": 40,
-          "color": "#ffffff"
-        },
-        {
-          "id": "el_bullet3",
-          "type": "text",
-          "name": "要点 3",
-          "x": 160,
-          "y": 820,
-          "width": 1200,
-          "height": 56,
-          "zIndex": 10,
-          "text": "③ 挪了位置，动效从新位置接着播",
-          "font": "font_inter",
-          "fontSize": 40,
-          "color": "#ffffff"
-        },
-        {
-          "id": "el_logo1",
-          "type": "image",
-          "name": "标志",
-          "x": 1560,
-          "y": 80,
-          "width": 200,
-          "height": 200,
-          "zIndex": 20,
-          "asset": "asset_logo01",
-          "fit": "contain"
-        }
-      ],
+      "name": "1 封面：逐项出现",
+      "file": "pages/page_cover1.html",
       "motion": {
-        "steps": 2,
-        "source": "export default async function (ctx) {\n  const title = ctx.element('el_title1').node;\n  const subtitle = ctx.element('el_subtitle1').node;\n  const bullets = ['el_bullet1', 'el_bullet2', 'el_bullet3'].map(id => ctx.element(id).node);\n  // The editor's layout is the start pose. Only playback nodes receive these temporary styles.\n  const baseOpacity = id => ctx.element(id).base.opacity ?? 1;\n  for (const node of bullets) node.style.opacity = '0';\n  await Promise.all([\n    ctx.animate(title, [{ opacity: 0, transform: `${title.style.transform || ''} translateY(24px)` }, { opacity: baseOpacity('el_title1'), transform: title.style.transform || 'none' }], { duration: 520, fill: 'forwards' }),\n    ctx.animate(subtitle, [{ opacity: 0 }, { opacity: baseOpacity('el_subtitle1') }], { duration: 680, fill: 'forwards' })\n  ]);\n  return {\n    async step(index) {\n      if (index === 0) {\n        await Promise.all(bullets.map(async (node, i) => {\n          await ctx.timer(i * 170);\n          await ctx.animate(node, [{ opacity: 0, transform: `${node.style.transform || ''} translateY(18px)` }, { opacity: baseOpacity(['el_bullet1', 'el_bullet2', 'el_bullet3'][i]), transform: node.style.transform || 'none' }], { duration: 360, fill: 'forwards' });\n        }));\n      } else if (index === 1) {\n        const photo = ctx.element('el_bgphoto').node;\n        const baselineFilter = photo.style.filter || 'none';\n        await ctx.animate(photo, [{ filter: baselineFilter }, { filter: `${baselineFilter === 'none' ? '' : baselineFilter} brightness(1.35)` }, { filter: baselineFilter }], { duration: 700, fill: 'forwards' });\n      }\n    },\n    async transition({ from, to }) {\n      const fromFilter = from.style.filter || 'none';\n      to.style.clipPath = 'inset(0 100% 0 0)';\n      await Promise.all([\n        ctx.animate(to, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)' }], { duration: 650, fill: 'forwards' }),\n        ctx.animate(from, [{ filter: fromFilter }, { filter: `${fromFilter === 'none' ? '' : fromFilter} brightness(.45)` }], { duration: 650, fill: 'forwards' })\n      ]);\n      to.style.clipPath = '';\n    },\n    dispose() {}\n  };\n}"
-      }
+        "steps": 2
+      },
+      "edits": []
     },
     {
       "id": "page_scene2",
-      "name": "2 连续推进：联动、跨步变色与 Anime.js 粒子",
-      "background": {
-        "type": "linear",
-        "angle": 90,
-        "stops": [
-          {
-            "offset": 0,
-            "color": "#1e293b"
-          },
-          {
-            "offset": 1,
-            "color": "#0f172a"
-          }
-        ]
-      },
-      "elements": [
-        {
-          "id": "el_photo2",
-          "type": "image",
-          "name": "照片",
-          "x": 200,
-          "y": 200,
-          "width": 640,
-          "height": 360,
-          "zIndex": 1,
-          "asset": "asset_city01",
-          "fit": "cover",
-          "effects": {
-            "filters": {
-              "grayscale": 0
-            }
-          }
-        },
-        {
-          "id": "el_tint2",
-          "type": "shape",
-          "name": "颜色混合层（multiply）",
-          "x": 200,
-          "y": 200,
-          "width": 640,
-          "height": 360,
-          "zIndex": 2,
-          "shape": "rect",
-          "fill": "#f59e0b",
-          "stroke": null,
-          "effects": {
-            "blend": "multiply"
-          }
-        },
-        {
-          "id": "el_card2a",
-          "type": "shape",
-          "name": "卡片 A",
-          "x": 1000,
-          "y": 200,
-          "width": 360,
-          "height": 240,
-          "zIndex": 3,
-          "shape": "rect",
-          "fill": "#334155",
-          "stroke": {
-            "color": "#94a3b8",
-            "width": 2
-          },
-          "cornerRadius": 24
-        },
-        {
-          "id": "el_card2b",
-          "type": "shape",
-          "name": "卡片 B",
-          "x": 1400,
-          "y": 200,
-          "width": 360,
-          "height": 240,
-          "zIndex": 3,
-          "shape": "rect",
-          "fill": "#334155",
-          "stroke": {
-            "color": "#94a3b8",
-            "width": 2
-          },
-          "cornerRadius": 24
-        },
-        {
-          "id": "el_marker2",
-          "type": "shape",
-          "name": "标记点（跨步骤移动并变色）",
-          "x": 1000,
-          "y": 560,
-          "width": 80,
-          "height": 80,
-          "zIndex": 5,
-          "shape": "ellipse",
-          "fill": "#22c55e",
-          "stroke": null
-        },
-        {
-          "id": "el_caption2",
-          "type": "text",
-          "name": "说明文字",
-          "x": 200,
-          "y": 700,
-          "width": 1520,
-          "height": 51,
-          "zIndex": 6,
-          "text": "点一下：照片和卡片一起推进；再点：标记点移动并变色；再点：照片变黑白",
-          "font": "font_inter",
-          "fontSize": 36,
-          "color": "#e2e8f0"
-        }
-      ],
+      "name": "2 连续推进：联动、跨步变色与粒子",
+      "file": "pages/page_scene2.html",
       "motion": {
-        "steps": 4,
-        "source": "export default async function (ctx) {\n  const ids = ['el_photo2', 'el_tint2', 'el_card2a', 'el_card2b'];\n  const nodes = Object.fromEntries([...ids, 'el_marker2'].map(id => [id, ctx.element(id).node]));\n  const original = Object.fromEntries(Object.entries(nodes).map(([id, node]) => [id, node.style.transform || '']));\n  const pose = (id, x = 0, y = 0, scale = 1, turn = 0) => `${original[id]} translate(${x}px, ${y}px) scale(${scale}) rotate(${turn}deg)`;\n  // Relative translations never replace project x/y/size/rotation: the original transform stays first.\n  let particleAnimations = [];\n  let particles = [];\n  const clearParticles = () => {\n    for (const animation of particleAnimations) animation.cancel();\n    for (const particle of particles) particle.remove();\n    particleAnimations = [];\n    particles = [];\n  };\n  return {\n    async step(index) {\n      if (index === 0) {\n        // A click starts a linked camera push; the two cards then rise without another click.\n        await Promise.all(ids.map(id => ctx.animate(nodes[id], [\n          { transform: pose(id) }, { transform: pose(id, -120, 0, .85) }\n        ], { duration: 640, easing: 'ease-in-out', fill: 'forwards' })));\n        ids.forEach(id => { nodes[id].style.transform = pose(id, -120, 0, .85); });\n        await Promise.all(['el_card2a', 'el_card2b'].map((id, i) => ctx.animate(nodes[id], [\n          { transform: pose(id, -120, 0, .85) }, { transform: pose(id, -120, i ? -60 : -30, .85, i ? -6 : 0) }\n        ], { duration: 420, fill: 'forwards' })));\n        nodes.el_card2a.style.transform = pose('el_card2a', -120, -30, .85);\n        nodes.el_card2b.style.transform = pose('el_card2b', -120, -60, .85, -6);\n      } else if (index === 1 || index === 2) {\n        const marker = nodes.el_marker2;\n        const start = index === 1 ? pose('el_marker2') : pose('el_marker2', -120, -80);\n        const end = index === 1 ? pose('el_marker2', -120, -80) : pose('el_marker2', 280, -80);\n        const before = index === 1 ? ctx.element('el_marker2').base.fill : '#facc15';\n        const after = index === 1 ? '#facc15' : '#ef4444';\n        await ctx.animate(marker, [{ transform: start, backgroundColor: before }, { transform: end, backgroundColor: after }], { duration: 490, fill: 'forwards' });\n        marker.style.transform = end;\n        marker.style.backgroundColor = after;\n      } else if (index === 3) {\n        // Anime.js is vendored locally; particles start at the marker's live position.\n        const { animate } = await ctx.importModule('/vendor/anime.esm.min.js');\n        const marker = nodes.el_marker2;\n        const markerRect = marker.getBoundingClientRect();\n        const rootRect = ctx.root.getBoundingClientRect();\n        const scaleX = rootRect.width / ctx.project.artboard.width;\n        const scaleY = rootRect.height / ctx.project.artboard.height;\n        const centerX = (markerRect.left + markerRect.width / 2 - rootRect.left) / scaleX;\n        const centerY = (markerRect.top + markerRect.height / 2 - rootRect.top) / scaleY;\n        for (let i = 0; i < 20; i++) {\n          const dot = document.createElement('span');\n          dot.style.cssText = `position:absolute;pointer-events:none;width:9px;height:9px;border-radius:50%;background:${i % 2 ? '#facc15' : '#38bdf8'};left:${centerX}px;top:${centerY}px;z-index:9999`;\n          ctx.root.append(dot);\n          particles.push(dot);\n          const angle = i * Math.PI * 2 / 20;\n          particleAnimations.push(animate(dot, { x: Math.cos(angle) * (70 + i * 3), y: Math.sin(angle) * (70 + i * 3), opacity: [1, 0], scale: [1, .25], duration: 720, ease: 'out(3)' }));\n        }\n        ctx.signal.addEventListener('abort', clearParticles, { once: true });\n        const photoFilter = nodes.el_photo2.style.filter || 'none';\n        const tintOpacity = ctx.element('el_tint2').base.opacity ?? 1;\n        await Promise.all([\n          ctx.animate(nodes.el_photo2, [{ filter: photoFilter }, { filter: `${photoFilter === 'none' ? '' : photoFilter} grayscale(1)` }], { duration: 720, fill: 'forwards' }),\n          ctx.animate(nodes.el_tint2, [{ opacity: tintOpacity }, { opacity: 0 }], { duration: 720, fill: 'forwards' }),\n          ctx.timer(730)\n        ]);\n        clearParticles();\n      }\n    },\n    async transition({ from, to }) {\n      const fromOpacity = Number.parseFloat(from.style.opacity || '1');\n      const toOpacity = Number.parseFloat(to.style.opacity || '1');\n      await Promise.all([\n        ctx.animate(from, [{ opacity: fromOpacity, transform: 'translateX(0)' }, { opacity: 0, transform: 'translateX(-8%)' }], { duration: 600, fill: 'forwards' }),\n        ctx.animate(to, [{ opacity: 0, transform: 'translateX(8%)' }, { opacity: toOpacity, transform: 'translateX(0)' }], { duration: 600, fill: 'forwards' })\n      ]);\n    },\n    dispose() { clearParticles(); }\n  };\n}"
-      }
+        "steps": 3
+      },
+      "edits": []
     },
     {
       "id": "page_clip3",
-      "name": "3 裁切与分组：自由代码动效",
-      "background": "#fafaf9",
-      "elements": [
-        {
-          "id": "el_clipimg3",
-          "type": "image",
-          "name": "多边形裁切的照片",
-          "x": 160,
-          "y": 160,
-          "width": 800,
-          "height": 600,
-          "zIndex": 1,
-          "asset": "asset_city01",
-          "fit": "cover",
-          "effects": {
-            "clip": {
-              "type": "polygon",
-              "points": [
-                [
-                  50,
-                  0
-                ],
-                [
-                  100,
-                  50
-                ],
-                [
-                  50,
-                  100
-                ],
-                [
-                  0,
-                  50
-                ]
-              ]
-            }
-          }
-        },
-        {
-          "id": "el_group3",
-          "type": "group",
-          "name": "右侧说明组",
-          "x": 1100,
-          "y": 200,
-          "width": 640,
-          "height": 520,
-          "zIndex": 2,
-          "children": [
-            {
-              "id": "el_gbox3",
-              "type": "shape",
-              "name": "组背景",
-              "x": 0,
-              "y": 0,
-              "width": 640,
-              "height": 520,
-              "zIndex": 0,
-              "shape": "rect",
-              "fill": "#ffffff",
-              "stroke": {
-                "color": "#d6d3d1",
-                "width": 2
-              },
-              "cornerRadius": 32
-            },
-            {
-              "id": "el_gtitle3",
-              "type": "text",
-              "name": "组标题",
-              "x": 40,
-              "y": 40,
-              "width": 560,
-              "height": 68,
-              "zIndex": 1,
-              "text": "分组：整体一起动",
-              "font": "font_inter",
-              "fontSize": 48,
-              "fontWeight": 600,
-              "color": "#1c1917"
-            },
-            {
-              "id": "el_gtri3",
-              "type": "shape",
-              "name": "三角形",
-              "x": 40,
-              "y": 160,
-              "width": 240,
-              "height": 240,
-              "zIndex": 1,
-              "shape": "polygon",
-              "fill": "#0ea5e9",
-              "stroke": null,
-              "points": [
-                [
-                  50,
-                  0
-                ],
-                [
-                  100,
-                  100
-                ],
-                [
-                  0,
-                  100
-                ]
-              ]
-            },
-            {
-              "id": "el_gnote3",
-              "type": "text",
-              "name": "组内说明",
-              "x": 320,
-              "y": 160,
-              "width": 300,
-              "height": 126,
-              "zIndex": 1,
-              "text": "子元素坐标相对分组左上角。用户拖动整组时，子元素一起走。",
-              "font": "font_inter",
-              "fontSize": 28,
-              "lineHeight": 1.5,
-              "color": "#44403c"
-            }
-          ]
-        },
-        {
-          "id": "el_pending3",
-          "type": "text",
-          "name": "待排版提示",
-          "x": 160,
-          "y": 860,
-          "width": 1600,
-          "height": 40,
-          "zIndex": 3,
-          "text": "素材 asset_newpic1 标记为待排版：用户拖进来了，agent 下一轮把它排进页面。",
-          "font": null,
-          "fontSize": 28,
-          "color": "#78716c"
-        }
-      ],
+      "name": "3 裁切与分组",
+      "file": "pages/page_clip3.html",
+      "notes": "素材 asset_newpic1（用户新拖进来的照片）还没排进页面。",
       "motion": {
-        "steps": 2,
-        "source": "export default async function (ctx) {\n  const photo = ctx.element('el_clipimg3').node;\n  const group = ctx.element('el_group3').node;\n  const triangle = ctx.element('el_gtri3').node;\n  const groupOrigin = group.style.transform || '';\n  const triangleOrigin = triangle.style.transform || '';\n  return {\n    async step(index) {\n      if (index === 0) {\n        await ctx.animate(photo, [\n          { clipPath: 'polygon(50% 0%,100% 50%,50% 100%,0% 50%)' },\n          { clipPath: 'polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%)' }\n        ], { duration: 700, fill: 'forwards' });\n      } else if (index === 1) {\n        await Promise.all([\n          ctx.animate(group, [{ transform: groupOrigin || 'none' }, { transform: `${groupOrigin} translateX(-80px) scale(1.05)` }], { duration: 560, fill: 'forwards' }),\n          ctx.animate(triangle, [{ transform: triangleOrigin || 'none' }, { transform: `${triangleOrigin} rotate(180deg)` }], { duration: 560, fill: 'forwards' })\n        ]);\n      }\n    },\n    async transition({ from, to }) {\n      if (!to) return;\n      const toOpacity = Number.parseFloat(to.style.opacity || '1');\n      await ctx.animate(to, [{ opacity: 0 }, { opacity: toOpacity }], { duration: 500, fill: 'forwards' });\n    },\n    dispose() {}\n  };\n}"
-      }
+        "steps": 2
+      },
+      "edits": []
     }
   ]
 }

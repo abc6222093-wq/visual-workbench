@@ -13,6 +13,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const core = require('./lib/core.cjs');
+const editMenu = require('./lib/edit-menu.cjs');
+// 应用版本（desktop/package.json）。写进窗口的 User-Agent，工作台据此提示「应用是旧版本，要重新制作」
+const DESKTOP_VERSION = require('./package.json').version;
 
 const SMOKE = process.argv.includes('--smoke');
 const SMOKE_TIMEOUT_MS = 90_000;
@@ -58,14 +61,22 @@ function showError(message, detail) {
 }
 
 function setMenu() {
-  const isMac = process.platform === 'darwin';
-  const template = [
-    ...(isMac ? [{ label: '视觉工作台', submenu: [{ role: 'about', label: '关于视觉工作台' }, { type: 'separator' }, { role: 'hide', label: '隐藏' }, { role: 'quit', label: '关闭工作台' }] }] : []),
-    { label: '编辑', submenu: [{ role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' }, { role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' }, { role: 'selectAll', label: '全选' }] },
-    { label: '显示', submenu: [{ role: 'reload', label: '重新载入' }, { role: 'toggleDevTools', label: '开发者工具', accelerator: isMac ? 'Alt+Command+I' : 'F12' }, { type: 'separator' }, { role: 'togglefullscreen', label: '全屏' }] },
-    { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭工作台' }] },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // 编辑菜单用 role：Mac 上 Cmd+X/C/V/A/Z 在所有输入框可用（没有这个菜单，快捷键在 Mac 上不生效）
+  Menu.setApplicationMenu(Menu.buildFromTemplate(editMenu.appMenuTemplate(process.platform === 'darwin')));
+}
+
+/**
+ * 右键：可编辑区域弹原生的剪切 / 复制 / 粘贴 / 全选；非编辑区有选中文字只给「复制」；其他地方不弹。
+ * 页面 iframe（沙箱）里改字时右键，事件仍在窗口的 webContents 上触发，params.frame 指向那个 iframe；
+ * popup 把 frame 传过去，菜单项用 role（作用于聚焦的 frame），再绑定 contents 兜底。
+ */
+function attachContextMenu(contents) {
+  contents.on('context-menu', (_event, params) => {
+    const template = editMenu.contextMenuTemplate(params);
+    if (!template) return;
+    const owner = BrowserWindow.fromWebContents(contents) || win || undefined;
+    Menu.buildFromTemplate(editMenu.bindToContents(template, contents)).popup({ window: owner, frame: params.frame || undefined });
+  });
 }
 
 /** 找仓库；找不到就让用户选文件夹，写进 ~/.visual-workbench/desktop.json。 */
@@ -193,6 +204,10 @@ function createWindow() {
     e.preventDefault();
     if (core.isExternalOpenable(url)) shell.openExternal(url);
   });
+  attachContextMenu(win.webContents);
+  // User-Agent 末尾带应用版本（页面和页面里的 iframe 都读得到 navigator.userAgent）
+  win.webContents.setUserAgent(core.desktopUserAgent(win.webContents.getUserAgent(), DESKTOP_VERSION));
+  log('应用版本', DESKTOP_VERSION, 'User-Agent：', win.webContents.getUserAgent());
   win.once('ready-to-show', () => win.show());
   win.on('close', (e) => { if (!closing) { e.preventDefault(); shutdownAndQuit(0); } else e.preventDefault(); });
   win.webContents.once('did-finish-load', () => {

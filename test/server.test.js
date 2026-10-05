@@ -42,7 +42,7 @@ test('library upload, project asset copy, and file serving',async t=>{
  const data=Buffer.from('tiny').toString('base64');
  const lib=await request('/api/library','POST',{name:'tiny.png',data,width:2,height:2,mime:'image/png'}); assert.equal(lib.status,201);
  const library=(await request('/api/library')).body; assert.equal(library.length,1); assert.equal(library[0].width,2); assert.equal(library[0].name,'tiny.png');
- const asset=await request('/api/projects/assets/assets','POST',{libraryFile:lib.body.file,width:2,height:2}); assert.equal(asset.status,201); assert.equal(asset.body.asset.pendingLayout,true); assert.equal(asset.body.asset.source.type,'library');
+ const asset=await request('/api/projects/assets/assets','POST',{libraryFile:lib.body.file,width:2,height:2}); assert.equal(asset.status,201); assert.equal(asset.body.asset.pendingLayout,undefined); assert.equal(asset.body.asset.source.type,'library');
  const served=await fetch(`${base}/data/projects/assets/${asset.body.asset.file}`); assert.equal(served.status,200); assert.equal(await served.text(),'tiny');
 });
 

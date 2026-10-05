@@ -50,12 +50,15 @@ const tmpName = (prefix) => `.${prefix}-${randomBytes(6).toString('hex')}.tmp`;
  */
 function listFiles(dir, base, skipTop = []) {
   const out = [];
-  for (const ent of readdirSync(dir, { withFileTypes: true })) {
-    if (ent.name.startsWith('.')) continue;
-    if (dir === base && skipTop.includes(ent.name)) continue;
-    const abs = join(dir, ent.name);
-    if (ent.isDirectory()) out.push(...listFiles(abs, base, skipTop));
-    else if (ent.isFile()) out.push(relative(base, abs).split('\\').join('/'));
+  for (const name of readdirSync(dir)) {
+    if (name.startsWith('.')) continue;
+    if (dir === base && skipTop.includes(name)) continue;
+    const abs = join(dir, name);
+    // 用 lstat 判断类型，不依赖 readdir 返回的类型（网盘等文件系统上可能不准）；符号链接一律跳过
+    let st;
+    try { st = lstatSync(abs); } catch { continue; }
+    if (st.isDirectory()) out.push(...listFiles(abs, base, skipTop));
+    else if (st.isFile()) out.push(relative(base, abs).split('\\').join('/'));
   }
   return out.sort();
 }
@@ -116,9 +119,17 @@ export function saveVersion({ projectDir, note = '', by = 'agent', auto }) {
 
   const files = orderFiles(snapshotFiles(projectDir));
   const objects = {};
+  const saved = [];
   for (const rel of files) {
     // 只读一次：算哈希和写对象用同一份内容，避免中途被改导致对象与哈希不符
-    const data = readFileSync(join(projectDir, rel));
+    let data;
+    try {
+      if (!lstatSync(join(projectDir, rel)).isFile()) continue; // 列出后被换成了目录 / 链接：跳过
+      data = readFileSync(join(projectDir, rel));
+    } catch (e) {
+      if (e.code === 'ENOENT' || e.code === 'EISDIR' || e.code === 'ENOTDIR') continue; // 存版途中被删 / 改成目录
+      throw e;
+    }
     const hash = createHash('sha256').update(data).digest('hex');
     const obj = putObject(objectsDir, hash, data);
     const dest = join(versionDir, rel);
@@ -130,6 +141,7 @@ export function saveVersion({ projectDir, note = '', by = 'agent', auto }) {
       writeFileSync(dest, data);
     }
     objects[rel] = hash;
+    saved.push(rel);
   }
 
   const meta = {
@@ -138,7 +150,7 @@ export function saveVersion({ projectDir, note = '', by = 'agent', auto }) {
     by,
     projectId: project.id,
     projectName: project.name,
-    files,
+    files: saved,
     objects,
     ...(auto ? { auto } : {}),
   };
@@ -223,9 +235,11 @@ export function restoreVersion({ projectDir, versionId, by = 'user' }) {
     throw new Error(`版本 ${versionId} 里没有 ${PROJECT_LAYOUT.file}，无法退回`);
   }
 
-  const check = validateProject(versionDir);
-  if (!check.ok) {
-    const detail = check.errors.map((e) => `[${e.code}] ${e.path} ${e.message}`).join('；');
+  // 只查结构：页面内容类问题（修改单对不上等）不挡退回；旧格式版本可以退回，打开时会再转换
+  const check = validateProject(versionDir, { structural: true });
+  const blocking = check.errors.filter((e) => e.code !== 'LEGACY_FORMAT');
+  if (blocking.length) {
+    const detail = blocking.map((e) => `[${e.code}] ${e.path} ${e.message}`).join('；');
     throw new Error(`版本 ${versionId} 校验未通过，未做任何改动：${detail}`);
   }
 
@@ -235,9 +249,10 @@ export function restoreVersion({ projectDir, versionId, by = 'user' }) {
   const files = orderFiles(listFiles(versionDir, versionDir, [META]));
   const keep = new Set(files);
 
-  // 1. 先写其他文件
+  // 1. 先写其他文件（路径上被目录 / 文件占住的先清掉，否则 rename 会报 EISDIR / ENOTDIR）
   for (const rel of files) {
     if (rel === PROJECT_LAYOUT.file) continue;
+    clearPathFor(projectDir, rel);
     copyInto(join(versionDir, rel), join(projectDir, rel), 'restore');
   }
   // 2. 删除快照范围内多出来的文件（空目录保留）
@@ -252,6 +267,25 @@ export function restoreVersion({ projectDir, versionId, by = 'user' }) {
   pruneAutoBackups(projectDir);
 
   return { backup, restoredFrom: versionDir, files };
+}
+
+/**
+ * 让 projectDir/rel 可以写成普通文件：路径中间某段是文件的删掉；终点是目录（或链接）的整个删掉。
+ * 这些东西在退回前已存进「退回前自动存档」，删掉是安全的。只在项目文件夹内操作。
+ */
+function clearPathFor(projectDir, rel) {
+  const parts = rel.split('/');
+  let cur = projectDir;
+  for (let i = 0; i < parts.length; i++) {
+    cur = join(cur, parts[i]);
+    let st;
+    try { st = lstatSync(cur); } catch { return; }
+    const last = i === parts.length - 1;
+    if (last ? !st.isFile() : !st.isDirectory()) {
+      rmSync(cur, { recursive: true, force: true });
+      return;
+    }
+  }
 }
 
 /** 读版本的 meta.json，缺失或损坏返回 null。 */

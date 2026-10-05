@@ -202,7 +202,14 @@ function isExternalOpenable(url) {
   try { return ['http:', 'https:', 'mailto:'].includes(new URL(url).protocol); } catch { return false; }
 }
 
+/** 窗口的 User-Agent：末尾追加 ` VisualWorkbenchDesktop/<版本>`（已有就换成这个版本，不重复追加）。工作台据此判断应用是不是旧版本。 */
+function desktopUserAgent(userAgent, version) {
+  const base = String(userAgent || '').replace(/\s*VisualWorkbenchDesktop\/\S*/g, '').trim();
+  return `${base} VisualWorkbenchDesktop/${version}`.trim();
+}
+
 module.exports = {
+  desktopUserAgent,
   PORT, ORIGIN, missingNodeChinese, portBusyChinese, FLUSH_SCRIPT,
   isRepoDir, resolveRepoDir, missingRepoChinese, userDesktopConfigPath,
   augmentedPath, nodeCommand, nodeVersionOk, checkNode, serverArgs,

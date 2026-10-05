@@ -1,256 +1,132 @@
-// 旧 HTML 导入 · 把分析结果写成项目：素材（位图压到显示尺寸 2 倍以内转 webp，矢量图存 .svg，截图存 .png）、
-// 字体（能拿到文件的 @font-face 复制进 fonts/）、页面元素、每页「迁移说明」notes、import/ 里的原文件和 README.md。
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync } from 'node:fs';
-import { join, resolve, sep, dirname } from 'node:path';
-import sharp from 'sharp';
+// 旧 HTML / 网页导入（第 12 轮）· 写项目：每页一个 pages/<页面编号>.html（保留原来的 HTML、CSS、脚本和动画，已标出可改的文字和图片），
+// 资源已经由 resources.js 复制进 assets/、fonts/；这里写 project.json（格式 v3）、每页「迁移说明」notes、import/ 里的原文件和 README.md。
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { WEB_DEVICES, WEB_DEFAULT_ARTBOARD } from '../../web/project-kinds.js';
 
-const hash = b => createHash('sha256').update(b).digest('hex');
 const rid = (prefix, n = 12) => `${prefix}${randomUUID().replaceAll('-', '').slice(0, n)}`;
-const GENERIC = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace', 'ui-rounded', '-apple-system', 'blinkmacsystemfont', 'math', 'emoji', 'fangsong']);
-
-/** data: 地址、本地服务地址、抓网页时收到的图片 / 字体（resources）→ 字节；其他网络地址返回 null。 */
-export function bytesOf(url, { srcDir, origin, resources }) {
-  if (typeof url !== 'string') return null;
-  if (resources?.has(url)) return resources.get(url);
-  if (url.startsWith('data:')) {
-    const m = /^data:([^,]*?),(.*)$/s.exec(url); if (!m) return null;
-    try { return /;base64$/i.test(m[1]) ? Buffer.from(m[2], 'base64') : Buffer.from(decodeURIComponent(m[2]), 'utf8'); } catch { return null; }
-  }
-  if (origin && url.startsWith(origin + '/')) {
-    let path; try { path = decodeURIComponent(new URL(url).pathname); } catch { return null; }
-    const root = resolve(srcDir), file = resolve(root, '.' + path);
-    if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) return null;
-    return readFileSync(file);
-  }
-  return null;
-}
-const isRemote = (url, origin) => /^https?:\/\//i.test(url) && !(origin && url.startsWith(origin + '/'));
-function fontExt(b) {
-  const sig = b.subarray(0, 4).toString('latin1');
-  if (sig === 'wOF2') return '.woff2'; if (sig === 'wOFF') return '.woff'; if (sig === 'OTTO') return '.otf';
-  if (sig === 'true' || b.readUInt32BE(0) === 0x00010000) return '.ttf';
-  return null;
-}
-function fontWeight(w) {
-  const parts = String(w || '400').trim().split(/\s+/);
-  if (parts.length > 1) return 'variable';
-  const n = parts[0] === 'bold' ? 700 : parts[0] === 'normal' ? 400 : Number(parts[0]);
-  return Number.isFinite(n) ? Math.max(100, Math.min(900, Math.round(n / 100) * 100)) : 400;
-}
-// SVG 只收纯图形；带脚本、事件、外链等的改成位图
-function safeSvg(text) { return /<svg[\s>]/i.test(text) && !/<script|<foreignObject|[\s"'/]on[a-z]+\s*=|javascript\s*:|<!ENTITY/i.test(text) && !/href\s*=\s*["']?\s*(?:https?:)?\/\//i.test(text); }
-function svgSize(text) {
-  const root = /<svg\b[^>]*>/i.exec(text)?.[0] || ''; const attr = n => new RegExp(`\\s${n}\\s*=\\s*["']([\\d.]+)(px)?["']`, 'i').exec(root)?.[1];
-  const w = Math.round(Number(attr('width'))), h = Math.round(Number(attr('height')));
-  return w >= 1 && h >= 1 ? { width: w, height: h } : {};
-}
-const pngSize = b => (b.length > 24 ? { width: b.readUInt32BE(16), height: b.readUInt32BE(20) } : {});
-const clean = s => String(s).replace(/\s+/g, ' ').trim();
-const fileSafe = s => String(s).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'font';
-const describe = list => list.map(({ name, count }) => `${name} ×${count}`).join('、');
 const deviceLabel = d => WEB_DEVICES[d]?.label || d;
-/** 跳过的网址 → 一行一条的中文说明。 */
+const short = (s, n) => Array.from(String(s || '').replace(/\s+/g, ' ').trim()).slice(0, n).join('');
 export const skippedLines = skipped => (skipped || []).map(s => `${s.url}（${(s.devices || []).map(deviceLabel).join('、') || '全部'}）：${s.reason}`);
+const list = (set, n = 12) => { const a = [...set]; return a.length > n ? `${a.slice(0, n).join('、')} 等 ${a.length} 个` : a.join('、'); };
 
-/**
- * 网页：把按 DOM 顺序排好的元素按「由外到内的分组编号」嵌成分组。只有一个子元素的分组去掉外壳，空分组不要；
- * 分组框 = 子元素框的并集，子元素坐标改成相对分组左上角，层级在每一层里从 1 往上排。
- */
-export function nestGroups(entries, meta = {}) {
-  const root = { children: [] }, nodes = new Map();
-  for (const { el, groups = [] } of entries) {
-    let parent = root, path = '';
-    for (const gid of groups) {
-      path += '/' + gid;
-      let node = nodes.get(path);
-      if (!node) { node = { gid, children: [] }; nodes.set(path, node); parent.children.push(node); }
-      parent = node;
-    }
-    parent.children.push(el);
+/** 一页的迁移说明。 */
+function pageNotes({ res, index, analysis, web, entry, now, skipped }) {
+  const lines = [];
+  if (web) {
+    lines.push(`迁移说明（网页导入，${now.slice(0, 10)}）`,
+      `- 来源：${res.url ? `网址 ${res.url}${res.finalUrl && res.finalUrl !== res.url ? `（实际打开 ${res.finalUrl}）` : ''}` : `本地文件 import/${res.file || entry}`}`,
+      `- 设备：${deviceLabel(res.device)}，窗口 ${WEB_DEVICES[res.device].width} × ${WEB_DEVICES[res.device].height}；整页高 ${res.height}`);
+    if (res.truncated) lines.push(`- 原网页整页高 ${res.truncated}，超过 20000，工作台只滚到 20000`);
+    lines.push(res.url ? '- 页面文件是打开网址后的当前画面（DOM），读得到的样式表已内联进 <style>' : '- 页面文件是原网页文件本身（未执行脚本时的原文）');
+  } else {
+    lines.push(`迁移说明（旧 HTML 导入，${now.slice(0, 10)}）`, `- 分页方式：${analysis.label}；这是原文件的第 ${index + 1} 页`);
+    if (analysis.kind === 'fallback' && analysis.pages.length > 1) lines.push(`- 保底切分：页面文件是整份原文档，用 body 的负上边距露出第 ${index + 1} 屏；分页位置可能切断内容，需要时请按内容重新整理这一页`);
+    else if (analysis.kind !== 'deck' && analysis.kind !== 'fallback') lines.push('- 页面文件只保留了这一页的那一块（祖先容器的标签和 class 还在，原样式的选择器能对上），其他页去掉了');
+    if (res.zoom && Math.abs(res.zoom - 1) > 0.02) lines.push(`- 原页面宽度和画板不同，已用 zoom ${Math.round(res.zoom * 100) / 100} 放大到画板宽（style[data-vw-import]）`);
   }
-  const make = node => {
-    if (!node.gid) return node; // 元素
-    const kids = node.children.map(make).filter(Boolean);
-    if (!kids.length) return null;
-    if (kids.length === 1) return kids[0];
-    const x = Math.min(...kids.map(k => k.x)), y = Math.min(...kids.map(k => k.y));
-    const r = Math.max(...kids.map(k => k.x + k.width)), b = Math.max(...kids.map(k => k.y + k.height));
-    kids.forEach((k, i) => { k.x = round1(k.x - x); k.y = round1(k.y - y); k.zIndex = i + 1; });
-    const m = meta[node.gid] || {};
-    return { id: rid('el_'), type: 'group', name: m.name || '分组', x: round1(x), y: round1(y), width: Math.max(1, round1(r - x)), height: Math.max(1, round1(b - y)), zIndex: 0, ...(m.origin?.selector ? { origin: m.origin } : {}), children: kids };
-  };
-  const out = root.children.map(make).filter(Boolean);
-  out.forEach((k, i) => { k.zIndex = i + 1; });
-  return out;
+  if (res.error) lines.push(`- 这一页导入失败：${res.error}；请参照原文件重做这一页`);
+  const st = res.stats || { text: 0, image: 0 };
+  lines.push(`- 自动标记：可改的文字 ${st.text} 处（data-vw-id t1、t2…，能力 text move color），可裁切的图片 ${st.image} 张（i1、i2…，能力 move resize crop），纯色色块 ${st.block || 0} 个（b1、b2…，能力 move resize background），整页背景 ${st.background || 0} 处（bg1、bg2…，能力 background，只改颜色）；data-vw-origin 是原网页里的定位`);
+  const n = res.notes;
+  if (n) {
+    const kept = [];
+    if (n.styles) kept.push(`<style> ${n.styles} 段`);
+    if (res.log?.css.size) kept.push(`外部样式表 ${res.log.css.size} 个（复制进 assets/）`);
+    if (n.scripts.inline) kept.push(`内联脚本 ${n.scripts.inline} 段`);
+    if (res.log?.scripts.size) kept.push(`外部脚本 ${res.log.scripts.size} 个（复制进 assets/：${list(res.log.scripts, 6)}）`);
+    if (kept.length) lines.push(`- 保留了：${kept.join('；')}`);
+    if (!web && n.scripts.inline && !['deck', 'fallback'].includes(analysis.kind)) lines.push('- 原脚本是整份文档共用的：其他页的元素已去掉，脚本里找不到元素时可能报错，请检查后按这一页改');
+    if (n.removedScripts?.length) lines.push(`- 网址抓取的页面已经是脚本运行后的样子，脚本没有保留（避免重复执行）：${list(new Set(n.removedScripts), 8)}`);
+    if (n.fragments) lines.push(`- reveal.js 的 .fragment（分步出现）${n.fragments} 处已加 visible，页面显示的是最后一步；要逐步出现请用 vw.motion 写并设置 motion.steps`);
+    if (n.canvas) lines.push(`- 页面里有 ${n.canvas} 个 <canvas>：内容靠脚本画${res.url ? '，网址抓取时脚本没有保留，画布会是空的' : '，脚本保留了就会照样画'}`);
+    if (n.iframes?.length) lines.push(`- 内嵌框架（iframe）没有复制：${list(new Set(n.iframes), 6)}`);
+  }
+  const c = res.clue;
+  if (c) {
+    const anim = [...(c.running || []).map(r => `${r.name}（${r.count} 个元素）`)];
+    if (anim.length) lines.push(`- 原来在跑的动画（保留在页面里，会照常播放）：${anim.join('、')}`);
+    if (c.keyframes?.length) lines.push(`- 样式表里的关键帧（@keyframes，已保留）：${c.keyframes.join('、')}`);
+    if (c.libs?.length) lines.push(`- 原页面用到的动画 / 脚本库：${c.libs.join('、')}`);
+    if (c.attrs?.length) lines.push(`- 分步线索：${c.attrs.map(a => `${a.name} ×${a.count}`).join('、')}`);
+  }
+  if (res.log?.remote.size) lines.push(`- 没下载到的网络地址（保留原样；导出的文件不能依赖网络，请换成本地文件或删掉）：${list(res.log.remote, 10)}`);
+  if (res.log?.missing.size) lines.push(`- 原文件里引用了但找不到的文件（引用已去掉）：${list(res.log.missing, 10)}`);
+  if (res.log?.missingFonts.size) lines.push(`- 缺失字体（没有拿到字体文件）：${list(res.log.missingFonts)}`);
+  if (res.log?.fonts.size) lines.push(`- 复制进 fonts/ 的字体：${list(res.log.fonts)}`);
+  lines.push('- 本轮导入不截图：能保留的都按原样保留了；原来的 CSS / JS 动画在页面里自己跑。需要点击推进的动效请用 vw.motion 写（见 docs/format.md §6）');
+  if (index === 0 && skipped?.length) lines.push('- 跳过的网址：', ...skippedLines(skipped).map(l => `  - ${l}`));
+  lines.push(web && res.url ? `- 导入时的网页快照：import/pages/${String(index + 1).padStart(2, '0')}-${res.device}.html` : `- 原文件：import/${res.file || entry}`);
+  return lines.join('\n');
 }
-const round1 = v => Math.round(v * 10) / 10;
-const countAll = list => list.reduce((n, e) => { const c = e.type === 'group' ? countAll(e.children) : { all: 0, groups: 0 }; return { all: n.all + 1 + c.all, groups: n.groups + (e.type === 'group' ? 1 : 0) + c.groups }; }, { all: 0, groups: 0 });
 
-/** 写项目到 projectDir（临时目录）；返回 { project, summary }。不校验、不改名，交给调用方。 */
 export async function buildProject({ analysis, srcDir, projectDir, id, name, preset, width, height, entry, files = [], startedAt = Date.now(), check = () => {} }) {
-  const { origin, resources } = analysis, web = analysis.kind === 'web';
-  for (const rel of ['assets', 'fonts', 'versions', 'import']) mkdirSync(join(projectDir, rel), { recursive: true });
-  const now = new Date().toISOString();
-  // ---------- 字体 ----------
-  const fonts = [], fontKeys = new Map(), missing = new Set(), remoteFaces = new Set();
-  for (const page of analysis.pages) {
-    for (const family of page.fonts?.remote || []) missing.add(family);
-    for (const face of page.fonts?.faces || []) {
-      if (!face.family) continue;
-      let bytes = null;
-      for (const u of face.urls) { const b = bytesOf(u.url, { srcDir, origin, resources }); if (b && b.length > 12 && fontExt(b)) { bytes = b; break; } }
-      if (!bytes) { if (face.urls.some(u => isRemote(u.url, origin))) { missing.add(face.family); remoteFaces.add(face.family); } continue; }
-      const weight = fontWeight(face.weight), style = /italic|oblique/.test(face.style) ? 'italic' : 'normal';
-      const key = `${face.family.toLowerCase()}|${weight}|${style}|${hash(bytes)}`;
-      const partial = !!face.range && !/^U\+0+-10FFFF$/i.test(face.range.trim());
-      if (fontKeys.has(key)) { (page.fontIds ||= []).push({ id: fontKeys.get(key), partial }); continue; }
-      const fid = rid('font_', 10), file = `fonts/${fileSafe(face.family)}-${weight}${style === 'italic' ? '-italic' : ''}-${fid.slice(5, 11)}${fontExt(bytes)}`;
-      writeFileSync(join(projectDir, file), bytes);
-      fontKeys.set(key, fid); fonts.push({ id: fid, family: face.family, file, weight, style }); (page.fontIds ||= []).push({ id: fid, partial });
-    }
-  }
-  for (const f of fonts) missing.delete(f.family);
-  // 同名字体有多份（各页各自的子集）时，优先用这一页 @font-face 里登记的、不带 unicode-range 的那份
-  const fontFor = (family, weight, page) => {
-    const all = fonts.filter(f => f.family.toLowerCase() === String(family || '').toLowerCase()); if (!all.length) return null;
-    const mine = page?.fontIds || [], pick = ids => all.filter(f => ids.some(x => x.id === f.id));
-    const full = pick(mine.filter(x => !x.partial)), list = full.length ? full : pick(mine).length ? pick(mine) : all;
-    return (list.find(f => f.weight === 'variable') || list.reduce((a, b) => (Math.abs(b.weight - weight) < Math.abs(a.weight - weight) ? b : a))).id;
-  };
-  // ---------- 图片 ----------
-  const sources = new Map(); let missingImages = 0;
-  for (const page of analysis.pages) for (const item of page.items) {
-    if (item.kind !== 'image') continue;
-    const bytes = item.svg ? Buffer.from(item.svg, 'utf8') : bytesOf(item.src, { srcDir, origin, resources });
-    if (!bytes?.length) { item.skip = true; missingImages++; page.missing = [...(page.missing || []), String(item.src || '').slice(0, 160)]; continue; }
-    const key = hash(bytes); item.key = key;
-    const s = sources.get(key) || { bytes, w: 1, h: 1, name: item.name }; s.w = Math.max(s.w, item.width); s.h = Math.max(s.h, item.height); sources.set(key, s);
-  }
-  const assets = [], assetOf = new Map();
-  for (const [key, s] of sources) {
-    check();
-    const text = s.bytes.subarray(0, 4096).toString('utf8');
-    let data, ext, size = {};
-    try {
-      if (/<svg[\s>]/i.test(text) && safeSvg(s.bytes.toString('utf8'))) { data = s.bytes; ext = '.svg'; size = svgSize(s.bytes.toString('utf8')); if (!size.width) size = { width: Math.max(1, Math.round(s.w)), height: Math.max(1, Math.round(s.h)) }; }
-      else {
-        const out = await sharp(s.bytes, { animated: false, limitInputPixels: 268402689 }).rotate().resize({ width: Math.max(1, Math.ceil(s.w * 2)), height: Math.max(1, Math.ceil(s.h * 2)), fit: 'outside', withoutEnlargement: true }).webp({ quality: 86 }).toBuffer({ resolveWithObject: true });
-        data = out.data; ext = '.webp'; size = { width: out.info.width, height: out.info.height };
-      }
-    } catch { missingImages++; continue; }
-    const aid = rid('asset_'), file = `assets/${aid.slice(6)}${ext}`;
-    writeFileSync(join(projectDir, file), data);
-    assets.push({ id: aid, kind: 'image', file, name: clean(s.name || '图片').slice(0, 60) || '图片', ...size, pendingLayout: false, addedAt: now, source: { type: 'upload' } });
-    assetOf.set(key, aid);
-  }
-  // ---------- 页面 ----------
-  let elementsTotal = 0, shotsTotal = 0, groupsTotal = 0; const shotReasons = new Map();
+  const web = analysis.kind === 'web', now = new Date().toISOString();
+  mkdirSync(join(projectDir, 'pages'), { recursive: true });
+  const { store } = analysis;
   const pages = analysis.pages.map((res, index) => {
-    let elements = []; const shots = [], used = new Set(), entries = [];
-    let z = 1; const bg = [];
-    for (const item of res.items) {
-      const geo = { x: item.x, y: item.y, width: Math.max(1, item.width), height: Math.max(1, item.height), ...(item.rotation ? { rotation: item.rotation } : {}) };
-      const op = item.opacity !== undefined && item.opacity < 0.999 ? { opacity: Math.max(0, Math.round(item.opacity * 1000) / 1000) } : {};
-      let el = null;
-      if (item.kind === 'text') {
-        used.add(item.family);
-        el = { id: rid('el_'), type: 'text', name: clean(item.text).slice(0, 12) || '文字', ...geo, ...op, text: item.text, font: fontFor(item.family, item.fontWeight, res), fontSize: Math.max(1, item.fontSize), fontWeight: item.fontWeight, lineHeight: item.lineHeight, letterSpacing: item.letterSpacing, align: item.align, color: item.color, stroke: item.stroke, shadow: item.shadow };
-      } else if (item.kind === 'image') {
-        if (item.skip || !assetOf.has(item.key)) continue;
-        el = { id: rid('el_'), type: 'image', name: clean(item.name || '图片').slice(0, 30), ...geo, ...op, asset: assetOf.get(item.key), fit: item.fit || 'cover' };
-      } else if (item.kind === 'shape') {
-        el = { id: rid('el_'), type: 'shape', name: item.name || '色块', ...geo, ...op, shape: 'rect', fill: item.fill, stroke: item.stroke, ...(item.radius > 0 ? { cornerRadius: item.radius } : {}) };
-      } else if (item.kind === 'shot') {
-        if (!item.png) continue;
-        const aid = rid('asset_'), file = `assets/${aid.slice(6)}.png`;
-        writeFileSync(join(projectDir, file), item.png);
-        const label = item.role === 'background' ? '背景' : item.reason;
-        assets.push({ id: aid, kind: 'image', file, name: `[截图] 第 ${index + 1} 页 ${label}`, ...pngSize(item.png), pendingLayout: false, addedAt: now, source: { type: 'upload' } });
-        el = { id: rid('el_'), type: 'image', name: item.role === 'background' ? '[截图] 背景' : (item.name?.startsWith('[截图]') ? item.name : `[截图] ${item.reason}`), ...geo, asset: aid, fit: 'fill' };
-        if (item.role !== 'background') { shots.push(item.reason); shotReasons.set(item.reason, (shotReasons.get(item.reason) || 0) + 1); }
-      }
-      if (!el) continue;
-      if (item.effects && Object.keys(item.effects).length) el.effects = item.effects;
-      if (item.tint && el.type === 'image') el.tint = item.tint;
-      if (item.locked && el.type !== 'text') el.locked = true;
-      if (item.origin?.selector) el.origin = item.origin;
-      if (item.role === 'background') { el.locked = true; bg.push(el); } else if (web) entries.push({ el, groups: item.groups }); else { el.zIndex = z++; elements.push(el); }
-    }
-    if (web) elements = nestGroups(entries, res.groups);
-    bg.forEach((el, i) => { el.zIndex = i - bg.length; });
-    const all = [...bg, ...elements];
-    const counted = countAll(all);
-    elementsTotal += counted.all; groupsTotal += counted.groups; shotsTotal += shots.length;
-    const texts = res.items.filter(i => i.kind === 'text');
-    const title = texts.filter(t => t.heading).sort((a, b) => a.heading - b.heading)[0] || [...texts].sort((a, b) => b.fontSize - a.fontSize)[0];
-    let host = ''; try { host = new URL(res.url).hostname; } catch {}
-    const pageName = web ? `${clean(res.title || title?.text || host || entry || '网页').slice(0, 30)} · ${deviceLabel(res.device)}` : clean(analysis.names?.[index] || title?.text || '').slice(0, 20) || `第 ${index + 1} 页`;
-    // 迁移说明
-    const c = res.clue, lines = web
-      ? [`导入说明（网页导入，${now.slice(0, 10)}）`, `- 来源：${res.url ? `网址 ${res.url}${res.finalUrl && res.finalUrl !== res.url ? `（实际打开 ${res.finalUrl}）` : ''}` : `本地文件 import/${res.file || entry}`}`, `- 设备：${deviceLabel(res.device)}，窗口 ${WEB_DEVICES[res.device].width} × ${WEB_DEVICES[res.device].height}；整页高 ${res.height}`, '- 组件（导航栏、区块、卡片、按钮、列表项等）导入成分组；每个元素的 origin.selector 指向原网页里对应的元素']
-      : [`迁移说明（旧 HTML 导入，${now.slice(0, 10)}）`, `- 分页方式：${analysis.label}；这是原文件的第 ${index + 1} / ${analysis.pages.length} 页`];
-    if (web && res.truncated) lines.push(`- 原网页整页高 ${res.truncated}，超过上限 ${res.height}，下面的部分没有导入`);
-    if (c) {
-      lines.push(`- 原动画（播完后取的最后画面）：${c.running.length ? describe(c.running) : '没有观察到正在运行的 CSS 动画或过渡'}`);
-      if (c.keyframes.length) lines.push(`- 样式表里定义的关键帧：${c.keyframes.slice(0, 20).join('、')}`);
-      if (c.libs.length || c.scripts.length) lines.push(`- 动画库 / 脚本：${[...c.libs, ...c.scripts.filter(s => !c.libs.some(l => s.toLowerCase().includes(l.toLowerCase())))].slice(0, 15).join('、')}`);
-      if (c.attrs.length || c.fragments) lines.push(`- 分步线索：${[...(c.fragments ? [`.fragment ×${c.fragments}`] : []), ...c.attrs.map(a => `${a.name} ×${a.count}`)].join('、')}`);
-    }
-    if (shots.length) lines.push(`- 截成图片的块（名字带「[截图]」）：${describe([...shots.reduce((m, r) => m.set(r, (m.get(r) || 0) + 1), new Map())].map(([name, count]) => ({ name, count })))}`);
-    const pageMissing = [...used].filter(f => missing.has(f));
-    if (pageMissing.length) lines.push(`- 缺失字体（网络字体，没有下载，文字暂用系统默认字体）：${pageMissing.join('、')}`);
-    const unregistered = [...used].filter(f => f && !missing.has(f) && !GENERIC.has(f.toLowerCase()) && !fonts.some(x => x.family.toLowerCase() === f.toLowerCase()));
-    if (unregistered.length) lines.push(`- 用到但没有内嵌文件的字体（暂用系统默认字体）：${unregistered.join('、')}`);
-    if (res.missing?.length) lines.push(`- 没有取到的图片（网络地址或文件不存在，没有导入）：${[...new Set(res.missing)].slice(0, 10).join('、')}`);
-    if (res.limited) lines.push(`- 元素超过每页 300 个的上限，剩下的 ${res.limited} 个块合成一张截图`);
-    if (res.error) lines.push(`- 这一页分析失败（${res.error}），整页截成了一张图`);
-    if (web && index === 0 && analysis.skipped?.length) lines.push(`- 跳过的网址：${skippedLines(analysis.skipped).join('；')}`);
-    if (web) lines.push(res.url ? `- 导入时的网页快照：import/pages/${String(index + 1).padStart(2, '0')}-${res.device}.html；导入那一刻的项目：import/baseline.json` : `- 原文件：import/${entry}；导入那一刻的项目：import/baseline.json`, '- 原网页的动画、交互没有搬过来；需要时请按原网页的意图用新格式写 motion（不要搬旧代码）。');
-    else lines.push(`- 原文件：import/${entry}`, '- 请按原 HTML 的动画意图用新格式重写 motion（不要搬旧代码）。');
-    const page = { id: `page_i${String(index + 1).padStart(3, '0')}_${randomUUID().replaceAll('-', '').slice(0, 6)}`, name: pageName, notes: lines.join('\n'), background: res.bgGradient || res.background || '#ffffff', elements: all };
+    check();
+    const pageId = rid('page_'), file = `pages/${pageId}.html`;
+    writeFileSync(join(projectDir, file), res.html);
+    const title = short(res.title || res.clue?.title || name, 40);
+    const pageName = web ? `${title || name} · ${deviceLabel(res.device)}` : short(res.heading, 20) || short(analysis.names?.[index], 20) || `第 ${index + 1} 页`;
+    const page = { id: pageId, name: pageName, file, notes: pageNotes({ res, index, analysis, web, entry, now, skipped: analysis.skipped }), edits: [] };
     if (web) Object.assign(page, { device: res.device, size: { width: WEB_DEVICES[res.device].width, height: res.height } });
-    const capturedAt = res.capturedAt || now;
-    page.origin = res.url ? { url: res.url, capturedAt } : { file: web ? (res.file || entry) : entry, capturedAt };
+    page.origin = res.url ? { url: res.url, capturedAt: res.capturedAt } : { file: res.file || entry, capturedAt: res.capturedAt || now };
     return page;
   });
-  const project = web
-    ? { format: 'visual-workbench/project', formatVersion: 2, id, name, kind: 'web', ...(analysis.skipped?.length ? { description: `网页导入时跳过的网址：\n${skippedLines(analysis.skipped).join('\n')}` } : {}), createdAt: now, updatedAt: now, artboard: { ...WEB_DEFAULT_ARTBOARD }, assets, fonts, pages }
-    : { format: 'visual-workbench/project', formatVersion: 2, id, name, createdAt: now, updatedAt: now, artboard: { preset, width, height }, assets, fonts, pages };
-  const projectText = JSON.stringify(project, null, 2) + '\n';
-  writeFileSync(join(projectDir, 'project.json'), projectText);
+  const skipped = analysis.skipped || [];
+  const project = {
+    format: 'visual-workbench/project', formatVersion: 3, id, name,
+    ...(skipped.length ? { description: `网页导入时跳过的网址：\n${skippedLines(skipped).join('\n')}` } : {}),
+    kind: web ? 'web' : 'deck', createdAt: now, updatedAt: now,
+    artboard: web ? { ...WEB_DEFAULT_ARTBOARD } : { preset, width, height },
+    assets: store.assets, fonts: store.fonts, pages,
+  };
+  writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2) + '\n');
+
   // ---------- 原文件 ----------
-  // 原文件逐字节复制；和工作台自己写的说明文件重名时，原文件改名（README.md 见下；baseline.json / source.json → 「-原文件」）
-  const importDir = join(projectDir, 'import'), RESERVED = { 'baseline.json': 'baseline-原文件.json', 'source.json': 'source-原文件.json' };
+  // 原文件逐字节复制；和工作台自己写的说明文件重名时，原文件改名（README.md 见下；source.json → 「-原文件」）
+  const importDir = join(projectDir, 'import'), RESERVED = { 'source.json': 'source-原文件.json' };
+  mkdirSync(importDir, { recursive: true });
   for (const rel of files) { const to = join(importDir, RESERVED[rel] || rel); mkdirSync(dirname(to), { recursive: true }); copyFileSync(join(srcDir, rel), to); }
-  // 改动清单的「改前」基准：导入那一刻的 project.json
-  writeFileSync(join(importDir, 'baseline.json'), projectText);
   if (analysis.source === 'urls') {
-    const list = [];
+    const out = [];
     analysis.pages.forEach((res, i) => {
       const file = `pages/${String(i + 1).padStart(2, '0')}-${res.device}.html`;
       mkdirSync(join(importDir, 'pages'), { recursive: true }); writeFileSync(join(importDir, file), res.snapshot || '');
-      list.push({ url: res.url, finalUrl: res.finalUrl, device: res.device, capturedAt: res.capturedAt, file: `import/${file}`, pageId: pages[i].id, height: res.height, ...(res.truncated ? { fullHeight: res.truncated } : {}) });
+      out.push({ url: res.url, finalUrl: res.finalUrl, device: res.device, capturedAt: res.capturedAt, file: `import/${file}`, pageId: pages[i].id, height: res.height, ...(res.truncated ? { fullHeight: res.truncated } : {}) });
     });
-    writeFileSync(join(importDir, 'source.json'), JSON.stringify({ source: 'urls', importedAt: now, urls: analysis.urls || [], devices: analysis.devices || [], pages: list, skipped: analysis.skipped || [] }, null, 2) + '\n');
+    writeFileSync(join(importDir, 'source.json'), JSON.stringify({ source: 'urls', importedAt: now, urls: analysis.urls || [], devices: analysis.devices || [], pages: out, skipped }, null, 2) + '\n');
   }
-  const seconds = Math.round((Date.now() - startedAt) / 100) / 10;
+
+  // ---------- 摘要 ----------
+  const sum = (f) => analysis.pages.reduce((n, p) => n + f(p), 0);
+  const union = key => new Set(analysis.pages.flatMap(p => [...(p.log?.[key] || [])]));
   const message = analysis.kind === 'fallback' ? (pages.length > 1 ? `没有识别出分页结构，按画板高度把整页切成了 ${pages.length} 页（保底办法），分页位置可能切断内容。` : '没有识别出分页结构（不是常见的幻灯片框架，也不是按屏滚动的页面），整份页面作为 1 页导入。') : '';
-  const summary = { method: analysis.kind, methodLabel: analysis.label, pages: pages.length, elements: elementsTotal, shots: shotsTotal, shotReasons: Object.fromEntries(shotReasons), images: assets.length, fonts: fonts.length, missingFonts: [...missing], missingImages, seconds, message };
-  if (web) Object.assign(summary, { kind: 'web', source: analysis.source, groups: groupsTotal, devices: { desktop: pages.filter(p => p.device === 'desktop').length, mobile: pages.filter(p => p.device === 'mobile').length }, skipped: analysis.skipped || [], truncated: analysis.pages.filter(p => p.truncated).map(p => ({ url: p.url || p.file, device: p.device, height: p.truncated })) });
-  const readme = (web ? [
-    '# 网页导入', '',
-    analysis.source === 'urls' ? `- 网址：${(analysis.urls || []).join('、') || '无'}` : `- 入口文件：${entry}`, `- 导入时间：${now}`, `- 设备：${(analysis.devices || []).map(deviceLabel).join('、')}`, `- 页数：${pages.length}；分组：${groupsTotal}；元素：${elementsTotal}；截图块：${shotsTotal}`,
-    ...(summary.skipped.length ? ['- 跳过的网址：', ...skippedLines(summary.skipped).map(l => `  - ${l}`)] : []), '',
-    analysis.source === 'urls' ? '这个文件夹里 pages/ 是导入时的网页快照（只读参考），source.json 记录网址、设备、时间和跳过的网址。抓取全程只读：只发 GET 请求，不提交表单、不登录、不点击，原网站不受影响。' : '这个文件夹是导入时复制的原文件（文件名不变），原来的文件没有被修改。',
-    'baseline.json 是导入那一刻的 project.json，用来对照之后改了什么。', '',
-  ] : [
-    '# 旧 HTML 导入', '',
-    `- 入口文件：${entry}`, `- 导入时间：${now}`, `- 分页方式：${analysis.label}`, `- 页数：${pages.length}；元素：${elementsTotal}；截图块：${shotsTotal}`,
-    ...(summary.missingFonts.length ? [`- 缺失字体：${summary.missingFonts.join('、')}`] : []), ...(message ? [`- 说明：${message}`] : []), '',
-    '这个文件夹是导入时复制的原文件（文件名不变），原来的文件没有被修改。项目里每页的 notes 是迁移说明；原来的动画没有搬过来，请按原 HTML 的动画意图用新格式重写 motion，不要搬旧代码。', '',
-  ]).join('\n');
+  const summary = {
+    method: analysis.kind, methodLabel: analysis.label, pages: pages.length,
+    texts: sum(p => p.stats?.text || 0), images: sum(p => p.stats?.image || 0), blocks: sum(p => p.stats?.block || 0), backgrounds: sum(p => p.stats?.background || 0),
+    assets: store.assets.length, fonts: store.fonts.length,
+    styles: union('css').size, scripts: union('scripts').size + sum(p => p.notes?.scripts?.inline || 0),
+    animations: [...new Set(analysis.pages.flatMap(p => p.clue?.keyframes || []))],
+    missingFonts: [...union('missingFonts')], remote: [...union('remote')], missing: [...union('missing')],
+    failed: analysis.pages.filter(p => p.error).length, message,
+  };
+  if (web) Object.assign(summary, { kind: 'web', source: analysis.source, devices: { desktop: pages.filter(p => p.device === 'desktop').length, mobile: pages.filter(p => p.device === 'mobile').length }, skipped, truncated: analysis.pages.filter(p => p.truncated).map(p => ({ url: p.url || p.file, device: p.device, height: p.truncated })) });
+
+  const readme = [
+    web ? '# 网页导入' : '# 旧 HTML 导入', '',
+    analysis.source === 'urls' ? `- 网址：${(analysis.urls || []).join('、') || '无'}` : `- 入口文件：${entry}`,
+    `- 导入时间：${now}`,
+    web ? `- 设备：${(analysis.devices || []).map(deviceLabel).join('、')}` : `- 分页方式：${analysis.label}`,
+    `- 页数：${pages.length}；可改的文字：${summary.texts}；可裁切的图片：${summary.images}；纯色色块：${summary.blocks}；整页背景：${summary.backgrounds}`,
+    ...(summary.missingFonts.length ? [`- 缺失字体：${summary.missingFonts.join('、')}`] : []), ...(message ? [`- 说明：${message}`] : []),
+    ...(skipped.length ? ['- 跳过的网址：', ...skippedLines(skipped).map(l => `  - ${l}`)] : []), '',
+    analysis.source === 'urls' ? '这个文件夹里 pages/ 是导入时的网页快照（只读参考），source.json 记录网址、设备、时间和跳过的网址。抓取全程只读：只发 GET 请求，不提交表单、不登录、不点击，原网站不受影响。' : '这个文件夹是导入时复制的原文件（文件名不变，逐字节相同），原来的文件没有被修改。',
+    '每页的页面文件保留了原来的 HTML、CSS、脚本和动画，自动标出了可改的文字、图片和纯色色块；每页 notes 是给 agent 的迁移说明。用户在工作台里的修改记在每页的修改单（edits）里。', '',
+  ].join('\n');
   writeFileSync(join(importDir, files.includes('README.md') ? 'README-导入说明.md' : 'README.md'), readme);
   return { project, summary };
 }

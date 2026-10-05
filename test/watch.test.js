@@ -297,3 +297,21 @@ test('项目编号不合法时 subscribe 抛错', t => {
   }
   assert.throws(() => w.noteSelfWrite('demo', '../x', 'a'), /文件路径不合法/);
 });
+
+test('格式 v3：agent 改 pages/<页面>.html（含新建、删除）进 changed 的 files；工作台自己写的页面文件不算外部', async t => {
+  const { w, file } = setup(t);
+  mkdirSync(file('pages'), { recursive: true });
+  const created = nextEvent(w, 'demo', ev => isChanged(ev) && ev.files.includes('pages/page_a.html'));
+  writeFileSync(file('pages', 'page_a.html'), '<p>1</p>');
+  assert.equal((await created).external, true);
+  const edited = nextEvent(w, 'demo', ev => isChanged(ev) && ev.files.includes('pages/page_a.html'));
+  writeFileSync(file('pages', 'page_a.html'), '<p>2</p>');
+  assert.equal((await edited).external, true);
+  const mine = nextEvent(w, 'demo', ev => isChanged(ev) && ev.files.includes('pages/page_b.html'));
+  w.noteSelfWrite('demo', 'pages/page_b.html', '<p>工作台新建</p>');
+  writeFileSync(file('pages', 'page_b.html'), '<p>工作台新建</p>');
+  assert.equal((await mine).external, false);
+  const removed = nextEvent(w, 'demo', ev => isChanged(ev) && ev.files.includes('pages/page_a.html'));
+  unlinkSync(file('pages', 'page_a.html'));
+  assert.ok(await removed);
+});

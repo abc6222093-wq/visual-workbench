@@ -19,7 +19,31 @@ import { fileURLToPath } from 'node:url';
 import { listVersions, restoreVersion, saveVersion, versionDiskUsage } from '../src/version.js';
 import { validateProject } from '../src/validate.js';
 
-const SAMPLE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-deck');
+// 格式 v3 的示例项目（测试自己生成，不依赖 examples/）：两页 HTML、一张照片、一个 logo、一份较大的字体
+import { after as afterAll } from 'node:test';
+import { mkdirSync as mkdirSample, writeFileSync as writeSample, mkdtempSync as mkdtempSample, rmSync as rmSample } from 'node:fs';
+import { tmpdir as tmpSample } from 'node:os';
+import { join as joinSample } from 'node:path';
+function writeV3Sample(dir, id = 'sample-deck') {
+  for (const sub of ['pages', 'assets', 'fonts']) mkdirSample(joinSample(dir, sub), { recursive: true });
+  const font = Buffer.alloc(300_000); for (let i = 0; i < font.length; i++) font[i] = (i * 2654435761) >>> 24;
+  writeSample(joinSample(dir, 'fonts/Inter-Variable.ttf'), font);
+  writeSample(joinSample(dir, 'assets/photo-city.png'), Buffer.from('城市照片的内容'.repeat(50)));
+  writeSample(joinSample(dir, 'assets/logo.png'), Buffer.from('logo'));
+  writeSample(joinSample(dir, 'pages/page_cover.html'), '<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:Inter;src:url(../fonts/Inter-Variable.ttf)} body{background:#123456;color:#fafafa}</style></head><body><h1 data-vw-id="title" data-vw="text move color">视觉工作台</h1><img data-vw-id="hero" data-vw="move resize crop" src="../assets/photo-city.png"></body></html>\n');
+  writeSample(joinSample(dir, 'pages/page_two.html'), '<!doctype html><html><body><img data-vw-id="logo" data-vw="move" src="../assets/logo.png"><p data-vw-id="body" data-vw="text">第二页</p></body></html>\n');
+  const now = '2026-10-01T12:00:00.000Z';
+  const project = { format: 'visual-workbench/project', formatVersion: 3, id, name: '示例课件', createdAt: now, updatedAt: now,
+    artboard: { preset: 'slide-16x9', width: 1920, height: 1080 },
+    assets: [{ id: 'asset_photo', kind: 'image', file: 'assets/photo-city.png', name: '城市' }, { id: 'asset_logo', kind: 'image', file: 'assets/logo.png', name: 'logo' }],
+    fonts: [{ id: 'font_inter', family: 'Inter', file: 'fonts/Inter-Variable.ttf', weight: 'variable' }],
+    pages: [{ id: 'page_cover', name: '封面', file: 'pages/page_cover.html', motion: { steps: 1 }, edits: [] }, { id: 'page_two', name: '第二页', file: 'pages/page_two.html', edits: [] }] };
+  writeSample(joinSample(dir, 'project.json'), JSON.stringify(project, null, 2) + '\n');
+  return dir;
+}
+const SAMPLE_ROOT = mkdtempSample(joinSample(tmpSample(), 'vw-sample-'));
+afterAll(() => rmSample(SAMPLE_ROOT, { recursive: true, force: true }));
+const SAMPLE = writeV3Sample(joinSample(SAMPLE_ROOT, 'sample-deck'));
 const FONT = 'fonts/Inter-Variable.ttf';
 const PHOTO = 'assets/photo-city.png';
 
@@ -218,10 +242,10 @@ test('版本编号不合法、不存在或版本校验不通过时抛错，项�
     mkdirSync(join(dir, 'versions', '19990101-000001'));
     assert.throws(() => restoreVersion({ projectDir: dir, versionId: '19990101-000001' }), /没有 project\.json/);
 
-    // 版本内容校验不通过（引用的素材文件缺失）
+    // 版本内容校验不通过（结构不对：没有页面）
     const bad = join(dir, 'versions', '19990101-000002');
     mkdirSync(bad);
-    cpSync(join(SAMPLE, 'project.json'), join(bad, 'project.json'));
+    writeFileSync(join(bad, 'project.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(SAMPLE, 'project.json'), 'utf8')), pages: [] }));
     assert.throws(() => restoreVersion({ projectDir: dir, versionId: '19990101-000002' }), /校验未通过/);
 
     assert.deepEqual(snapshot(dir), before, '项目文件应不变');
@@ -233,7 +257,7 @@ test('旧格式版本（完整复制、无 objects 字段）能被列出并退�
   withProject((dir) => {
     const old = join(dir, 'versions', '20200101-000000');
     mkdirSync(old, { recursive: true });
-    for (const rel of ['project.json', 'assets', 'fonts']) cpSync(join(dir, rel), join(old, rel), { recursive: true });
+    for (const rel of ['project.json', 'pages', 'assets', 'fonts']) cpSync(join(dir, rel), join(old, rel), { recursive: true });
     const files = ['project.json', ...projectFiles(dir).filter((f) => f !== 'project.json')];
     writeFileSync(
       join(old, 'meta.json'),
@@ -284,5 +308,31 @@ test('存版跳过以 . 开头的文件和符号链接', (t) => {
     }
     assert.deepEqual(meta.files, ['project.json', ...projectFiles(dir).filter((f) => f !== 'project.json')]);
     assert.deepEqual(Object.keys(meta.objects).sort(), [...meta.files].sort());
+  });
+});
+
+test('网页项目（import/ 子目录、pages/）存版不报 EISDIR；退回时文件位置被目录占住（或反过来）也能退回', () => {
+  withProject((dir) => {
+    mkdirSync(join(dir, 'import', 'pages', 'site.html'), { recursive: true }); // 目录名像文件
+    writeFileSync(join(dir, 'import', 'pages', 'site.html', 'index.html'), '<p>快照</p>');
+    writeFileSync(join(dir, 'import', 'snap'), '原来是文件');
+    mkdirSync(join(dir, 'import', 'dir'), { recursive: true });
+    writeFileSync(join(dir, 'import', 'dir', 'a.txt'), '原来是目录里的文件');
+    const v = saveVersion({ projectDir: dir, note: '网页项目' });
+    assert.ok(v.meta.files.includes('import/pages/site.html/index.html'));
+    assert.ok(v.meta.files.includes('pages/page_cover.html'));
+    // 之后 import/snap 变成目录、import/dir 变成文件：rename 会撞上目录（EISDIR）或路径中间是文件（ENOTDIR）
+    rmSync(join(dir, 'import', 'snap'));
+    mkdirSync(join(dir, 'import', 'snap'));
+    writeFileSync(join(dir, 'import', 'snap', 'x.html'), 'x');
+    rmSync(join(dir, 'import', 'dir'), { recursive: true });
+    writeFileSync(join(dir, 'import', 'dir'), '现在是文件');
+    restoreVersion({ projectDir: dir, versionId: basename(v.versionDir) });
+    assert.equal(readFileSync(join(dir, 'import', 'snap'), 'utf8'), '原来是文件');
+    assert.equal(readFileSync(join(dir, 'import', 'dir', 'a.txt'), 'utf8'), '原来是目录里的文件');
+    assert.equal(validateProject(dir).ok, true);
+    // 被替换掉的内容在「退回前自动存档」里
+    const backup = listVersions(dir).at(-1);
+    assert.equal(readFileSync(join(backup, 'import', 'snap', 'x.html'), 'utf8'), 'x');
   });
 });
