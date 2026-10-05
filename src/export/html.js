@@ -337,7 +337,8 @@ export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_R
   for (const text of Object.values(pages)) for (const m of text.matchAll(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g)) inlineModuleBytes += m[0].length;
   libraryBytes += inlineModuleBytes;
 
-  const projectJson = jsonInHtml(project);
+  // 批注只给编辑画布看：放映文件里不带（文件可能发给别人）
+  const projectJson = jsonInHtml({ ...project, pages: project.pages.map(({ annotations, ...page }) => page) });
   const pagesJson = jsonInHtml(pages);
   const dataJson = `{"project":${projectJson},"pages":${pagesJson},"files":${jsonInHtml(files)},"runtimeText":${jsonInHtml(runtimeText)},"modules":${jsonInHtml(modules)}}`;
   const licenseComment = licenseNotes.length
