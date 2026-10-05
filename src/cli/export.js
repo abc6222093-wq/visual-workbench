@@ -47,7 +47,7 @@ try {
       if (result.breakdown) console.log(`  组成：${describeBreakdown(result.breakdown)}`);
       for (const item of result.items || []) {
         if (item.kind === 'library') continue;
-        console.log(`    ${item.kind === 'font' ? '字体' : '图片'} ${item.name}：${formatBytes(item.original)} → ${formatBytes(item.bytes)}（${item.note}）`);
+        console.log(`    ${{ font: '字体', image: '图片', file: '文件' }[item.kind] || item.kind} ${item.name}：${formatBytes(item.original)} → ${formatBytes(item.bytes)}（${item.note}）`);
       }
       if (result.skipped?.length) console.log(`  没有用到、未打包的素材：${result.skipped.join('、')}`);
       for (const warning of result.warnings || []) console.warn(`  ⚠ ${warning}`);

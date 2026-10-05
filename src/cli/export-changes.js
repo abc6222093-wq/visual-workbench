@@ -1,5 +1,6 @@
 // 交接包：npm run export-changes -- <项目目录或编号> [--out <目录>] [--no-images] [--data-dir x]
-// 生成改动清单（改动清单.md + changes.json）、改前改后对比图（compare/）和「复制给 agent」的文字。
+// 第 12 轮：改动清单 = 修改单（pages[].edits）。生成 改动清单.md + changes.json、改前改后对比图（compare/，只给有改动的页）和「复制给 agent」的文字。
+// 不需要导入基准：改前就是页面源码本身；课件项目也能导。
 // 不给 --out 时放到 <数据目录>/exports/<项目编号>/handoff-<yyyyMMdd-HHmmss>/。
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
