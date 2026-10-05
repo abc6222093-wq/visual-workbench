@@ -108,3 +108,10 @@ test('草稿页 HTML：白底朴素、每块 <p data-vw-level>、换行成 <br>�
   assert.throws(() => normalizeBlocks('x'), /数组/);
   assert.equal(DRAFT_LEVELS.length, 8);
 });
+
+test('只用 --- 分页、没有 ## 和【】：--- 之后的文字开新页，# 之后 --- 之前的说明仍不上页面', () => {
+  const r = parseDraftText('# 名\n说明一句\n---\n第一页甲\n第一页乙\n---\n第二页');
+  assert.equal(r.name, '名');
+  assert.equal(r.description, '说明一句');
+  assert.deepEqual(r.pages.map(p => [p.name, p.blocks.map(b => b.text)]), [['第 1 页', ['第一页甲', '第一页乙']], ['第 2 页', ['第二页']]]);
+});

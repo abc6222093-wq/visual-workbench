@@ -15,7 +15,10 @@ import * as versionStore from './version.js'; // 删除版本（deleteVersion）
 import { copyPages, copyPagesInto, rollbackWritten, blankPageHtml, blankPageEntry, newPageId } from './copy-pages.js';
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
-import { agentBrief } from './brief.js';
+import { agentBrief, organizeBrief, BRIEF_INTENTS } from './brief.js';
+import { listFolders, createFolder, renameFolder, deleteFolder, ensureFolder, readBackup, beginOrganize, restoreOrganize } from './folders.js';
+import { DRAFT_OPS, createFileWriter, draftOperation, draftProjectPages } from './drafts.js';
+import { fontsApi } from './fonts/library.js';
 import { exportHandoff, defaultHandoffDir } from './export/changes.js';
 import { WEB_DEVICES, WEB_DEFAULT_ARTBOARD, webPageDefaults, projectKind } from '../web/project-kinds.js';
 import { newEditId } from '../web/edits-model.js';
@@ -196,7 +199,7 @@ const idList = (value, label='pageIds') => { if(!Array.isArray(value)||!value.le
 function pageOperation({ dataDir, dir, id, body:b, selfWrite }) {
   const old=readProject(dir); checkRevision(b.revision,old.revision);
   if(isLegacyProject(old.project)) throw fail(409,'旧格式，请先运行 npm run convert 转换');
-  let project=structuredClone(old.project); let written=[], created=[], removedFiles=[];
+  let project=structuredClone(old.project); let written=[], created=[], removedFiles=[], writer=null, draft;
   const has = pid => project.pages.some(p=>p.id===pid);
   const after = b.after ?? null; if(after!==null&&(typeof after!=='string'||!has(after))) throw fail(400,'找不到要插在后面的那一页');
   if(b.op==='create') {
@@ -226,11 +229,15 @@ function pageOperation({ dataDir, dir, id, body:b, selfWrite }) {
     const ids=idList(b.pageIds); if(ids.some(pid=>!src.pages.some(p=>p.id===pid))) throw fail(400,'来源项目里找不到这些页面');
     let out; try { out=copyPagesInto({srcDir,src,pageIds:ids,destDir:dir,dest:project,after,onWrite:selfWrite}); } catch(e) { throw asBadRequest(e); }
     project=out.project; written=out.written; created=out.pageIds;
-  } else throw fail(400,'op 只能是 create、duplicate、delete 或 copy-from');
+  } else if(DRAFT_OPS.has(b.op)) { // 草稿页（第 13 轮）：服务端改写草稿页文件，见 src/drafts.js
+    writer=createFileWriter(dir,selfWrite); let out;
+    try { out=draftOperation({dir,project,body:b,after,writer}); } catch(e) { writer.rollback(); throw asBadRequest(e); }
+    project=out.project; created=out.pageIds; removedFiles=out.removedFiles; draft=out.draft;
+  } else throw fail(400,'op 只能是 create、duplicate、delete、copy-from、draft、draft-update、draft-split 或 draft-merge');
   project.updatedAt=new Date().toISOString();
-  let revision; try { revision=saveProject(dir,project,selfWrite); } catch(e) { rollbackWritten(dir,written,selfWrite); throw e; }
+  let revision; try { revision=saveProject(dir,project,selfWrite); } catch(e) { rollbackWritten(dir,written,selfWrite); writer?.rollback(); throw e; }
   for(const rel of removedFiles) { if(project.pages.some(p=>p.file===rel)) continue; selfWrite(rel,null); rmSync(join(dir,rel),{force:true}); }
-  return {project,revision,pageIds:created};
+  return {project,revision,pageIds:created,...(draft?{draft}:{})};
 }
 
 export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollMs=1000, exporter=defaultExporter, reveal=defaultReveal, configSource="explicit", configHome, usageOptions={}, onShutdown, importOptions={} } = {}) {
@@ -245,9 +252,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
   let shuttingDown=false;
   const assertUsage = () => {if(shuttingDown)throw fail(503,'工作台正在关闭');const status=usage.status();if(status.blocked)throw fail(423,'另一台电脑上的工作台还开着，请先确认是否继续',status);};
   const checkedBody = async req => {const value=await body(req);assertUsage();checkDataRoots(dataDir);return value;};
+  const drained = async req => {for await (const chunk of req) void chunk;assertUsage();checkDataRoots(dataDir);}; // 不需要请求体的修改请求
+  const projectWrite = (pid, bytes) => watcher.noteSelfWrite(pid, 'project.json', bytes);
   const selfWrite = id => (rel, bytes) => watcher.noteSelfWrite(id, rel, bytes);
   // 旧 HTML 导入：后台任务，前端轮询进度
-  const imports = createImportJobs({ dataDir, ...importOptions });
+  const imports = createImportJobs({ dataDir, onProjectChanged: id => watcher.noteSelfSnapshot(id), ...importOptions });
   const exportProgress = createExportProgress();
   // 旧格式项目第一次打开时转换（src/convert-v2.js 先自动存版再转换）；同一项目同时只转一次
   const converting = new Map();
@@ -286,8 +295,29 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       if(parts.length===3&&req.method==='DELETE') {await checkedBody(req);return json(res,200,purgeProject(dataDir,parts[2]));}
     }
     if(req.method==='PUT'&&url.pathname==='/api/settings') {const b=await checkedBody(req);try {saveLocalConfig(b.dataDir,{home:configHome});}catch(e){throw fail(400,e.message);}return json(res,200,{saved:true,dataDir,source:configSource,pendingDataDir:b.dataDir,message:'本机设置已保存。关闭工作台后重新双击启动生效；命令行和环境变量仍优先于本机设置。'});}
-    if(req.method==='GET'&&url.pathname==='/api/projects') { const masters=new Set(masterList()); return json(res,200,listProjects(dataDir).map(id=>{ const project=readProject(projectPath(dataDir,id)).project; return {id,name:project.name,updatedAt:project.updatedAt,master:masters.has(id),...(isLegacyProject(project)?{legacy:true}:{}),project}; })); }
-    if(req.method==='POST'&&url.pathname==='/api/projects') { const b=await checkedBody(req); if(typeof b.name!=='string'||!b.name.trim()) throw fail(400,'Name required'); const id=String(b.id||`project-${randomUUID().slice(0,8)}`); if(!ID.test(id)) throw fail(400,'Invalid project id'); const dir=safe(join(dataDir,'projects'),id); if(existsSync(dir)) throw fail(409,'Project already exists');
+    if(req.method==='GET'&&url.pathname==='/api/projects') { const masters=new Set(masterList()); return json(res,200,listProjects(dataDir).map(id=>{ const project=readProject(projectPath(dataDir,id)).project; return {id,name:project.name,updatedAt:project.updatedAt,master:masters.has(id),folder:typeof project.folder==='string'?project.folder:'',...(project.designCard&&typeof project.designCard==='object'?{designCard:project.designCard}:{}),drafts:Array.isArray(project.pages)?project.pages.filter(p=>p?.draft===true).length:0,...(isLegacyProject(project)?{legacy:true}:{}),project}; })); }
+    // 文件夹与整理（第 13 轮，src/folders.js）
+    if(req.method==='GET'&&url.pathname==='/api/folders') { const backup=readBackup(dataDir); return json(res,200,{folders:listFolders(dataDir),backup:backup?{at:backup.at}:null}); }
+    if(req.method==='POST'&&url.pathname==='/api/folders') { const b=await checkedBody(req); return json(res,201,{folders:createFolder(dataDir,b.name)}); }
+    if(parts[0]==='api'&&parts[1]==='folders'&&parts.length===3&&(req.method==='PATCH'||req.method==='DELETE')) {
+      let name; try { name=decodeURIComponent(parts[2]); } catch { throw fail(400,'文件夹名称不对'); }
+      if(req.method==='PATCH') { const b=await checkedBody(req); return json(res,200,{folders:renameFolder(dataDir,name,b.name,{onWrite:projectWrite})}); }
+      await drained(req); return json(res,200,{folders:deleteFolder(dataDir,name,{onWrite:projectWrite})});
+    }
+    if(req.method==='GET'&&url.pathname==='/api/organize') { const backup=readBackup(dataDir); return json(res,200,{backup:backup?{at:backup.at}:null}); }
+    if(req.method==='POST'&&url.pathname==='/api/organize/backup') { await drained(req); return json(res,200,{at:beginOrganize(dataDir).at}); }
+    if(req.method==='POST'&&url.pathname==='/api/organize/restore') { await drained(req); return json(res,200,restoreOrganize(dataDir,{onWrite:projectWrite})); }
+    if(req.method==='GET'&&url.pathname==='/api/brief/organize') {
+      const projects=listProjects(dataDir).map(id=>{ try { const p=readProject(projectPath(dataDir,id)).project; return {id,name:p.name||id,folder:typeof p.folder==='string'?p.folder:'',updatedAt:p.updatedAt||''}; } catch { return null; } }).filter(Boolean);
+      const backup=readBackup(dataDir);
+      return json(res,200,{text:organizeBrief({repoDir:REPO,dataDir,folders:listFolders(dataDir),projects,backup})});
+    }
+    if(req.method==='GET'&&url.pathname==='/api/fonts') return json(res,200,await fontsApi(dataDir)); // 本地常用字体库清单（src/fonts/library.js）
+    if(req.method==='POST'&&url.pathname==='/api/projects') { const b=await checkedBody(req); const fromDraft=b.draft!==undefined;
+      if(fromDraft&&typeof b.draft!=='string') throw fail(400,'文案要写成文字');
+      if(fromDraft&&b.fromMaster!==undefined) throw fail(400,'从文案新建时不能同时从母版开始');
+      if(fromDraft&&b.name!==undefined&&typeof b.name!=='string') throw fail(400,'Name required');
+      if(!fromDraft&&(typeof b.name!=='string'||!b.name.trim())) throw fail(400,'Name required'); const id=String(b.id||`project-${randomUUID().slice(0,8)}`); if(!ID.test(id)) throw fail(400,'Invalid project id'); const dir=safe(join(dataDir,'projects'),id); if(existsSync(dir)) throw fail(409,'Project already exists');
       if(b.fromMaster!==undefined) { // 从系列母版开始：继承画板、背景、字体、配色、动效代码和通用素材，不带页面内容
         if(!masterList().includes(b.fromMaster)) throw fail(400,'这个项目不是系列母版');
         let out; try { out=createFromMaster({masterDir:projectPath(dataDir,b.fromMaster),destProjectDir:dir,newId:id,newName:b.name.trim()}); } catch(e) { throw e.status?e:fail(400,e.message); }
@@ -297,11 +327,17 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       const web=b.kind==='web'; let artboard;
       if(web) artboard={...WEB_DEFAULT_ARTBOARD};
       else { const preset=b.preset||'slide-16x9'; if(!PRESETS[preset]) throw fail(400,'Invalid preset'); const [dw,dh]=PRESETS[preset], width=b.width??dw,height=b.height??dh; dims({width,height}); artboard={preset,width,height}; }
-      mkdirSync(dir); try { initProjectDir(dir); const now=new Date().toISOString();
-        const shell={format:'visual-workbench/project',formatVersion:3,id,name:b.name.trim(),...(web?{kind:'web'}:{}),createdAt:now,updatedAt:now,artboard,assets:[],fonts:[],pages:[]};
-        const pages=web?[{...blankPageEntry({id:'page_home_desk',name:'首页 · 电脑端',project:shell,device:'desktop'})},{...blankPageEntry({id:'page_home_mob',name:'首页 · 手机端',project:shell,device:'mobile'})}]:[blankPage()];
-        for(const page of pages) writeFileSync(join(dir,page.file),blankPageHtml({title:page.name}));
-        const project={...shell,pages}; const revision=saveProject(dir,project); return json(res,201,{project,revision}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
+      const now=new Date().toISOString();
+      const shell={format:'visual-workbench/project',formatVersion:3,id,name:fromDraft?'':b.name.trim(),...(web?{kind:'web'}:{}),createdAt:now,updatedAt:now,artboard,assets:[],fonts:[],pages:[]};
+      // 从文案新建（第 13 轮草稿分页）：先分页（分不出来就 400，不建文件夹），名称取文案里的 # 标题，没有就用 name
+      const drafted=fromDraft?draftProjectPages({text:b.draft,fallbackName:b.name,project:shell}):null;
+      if(drafted) { shell.name=drafted.name; if(drafted.description) shell.description=drafted.description; }
+      mkdirSync(dir); try { initProjectDir(dir);
+        let pages;
+        if(drafted) { pages=drafted.pages.map(e=>e.page); for(const e of drafted.pages) writeFileSync(join(dir,e.page.file),e.html); }
+        else { pages=web?[{...blankPageEntry({id:'page_home_desk',name:'首页 · 电脑端',project:shell,device:'desktop'})},{...blankPageEntry({id:'page_home_mob',name:'首页 · 手机端',project:shell,device:'mobile'})}]:[blankPage()];
+          for(const page of pages) writeFileSync(join(dir,page.file),blankPageHtml({title:page.name})); }
+        const project={...shell,pages}; const revision=saveProject(dir,project); return json(res,201,{project,revision,...(drafted?{draft:drafted.draft}:{})}); } catch(e){rmSync(dir,{recursive:true,force:true});throw e;} }
     if(parts[0]==='api'&&parts[1]==='projects'&&parts[2]) { const id=parts[2],dir=projectPath(dataDir,id);
       if(parts.length===3&&req.method==='DELETE') {
         // A normalized /versions/.. request has no body and must keep the old 404.
@@ -309,7 +345,16 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         if(!req.headers['transfer-encoding'] && !(Number(req.headers['content-length'])>0))throw fail(404,'未找到删除请求，请从项目菜单确认删除');
         await checkedBody(req);return json(res,200,deleteProject(dataDir,id));
       }
-      if(parts.length===3&&req.method==='PATCH') {const b=await checkedBody(req);if(typeof b.name!=='string'||!b.name.trim())throw fail(400,'请输入项目名称');const old=readProject(projectPath(dataDir,id));if(b.revision!==undefined)checkRevision(b.revision,old.revision);const project={...old.project,name:b.name.trim(),updatedAt:new Date().toISOString()};const revision=saveProject(dir,project,selfWrite(id));return json(res,200,{project,revision});}
+      if(parts.length===3&&req.method==='PATCH') { // 改名、移进 / 移出文件夹（folder 为 "" = 移出；文件夹不存在自动登记）
+        const b=await checkedBody(req);
+        if(b.name===undefined&&b.folder===undefined) throw fail(400,'请输入项目名称');
+        if(b.name!==undefined&&(typeof b.name!=='string'||!b.name.trim())) throw fail(400,'请输入项目名称');
+        if(b.folder!==undefined&&typeof b.folder!=='string') throw fail(400,'文件夹名称不对');
+        const old=readProject(projectPath(dataDir,id)); if(b.revision!==undefined) checkRevision(b.revision,old.revision);
+        const project={...old.project,updatedAt:new Date().toISOString()};
+        if(b.name!==undefined) project.name=b.name.trim();
+        if(b.folder!==undefined) { if(b.folder.trim()) project.folder=ensureFolder(dataDir,b.folder); else delete project.folder; }
+        const revision=saveProject(dir,project,selfWrite(id)); return json(res,200,{project,revision}); }
       if(parts.length===4&&parts[3]==='duplicate'&&req.method==='POST') {const b=await checkedBody(req);const out=duplicateProject(dataDir,id,b);return json(res,201,{...out,revision:readProject(projectPath(dataDir,out.project.id)).revision});}
       if(parts.length===3&&req.method==='GET') { // 旧格式（v2）第一次打开时先转换（转换前自动存版）；失败则项目原样不动
         let current=readProject(dir);
@@ -327,9 +372,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         return;
       }
       if(parts[3]==='brief'&&parts.length===4&&req.method==='GET') { // 复制给 agent：?pageIds=a,b 只写这些页（当前页），不给 = 全部页
+        // ?intent=edits（默认，请处理修改单）| design（请设计草稿页）| unify（请统一风格，拼进来的页）
         const {project}=readProject(dir); const ids=url.searchParams.get('pageIds')?.split(',').filter(Boolean);
+        const intent=url.searchParams.get('intent')||'edits'; if(!BRIEF_INTENTS.includes(intent)) throw fail(400,'intent 只能是 edits、design 或 unify');
         if(ids&&ids.some(pid=>!project.pages?.some(p=>p.id===pid))) throw fail(400,'页面编号不对');
-        return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project,pageIds:ids}),filePath:join(dir,'project.json')}); }
+        return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project,pageIds:ids,intent}),filePath:join(dir,'project.json')}); }
       if(parts[3]==='pages'&&parts.length===4&&req.method==='POST') { const b=await checkedBody(req); return json(res,200,pageOperation({dataDir,dir,id,body:b,selfWrite:selfWrite(id)})); }
       // 第 11 轮：交接包（改动清单 + 改前改后对比图 + 复制给 agent 的文字）；改前基准是 import/baseline.json
       if(parts[3]==='handoff'&&parts.length===4&&req.method==='POST') {
@@ -397,6 +444,10 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       const rel=parts.slice(4).map(decodeFile).join('/'); const html=/\.html?$/i.test(rel);
       return serve(res,join(projectPath(dataDir,parts[2]),parts[3]),rel,{'Cache-Control':'no-cache',...(html?{'Content-Security-Policy':'sandbox allow-scripts'}:{})}); }
     if(req.method==='GET'&&parts[0]==='data'&&parts[1]==='library'&&parts[2]==='assets'&&parts.length===4 ) return serve(res,libraryRoot(dataDir),decodeFile(parts[3]));
+    if(req.method==='GET'&&parts[0]==='data'&&parts[1]==='library'&&parts[2]==='fonts'&&parts.length>=4) { // 字体库文件（页面 iframe 是 null 源，serve 带 CORS）；拒绝 .. 和符号链接
+      const root=join(dataDir,'library/fonts'); const rels=parts.slice(3).map(decodeFile); let cur=root;
+      for(const rel of rels) { cur=join(cur,rel); if(existsSync(cur)&&lstatSync(cur).isSymbolicLink()) throw fail(403,'字体库里不能有符号链接'); }
+      return serve(res,root,rels.join('/'),{'Cache-Control':'no-cache'}); }
     if(req.method==='GET'&&!url.pathname.startsWith('/api/')&&!url.pathname.startsWith('/data/')) return serve(res,WEB,url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1)),{'Cache-Control':'no-cache'}); // 界面代码更新后，浏览器不能继续用旧的
     throw fail(404,'Not found');
   } catch(e) { if(res.headersSent) return res.end(); json(res,e.status||500,{error:e.message, ...(e.details?{details:e.details}:{})}); } });

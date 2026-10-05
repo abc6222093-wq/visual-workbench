@@ -69,6 +69,7 @@ function parseMarked(text) {
   const pages = [];
   let current = null; // { name, blocks, notes: [{ label, lines }], section: 'core' | { label } }
   let headingCount = 0;
+  let afterRule = false; // 刚遇到 ---：下一行内容直接开新页（没有 ## 也算分页）
   const finish = () => {
     if (!current) return;
     const blocks = trimBlocks(current.blocks);
@@ -81,13 +82,13 @@ function parseMarked(text) {
     const line = rtrim(raw);
     const title = TITLE_RE.exec(line);
     if (title && !name && !current) { name = title[1].trim(); continue; }
-    if (RULE_RE.test(line)) { finish(); continue; }
+    if (RULE_RE.test(line)) { finish(); afterRule = true; continue; }
     const heading = PAGE_HEADING_RE.exec(line);
-    if (heading) { start(pageNameFromHeading(heading[1], headingCount)); headingCount++; continue; }
+    if (heading) { start(pageNameFromHeading(heading[1], headingCount)); headingCount++; afterRule = false; continue; }
     if (!current) {
-      // 第一个分页之前：说明文字（不上页面）。遇到正文内容但还没有分页记号时，先开一页
+      // 第一个分页之前：说明文字（不上页面）。--- 之后或遇到【…】记号时直接开一页
       if (!line.trim()) continue;
-      if (MARKER_RE.test(line)) { start(`第 ${pages.length + 1} 页`); } else { preamble.push(line.trim()); continue; }
+      if (afterRule || MARKER_RE.test(line)) { start(`第 ${pages.length + 1} 页`); afterRule = false; } else { preamble.push(line.trim()); continue; }
     }
     const marker = MARKER_RE.exec(line);
     if (marker) {
