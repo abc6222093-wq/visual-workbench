@@ -1,6 +1,6 @@
 # 导入 HTML / 网页（第 12 轮：保留原网页）
 
-把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改、可挪动（`text move color`），图片标成可裁切（`move resize crop`），纯色色块标成可移动缩放改底色（`move resize background`），整页背景只标 `background`。原文件原样复制进项目的 `import/`，绝不修改。导入**永远新建项目**，不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
+把以前做的网页课件 / 海报 / 网页变成工作台项目（格式 v3，见 `docs/format.md`）：**按页切开后保留原来的 HTML、CSS、脚本和动画**，每页写成一个独立的页面文件 `pages/<页面编号>.html`；看得出的文字自动标成可改、可挪动（`text move color`），图片标成可裁切（`move resize crop`），纯色色块标成可移动缩放改底色（`move resize background`），整页背景只标 `background`。原文件原样复制进项目的 `import/`，绝不修改。导入默认新建项目（第 13 轮起也可以「导入为页面」插进已有项目，见下文），不生成动效（`motion` 不写），原页面的 CSS / JS 动画在页面里自己跑。
 
 第 10、11 轮的做法（把页面拆成文字 / 图片 / 形状元素、截图块、分组）已经取消。
 
@@ -27,6 +27,15 @@
 入口文件：指定的 `entry`，否则层级最浅的 `index.html`，否则层级最浅、按名字排第一的 `.html`。所有文件在同一个顶层文件夹里时去掉这一层。路径里有 `../`、绝对路径的直接拒绝。
 
 `summary`：`method`、`methodLabel`、`pages`、`texts`（标成可改的文字数）、`images`（标成可裁切的图片数）、`blocks`（标成色块的数）、`backgrounds`（标成整页背景的数）、`assets`、`fonts`、`styles`（复制的外部样式表数）、`scripts`、`animations`（样式表里的 @keyframes 名）、`missingFonts`、`remote`（没下载到的网络地址）、`missing`（原文件里引用了但找不到的文件）、`failed`、`message`、`seconds`；网页另有 `kind: "web"`、`source`、`devices: {desktop, mobile}`、`skipped: [{url, devices, reason}]`、`truncated`。
+
+## 拖进来导入 / 导入为页面（第 13 轮）
+
+- **拖进来**：把 `.html`、整个文件夹或 `.zip` 拖到总览，就直接开始导入成新项目（名称按文件名 / 文件夹名，画板照常从 HTML 自动识别）；拖到编辑器的页面栏，就是「导入为页面」，插到当前页后面。页面栏右键「导入为页面…」打开同一个弹窗，自己选文件。
+- `web/import-html.js` 导出 `filesFromDataTransfer(dataTransfer) → Promise<[{ path, file }]>`：支持单个 / 多个文件、文件夹（`webkitGetAsEntry` 递归，`path` 带文件夹层级，如 `site/img/a.png`）、`.zip`；去掉 `.DS_Store`、`__MACOSX`、`Thumbs.db`、`._*`；里面没有 `.html` 时取第一个 `.zip`，都没有返回空数组（调用方据此提示或改走别的处理）。要在 `drop` 事件里同步调用。
+- `openImportDialog` 新增选项：`files`（预先选好的 `[{ path, file }]`，按选文件的同一规则定名称、猜画板、显示「已选择」）、`autoStart`（弹窗直接进入进度阶段开始上传）、`intoProject` + `after`（「导入为页面」：标题「导入为页面」，不显示项目类型、画板、项目名称；完成后显示「已导入 n 页」和「关闭」，并立刻调用 `onCreated(projectId)`、`onDone(projectId, pageIds)`）。
+- **服务端**：`POST /api/import-html/jobs` 带 `intoProject`（目标项目编号）和 `after`（页面编号，`null` 放最后）时，`name` 可省；项目类型默认跟目标项目（网页项目默认电脑端 + 手机端），课件画板 = 目标项目的画板。照常分析、在临时项目里生成页面和资源并校验，然后不改名成新项目，而是读目标 `project.json`（不存在、读不了、格式不是 v3 → 任务失败，给中文原因），用 `copyPagesInto` 把全部页复制进去：页面文件、素材、字体一起带并登记，页名、`notes`、`origin.file` 照旧（不写 `origin.project`，导入的页不算「拼进来的页」）；原文件放进目标的 `import/<时间>/`，每页 `notes` 里的 `import/` 路径跟着改。原子写回 `project.json`（`updatedAt` 更新）后调用 `createImportJobs` 的 `onProjectChanged(目标编号)`（服务器传 `id => watcher.noteSelfSnapshot(id)`）。
+- 结果：`projectId` 是目标项目编号，另有 `pageIds`（新页编号，按顺序）、`intoProject`，`summary.intoProject = true`（`summary.assets` / `fonts` 是实际新复制的个数）。
+- 失败（包括 `after` 指的页在导入过程中被删掉）时，已写进目标项目的文件全部撤掉，`project.json` 不动；取消同样不动目标项目。
 
 ## 流程与清理
 

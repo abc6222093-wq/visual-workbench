@@ -1,8 +1,10 @@
 // 旧 HTML / 网页导入任务：上传的文件先落到 <数据目录>/.import-tmp/<任务>/src/，后台浏览器按页切开（保留原 HTML、CSS、脚本、动画），
 // 资源和页面文件先写在 .import-tmp/<任务>/project/，
-// 全部完成并通过校验后才一次改名进 projects/。取消或失败时关浏览器、删临时文件，不留半个项目。导入永远新建项目，不碰原文件。
+// 全部完成并通过校验后才一次改名进 projects/。取消或失败时关浏览器、删临时文件，不留半个项目。不碰原文件。
+// 第 13 轮「导入为页面」：任务体带 intoProject（目标项目编号）、after 时，临时项目生成好后用 copyPagesInto 把全部页复制进目标项目
+// （素材、字体一起带；原文件进目标的 import/<批次>/），原子写回目标 project.json，再调 onProjectChanged(目标编号)。失败时目标项目不动。
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, rmSync, existsSync, renameSync, readdirSync, statSync, lstatSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, renameSync, readdirSync, statSync, lstatSync, readFileSync, cpSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { validateProjectData } from '../validate.js';
 import { unzip } from './zip.js';
@@ -10,6 +12,7 @@ import { analyzeHtml, cancelledError } from './analyze.js';
 import { buildProject } from './build.js';
 import { analyzeWebFiles, captureUrls, normalizeDevices, MAX_URLS } from './web.js';
 import { WEB_DEFAULT_ARTBOARD } from '../../web/project-kinds.js';
+import { copyPagesInto, rollbackWritten } from '../copy-pages.js';
 
 export const IMPORT_PRESETS = { 'slide-16x9': [1920, 1080], 'web-desktop': [1440, 900], 'web-mobile': [390, 844], 'poster-a4': [2480, 3508], 'poster-a3': [3508, 4961], custom: [1920, 1080] };
 export const IMPORT_MAX_BYTES = 380_000_000;
@@ -34,13 +37,70 @@ export function pickEntry(paths, wanted) {
   return html[0];
 }
 
-export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = analyzeWebFiles, capture = captureUrls, pageTimeout, urlTimeout } = {}) {
+/** 读目标项目（导入为页面）：不存在、读不了、旧格式都给中文原因。 */
+export function readTargetProject(dataDir, projectId) {
+  const dir = join(dataDir, 'projects', projectId), file = join(dir, 'project.json');
+  if (!existsSync(file)) throw new Error(`找不到要导入进去的项目：${projectId}`);
+  let project; try { project = JSON.parse(readFileSync(file, 'utf8')); } catch { throw new Error('要导入进去的项目文件（project.json）读不了'); }
+  if (!project || typeof project !== 'object' || project.formatVersion !== 3) throw new Error('要导入进去的项目是旧格式，请先在工作台里打开它（会自动转换）再导入');
+  return { dir, project };
+}
+
+/**
+ * 把临时项目的全部页复制进目标项目（导入为页面）。写目标的页面、素材、字体和 import/<批次>/，原子写回 project.json；
+ * 任一步失败撤掉已写的文件，目标 project.json 不动。返回 { pageIds, copiedAssets, copiedFonts }。
+ */
+export function mergeIntoProject({ dataDir, intoProject, after = null, srcDir, src, now = new Date() }) {
+  const { dir: destDir, project: dest } = readTargetProject(dataDir, intoProject);
+  if (after != null && !(dest.pages || []).some(p => p.id === after)) throw new Error(`要插入的位置（页面 ${after}）在目标项目里已经不存在`);
+  const out = copyPagesInto({ srcDir, src, pageIds: src.pages.map(p => p.id), destDir, dest, after: after ?? null, markOrigin: false, now });
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  let batch = null; const hadImport = existsSync(join(destDir, 'import'));
+  try {
+    // 原文件（或网址快照）：放进目标的 import/<批次>/，每页 notes 里的 import/ 路径跟着改
+    if (existsSync(join(srcDir, 'import'))) {
+      let n = 0; do batch = `import/${stamp}${n ? `-${n}` : ''}`; while (existsSync(join(destDir, batch)) && ++n);
+      mkdirSync(join(destDir, 'import'), { recursive: true });
+      cpSync(join(srcDir, 'import'), join(destDir, batch), { recursive: true, errorOnExist: true, force: false });
+    }
+    const project = out.project, srcById = new Map(src.pages.map(p => [p.id, p])), ids = new Set(out.pageIds);
+    src.pages.forEach((sp, i) => {
+      const page = project.pages.find(p => p.id === out.pageIds[i]);
+      if (!page || !ids.has(page.id)) return;
+      page.origin = structuredClone(srcById.get(sp.id).origin);
+      if (batch && typeof page.notes === 'string') page.notes = page.notes.replace(/(?<![\w/.-])import\//g, `${batch}/`);
+    });
+    project.updatedAt = now.toISOString();
+    const check = validateProjectData(project, { projectDir: destDir, structural: true });
+    if (!check.ok) throw new Error(`导入后的项目没通过校验：${check.errors.slice(0, 3).map(e => `${e.path} ${e.message}`).join('；')}`);
+    const file = join(destDir, 'project.json'), tmp = join(destDir, `.project-${randomUUID()}.tmp`);
+    try { writeFileSync(tmp, JSON.stringify(project, null, 2) + '\n', { flag: 'wx' }); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+    return { pageIds: out.pageIds, copiedAssets: out.copiedAssets, copiedFonts: out.copiedFonts };
+  } catch (error) {
+    rollbackWritten(destDir, out.written);
+    if (batch) { rmSync(join(destDir, batch), { recursive: true, force: true }); if (!hadImport) rmSync(join(destDir, 'import'), { recursive: true, force: true }); }
+    throw error;
+  }
+}
+
+export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = analyzeWebFiles, capture = captureUrls, pageTimeout, urlTimeout, onProjectChanged = () => {} } = {}) {
   const jobs = new Map(), tmpRoot = join(dataDir, '.import-tmp');
   // 上次异常退出留下的临时文件：超过一天的清掉
   try { if (existsSync(tmpRoot) && !lstatSync(tmpRoot).isSymbolicLink()) for (const name of readdirSync(tmpRoot)) { const p = join(tmpRoot, name); if (Date.now() - statSync(p).mtimeMs > 86400000) rmSync(p, { recursive: true, force: true }); } } catch {}
-  const view = job => ({ jobId: job.id, state: job.state, progress: Math.round(job.progress * 1000) / 1000, step: job.step, pages: job.pages, summary: job.summary, projectId: job.projectId, error: job.error });
+  const view = job => ({ jobId: job.id, state: job.state, progress: Math.round(job.progress * 1000) / 1000, step: job.step, pages: job.pages, summary: job.summary, projectId: job.projectId, error: job.error, ...(job.into ? { intoProject: job.into.project, pageIds: job.pageIds || null } : {}) });
 
   function create(b) {
+    // 导入为页面：目标项目编号、插在哪一页后面；项目类型和画板默认跟目标项目（目标读不了时任务最后会失败并说明原因）
+    let into = null, target = null;
+    if (b?.intoProject !== undefined && b?.intoProject !== null) {
+      if (typeof b.intoProject !== 'string' || !ID.test(b.intoProject)) throw fail(400, '目标项目编号不正确');
+      if (b.after != null && (typeof b.after !== 'string' || !b.after)) throw fail(400, '插入位置不正确');
+      into = { project: b.intoProject, after: b.after ?? null };
+      try { target = readTargetProject(dataDir, b.intoProject).project; } catch {}
+      b = { ...b, name: typeof b.name === 'string' && b.name.trim() ? b.name : (target?.name || b.intoProject), kind: b.kind ?? (target?.kind === 'web' ? 'web' : 'deck') };
+      if (b.kind !== 'web' && target?.artboard && b.width === undefined && b.height === undefined && Number.isInteger(target.artboard.width) && Number.isInteger(target.artboard.height)) b = { ...b, preset: IMPORT_PRESETS[target.artboard.preset] ? target.artboard.preset : 'custom', width: target.artboard.width, height: target.artboard.height };
+      if (b.kind === 'web' && b.devices === undefined) b = { ...b, devices: ['desktop', 'mobile'] };
+    }
     if (typeof b?.name !== 'string' || !b.name.trim()) throw fail(400, '请填写项目名称');
     const kind = b.kind === undefined || b.kind === 'deck' ? 'deck' : b.kind === 'web' ? 'web' : null;
     if (!kind) throw fail(400, '项目类型不正确（课件 deck / 网页 web）');
@@ -57,7 +117,7 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = 
         if (existsSync(tmpRoot) && lstatSync(tmpRoot).isSymbolicLink()) throw fail(403, '数据目录中的文件夹不能是符号链接');
         const id = randomUUID().replaceAll('-', '').slice(0, 16), dir = join(tmpRoot, id);
         mkdirSync(dir, { recursive: true });
-        const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null };
+        const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null, into };
         jobs.set(id, job);
         run(job, { kind, source: 'urls', name: b.name.trim().slice(0, 200), preset, width, height, urls, devices, entry: null, files: [] });
         return { jobId: id };
@@ -88,7 +148,7 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = 
     const id = randomUUID().replaceAll('-', '').slice(0, 16), dir = join(tmpRoot, id), src = join(dir, 'src');
     try { for (const f of list) { const to = join(src, f.path); mkdirSync(dirname(to), { recursive: true }); writeFileSync(to, f.data); } }
     catch (e) { rmSync(dir, { recursive: true, force: true }); throw e; }
-    const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备文件', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null };
+    const job = { id, dir, state: 'running', progress: 0.02, step: '正在准备文件', pages: null, summary: null, projectId: null, error: null, controller: new AbortController(), browser: null, into };
     jobs.set(id, job);
     run(job, { kind, source: 'files', name: b.name.trim().slice(0, 200), preset, width, height, devices, entry, files: list.map(f => f.path) });
     return { jobId: id };
@@ -120,6 +180,15 @@ export function createImportJobs({ dataDir, analyze = analyzeHtml, analyzeWeb = 
       const result = validateProjectData(project, { projectDir: tmpProject });
       if (!result.ok) throw new Error(`导入结果没通过校验：${result.errors.slice(0, 3).map(e => `${e.path} ${e.message}`).join('；')}`);
       check();
+      if (job.into) {
+        step(0.98, '正在放进项目');
+        const out = mergeIntoProject({ dataDir, intoProject: job.into.project, after: job.into.after, srcDir: tmpProject, src: project });
+        try { onProjectChanged(job.into.project); } catch {}
+        summary.seconds = Math.round((Date.now() - startedAt) / 100) / 10;
+        Object.assign(summary, { intoProject: true, assets: out.copiedAssets.length, fonts: out.copiedFonts.length });
+        Object.assign(job, { state: 'done', progress: 1, step: '导入完成', summary, projectId: job.into.project, pageIds: out.pageIds, pages: summary.pages });
+        return;
+      }
       const dest = join(projectsDir, id); if (existsSync(dest)) throw new Error('项目编号冲突，请重试');
       renameSync(tmpProject, dest);
       summary.seconds = Math.round((Date.now() - startedAt) / 100) / 10;
