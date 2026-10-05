@@ -47,7 +47,9 @@
   }
   const slot = (map, el) => { let m = map.get(el); if (!m) { m = {}; map.set(el, m); } return m; };
   const BG = ['background-color', 'background-image', 'background-position', 'background-size', 'background-repeat', 'background-attachment', 'background-origin', 'background-clip'];
-  const STYLE_PROPS = { fontSize: ['font-size'], move: ['translate', '--vw-dx', '--vw-dy'], resize: ['width', 'height'], color: ['color'], background: BG, crop: ['object-fit', 'object-view-box'] };
+  // 裁切：原生用 object-view-box；兼容方案（Safari 等）用同一张图做背景、把 <img> 自己的画面挪出框外（见 applyCrop）
+  const CROP_FALLBACK_PROPS = ['object-position', 'background-image', 'background-repeat', 'background-size', 'background-position', 'background-origin', 'background-clip'];
+  const STYLE_PROPS = { fontSize: ['font-size'], move: ['translate', '--vw-dx', '--vw-dy'], resize: ['width', 'height'], color: ['color'], background: BG, crop: ['object-fit', 'object-view-box'].concat(CROP_FALLBACK_PROPS) };
   function snapshot(el, kind) {
     if (kind === 'text') return { html: el.innerHTML };
     const out = {};
@@ -58,6 +60,7 @@
     if (!snap) return;
     if (kind === 'text') { if (el.innerHTML !== snap.html) el.innerHTML = snap.html; return; }
     if (kind === 'background') el.style.removeProperty('background');
+    if (kind === 'crop') dropCropFallback(el);
     for (const p of Object.keys(snap)) { const [v, pr] = snap[p]; if (v) el.style.setProperty(p, v, pr); else el.style.removeProperty(p); }
   }
   function saveOriginal(st, el, kind) { const o = slot(st.originals, el); if (!(kind in o)) o[kind] = snapshot(el, kind); }
@@ -85,8 +88,74 @@
       case 'resize': if (a.width != null) s.setProperty('width', `${a.width}px`); if (a.height != null) s.setProperty('height', `${a.height}px`); break;
       case 'color': s.setProperty('color', a.color); break;
       case 'background': s.setProperty('background', a.background); break;
-      case 'crop': if (a.crop) { s.setProperty('object-fit', 'cover'); s.setProperty('object-view-box', insetOf(a.crop)); } else { s.removeProperty('object-view-box'); } break;
+      case 'crop': if (a.crop) applyCrop(el, a.crop); else { s.removeProperty('object-view-box'); dropCropFallback(el); } break;
     }
+  }
+
+  // ---------- 裁切的兼容方案（不支持 object-view-box 的浏览器，例如 Safari；或 cropFallback:true 强制） ----------
+  // 不包裹节点、不换 src、不改元素框：<img> 照常加载原图（固有尺寸、布局都不变），用 object-position 把它自己的画面挪出框外（替换元素的内容按框裁掉），
+  // 再把同一张图作为背景，按 object-view-box + object-fit:cover 的算法摆好：裁切区域按 cover 缩放、居中。
+  // 尺寸变化（拉宽、动效改 width）时由 ResizeObserver 重算；图还没加载完（不知道原图尺寸）或在 DOMParser 文档里（缩略图，没有排版）时，
+  // 先按比例写（框和裁切区域比例相同时与原生完全一致）。
+  const BLANK_POSITION = '-100000px -100000px';
+  const CROPS = new WeakMap(); // el → crop
+  const nativeCrop = () => { try { return typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('object-view-box', 'inset(0%)'); } catch (error) { return false; } };
+  const useCropFallback = el => !!stateOf(el.ownerDocument).cropFallback || !nativeCrop();
+  const cssUrl = url => `url("${String(url).replace(/["\\\n]/g, c => (c === '\n' ? '' : `\\${c}`))}")`;
+  function applyCrop(el, crop) {
+    const s = el.style;
+    s.setProperty('object-fit', 'cover');
+    if (!useCropFallback(el)) { s.setProperty('object-view-box', insetOf(crop)); return; }
+    s.removeProperty('object-view-box');
+    CROPS.set(el, crop);
+    const src = el.currentSrc || el.getAttribute('src') || '';
+    s.setProperty('object-position', BLANK_POSITION);
+    s.setProperty('background-image', cssUrl(src));
+    s.setProperty('background-repeat', 'no-repeat');
+    s.setProperty('background-origin', 'content-box');
+    s.setProperty('background-clip', 'content-box');
+    layoutCrop(el);
+    watchCrop(el);
+  }
+  function layoutCrop(el) {
+    const c = CROPS.get(el);
+    if (!c) return;
+    const view = el.ownerDocument.defaultView;
+    const nw = el.naturalWidth, nh = el.naturalHeight;
+    let size = '', position = '';
+    if (view && nw > 0 && nh > 0 && el.isConnected) {
+      const cs = view.getComputedStyle(el);
+      const W = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      const H = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      if (W > 0 && H > 0) {
+        const vw = c.width * nw, vh = c.height * nh, k = Math.max(W / vw, H / vh);
+        const bw = nw * k, bh = nh * k;
+        size = `${r4(bw)}px ${r4(bh)}px`;
+        position = `${r4((W - vw * k) / 2 - c.x * bw)}px ${r4((H - vh * k) / 2 - c.y * bh)}px`;
+      }
+    }
+    if (!size) {
+      const along = (o, w) => (w < 1 ? pct(clamp(o / (1 - w), 0, 1)) : '0%');
+      size = `${pct(1 / c.width)} ${pct(1 / c.height)}`;
+      position = `${along(c.x, c.width)} ${along(c.y, c.height)}`;
+    }
+    if (el.style.getPropertyValue('background-size') !== size) el.style.setProperty('background-size', size);
+    if (el.style.getPropertyValue('background-position') !== position) el.style.setProperty('background-position', position);
+  }
+  function watchCrop(el) {
+    const view = el.ownerDocument.defaultView;
+    if (!view) return;
+    const st = stateOf(el.ownerDocument);
+    if (!st.cropObserver && typeof view.ResizeObserver === 'function') st.cropObserver = new view.ResizeObserver(entries => { for (const entry of entries) layoutCrop(entry.target); });
+    if (st.cropObserver) st.cropObserver.observe(el);
+    if (!el.__vwCropLoad) { el.__vwCropLoad = () => { if (CROPS.has(el)) { el.style.setProperty('background-image', cssUrl(el.currentSrc || el.getAttribute('src') || '')); layoutCrop(el); } }; el.addEventListener('load', el.__vwCropLoad); }
+  }
+  function dropCropFallback(el) {
+    if (!CROPS.has(el)) return;
+    CROPS.delete(el);
+    const st = stateOf(el.ownerDocument);
+    if (st.cropObserver) st.cropObserver.unobserve(el);
+    if (el.__vwCropLoad) { el.removeEventListener('load', el.__vwCropLoad); delete el.__vwCropLoad; }
   }
   function createUserImage(doc, id) {
     const img = doc.createElement('img');
@@ -110,6 +179,7 @@
   function applyEditsToDocument(doc, edits, opts) {
     opts = opts || {};
     const st = stateOf(doc);
+    if (opts.cropFallback !== undefined) st.cropFallback = !!opts.cropFallback;
     const assets = opts.assets || {};
     const list = Array.isArray(edits) ? edits.filter(e => e && typeof e === 'object' && typeof e.target === 'string') : [];
     const skipped = [];
@@ -320,8 +390,11 @@
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   const loaded = new Promise(resolve => { if (doc.readyState === 'complete') resolve(); else window.addEventListener('load', () => resolve(), { once: true }); });
 
-  function startPlay() {
-    const state = { controller: new AbortController(), nextStep: 0, total: Math.max(0, Number(cfg.steps) || 0), fast: !!cfg.fast, busy: false, current: Promise.resolve(), ctxStep: -1, inited: false, finishAll: () => {} };
+  // opts.edit：编辑画布的「第 N 屏」——快进跑 init 和 step 0 … target-1 后停住（不 dispose，不报「没登记 step」，快进一直开着）
+  function startPlay(opts) {
+    opts = opts || {};
+    const total = Math.max(0, Number(cfg.steps) || 0);
+    const state = { controller: new AbortController(), nextStep: 0, total, fast: !!cfg.fast || !!opts.edit, edit: !!opts.edit, target: opts.edit ? clamp(Number(opts.target) || 0, 0, total) : total, busy: false, current: Promise.resolve(), ctxStep: -1, inited: false, finishAll: () => {} };
     motion = state;
     state.ctx = createContext(state);
     const runStep = async index => {
@@ -335,7 +408,7 @@
     state.ready = (async () => {
       await loaded;
       if (!handlers) {
-        const wait = state.total > 0 ? (Number(cfg.timeout) || 5000) : (pageMentionsMotion() ? Math.min(Number(cfg.timeout) || 5000, 2000) : 0);
+        const wait = state.total > 0 && !state.edit ? (Number(cfg.timeout) || 5000) : (pageMentionsMotion() ? Math.min(Number(cfg.timeout) || 5000, 2000) : 0);
         if (wait) await Promise.race([registered, delay(wait)]);
       }
       if (state.controller.signal.aborted) return;
@@ -343,6 +416,7 @@
         for (const name of ['init', 'step', 'leave', 'dispose']) if (handlers[name] !== undefined && typeof handlers[name] !== 'function') postError(new Error(`vw.motion 的 ${name} 必须是函数`), 'init');
       }
       if (state.total > 0 && (!handlers || typeof handlers.step !== 'function')) {
+        if (state.edit) { state.nextStep = state.total; return; }
         postError(new Error(`这一页的 motion.steps 是 ${state.total}，但页面没有用 vw.motion 登记 step`), 'init');
         state.nextStep = state.total;
       }
@@ -352,14 +426,15 @@
       }
       if (state.fast) {
         state.finishAll();
-        while (state.nextStep < state.total && !state.controller.signal.aborted) await runStep(state.nextStep);
+        while (state.nextStep < state.target && !state.controller.signal.aborted) await runStep(state.nextStep);
         state.finishAll();
-        state.fast = false;
+        if (!state.edit) state.fast = false;
       }
     })();
     // 登记晚于等待时限：补跑 init
     registered.then(async () => {
       await state.ready;
+      if (state.edit) return; // 编辑画布：屏已经定了，不再改画面
       if (!state.inited && handlers && typeof handlers.init === 'function' && !state.controller.signal.aborted) {
         state.inited = true;
         try { await handlers.init(state.ctx); } catch (error) { postError(error, 'init'); }
@@ -379,14 +454,18 @@
     state.current = run.catch(() => {});
     return run;
   }
+  // 编辑画布里的动效停在某一屏：不响应 step / toEnd / leave（直接回复，免得父页面一直等）
+  const frozen = () => !motion || motion.edit || mode !== 'play';
   async function playStep() {
-    const state = motion; if (!state) return;
+    const state = motion;
+    if (frozen()) { post({ vw: 'step-done', nextStep: state ? state.nextStep : 0, total: state ? state.total : Math.max(0, Number(cfg.steps) || 0), frozen: true }); return; }
     await state.ready;
     await queue(state, async () => { if (state.nextStep < state.total) await state.runStep(state.nextStep); });
     post({ vw: 'step-done', nextStep: state.nextStep, total: state.total });
   }
   async function playToEnd() {
-    const state = motion; if (!state) return;
+    const state = motion;
+    if (frozen()) { post({ vw: 'step-done', nextStep: state ? state.nextStep : 0, total: state ? state.total : Math.max(0, Number(cfg.steps) || 0), frozen: true }); return; }
     state.fast = true; state.finishAll();
     await state.ready;
     await queue(state, async () => {
@@ -397,7 +476,7 @@
     post({ vw: 'step-done', nextStep: state.nextStep, total: state.total });
   }
   async function playLeave(direction) {
-    const state = motion;
+    const state = frozen() ? null : motion;
     if (state) {
       await state.ready;
       await queue(state, async () => {
@@ -443,10 +522,10 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   const UI_CSS = `
 :host { all: initial; }
 .box { position: absolute; box-sizing: border-box; pointer-events: none; }
-.hover { border: var(--lw) solid rgba(79, 124, 255, 0.55); }
-.sel { border: calc(var(--lw) * 1.5) solid #4f7cff; }
+.hover { border: calc(var(--lw) * 2) solid rgba(79, 124, 255, 0.95); }
+.sel { border: calc(var(--lw) * 2) solid #4f7cff; }
 .sel.editing { border-style: dashed; }
-.h { position: absolute; width: var(--hs); height: var(--hs); background: #fff; border: calc(var(--lw) * 1.5) solid #4f7cff; border-radius: calc(var(--lw) * 2); box-sizing: border-box; transform: translate(-50%, -50%); pointer-events: auto; }
+.h { position: absolute; width: var(--hs); height: var(--hs); background: #fff; border: calc(var(--lw) * 2) solid #4f7cff; border-radius: calc(var(--lw) * 2); box-sizing: border-box; box-shadow: 0 0 0 var(--lw) rgba(255, 255, 255, 0.9), 0 calc(var(--lw) * 1) calc(var(--lw) * 3) rgba(0, 0, 0, 0.25); transform: translate(-50%, -50%); pointer-events: auto; }
 .crop { position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
 .crop img { position: absolute; max-width: none; max-height: none; display: block; pointer-events: none; }
 .crop .frame { position: absolute; box-sizing: border-box; outline: calc(var(--lw) * 1.5) solid #fff; box-shadow: 0 0 0 100000px rgba(18, 16, 28, 0.5); cursor: move; }
@@ -455,6 +534,23 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   const CURSOR = { nw: 'nwse', se: 'nwse', ne: 'nesw', sw: 'nesw', n: 'ns', s: 'ns', e: 'ew', w: 'ew' };
   const MIN_BOX = 8, MAX_ZOOM = 5, WHEEL_STEP = 1.1;
   let edit = null; // 编辑状态
+
+  // 编辑画布上的用户输入：在 window 捕获阶段最先拦住（运行时的脚本在页面脚本之前注入，这个监听排在最前），
+  // 交给运行时自己的处理后 stopImmediatePropagation——页面自己的脚本（动效、点击翻转之类）收不到。
+  // 不 preventDefault：光标放置、拖选、输入法这些浏览器默认行为照旧。play 模式不拦。
+  const GUARDED = ['pointerdown', 'pointerup', 'pointermove', 'pointercancel', 'pointerover', 'pointerout', 'pointerenter', 'pointerleave',
+    'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave',
+    'click', 'dblclick', 'auxclick', 'contextmenu', 'touchstart', 'touchend', 'touchmove', 'touchcancel', 'keydown', 'keyup', 'keypress'];
+  function setupInputGuard() {
+    for (const type of GUARDED) {
+      window.addEventListener(type, e => {
+        if (mode !== 'edit') return;
+        const fn = edit && edit.handlers[type];
+        if (fn) { try { fn(e); } catch (error) { postError(error, type); } }
+        e.stopImmediatePropagation();
+      }, { capture: true, passive: false });
+    }
+  }
 
   function setupEdit() {
     const style = doc.createElement('style');
@@ -473,7 +569,11 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       drag: null, crop: null, lastRect: '', raf: 0, scale: Number(cfg.uiScale) || 1, listeners: new AbortController()
     };
     applyScale();
-    const on = (type, fn, opts) => window.addEventListener(type, fn, Object.assign({ capture: true, signal: E.listeners.signal }, opts || {}));
+    E.handlers = {};
+    const on = (type, fn, opts) => {
+      if (GUARDED.includes(type)) { E.handlers[type] = fn; return; } // 由输入守卫转交
+      window.addEventListener(type, fn, Object.assign({ capture: true, signal: E.listeners.signal }, opts || {}));
+    };
     on('pointerdown', onDown);
     on('pointermove', onMove);
     on('pointerup', onUp);
@@ -506,7 +606,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   function applyScale() {
     const s = edit.scale > 0 ? edit.scale : 1;
     edit.host.style.setProperty('--lw', `${1 / s}px`, 'important');
-    edit.host.style.setProperty('--hs', `${10 / s}px`, 'important');
+    edit.host.style.setProperty('--hs', `${12 / s}px`, 'important');
   }
   function markFrom(node) {
     for (let el = node && node.nodeType === 1 ? node : node && node.parentElement; el && el !== doc.documentElement; el = el.parentElement) {
@@ -515,16 +615,56 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     }
     return null;
   }
+  // 框线附近（参照 PowerPoint 文本框）：内侧 10px、外侧 6px（屏幕像素，按 uiScale 换算成页面像素）
+  const EDGE_IN = 10, EDGE_OUT = 6;
   function nearEdge(el, e) {
     const r = el.getBoundingClientRect();
-    const band = Math.min(8 / (edit.scale || 1), r.width / 4, r.height / 4);
+    if (!r.width && !r.height) return false;
+    const s = edit.scale || 1;
+    const inner = Math.min(EDGE_IN / s, r.width / 4, r.height / 4), outer = EDGE_OUT / s;
     const x = e.clientX - r.left, y = e.clientY - r.top;
-    return x < band || y < band || r.width - x < band || r.height - y < band;
+    if (x < -outer || y < -outer || x > r.width + outer || y > r.height + outer) return false;
+    if (x < 0 || y < 0 || x > r.width || y > r.height) return true; // 框外那一圈
+    const d = Math.min(x, y, r.width - x, r.height - y);
+    if (d >= inner) return false;
+    // 框内那一圈：空白处都算框线；压在字上时只算最外 EDGE_TIGHT px（点在字上仍是改字）
+    return d < EDGE_TIGHT / s || !overGlyph(el, e.clientX, e.clientY);
+  }
+  const EDGE_TIGHT = 4;
+  function overGlyph(el, cx, cy) {
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const range = doc.createRange();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.nodeValue || !node.nodeValue.trim()) continue;
+      range.selectNodeContents(node);
+      for (const q of range.getClientRects()) if (cx >= q.left && cx <= q.right && cy >= q.top && cy <= q.bottom) return true;
+    }
+    return false;
+  }
+  const movable = caps => caps.includes('move') || caps.includes('resize') || caps.includes('text');
+  // 带 text 又带 move 的元素：鼠标离框线很近时（含框外 6px，e.target 不是它）按几何位置找到它。先看选中的、悬停的，再看其余（后面的盖在上面）
+  function edgeTarget(e) {
+    const E = edit;
+    const list = [E.selected, E.hovered];
+    const marks = [...doc.querySelectorAll('[data-vw-id]')];
+    for (let i = marks.length - 1; i >= 0; i--) list.push(marks[i]);
+    const seen = new Set();
+    for (const el of list) {
+      if (!el || seen.has(el) || !el.isConnected) continue;
+      seen.add(el);
+      if (el === E.editing) { // 改字中：框里是放光标，只有框外那一圈能拖
+        const r = el.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) continue;
+      }
+      const caps = capsOf(el);
+      if (caps.includes('text') && caps.includes('move') && nearEdge(el, e)) return el;
+    }
+    return null;
   }
   function setBox(box, r) { box.style.left = `${r.x}px`; box.style.top = `${r.y}px`; box.style.width = `${r.width}px`; box.style.height = `${r.height}px`; }
   function refreshUi() {
     const E = edit;
-    if (E.hovered && E.hovered !== E.selected && E.hovered.isConnected && !E.drag) { E.hoverBox.hidden = false; setBox(E.hoverBox, pageRect(E.hovered)); }
+    if (E.hovered && E.hovered !== E.selected && E.hovered.isConnected && !E.drag && !E.crop) { E.hoverBox.hidden = false; setBox(E.hoverBox, pageRect(E.hovered)); }
     else E.hoverBox.hidden = true;
     const el = E.selected;
     if (!el || !el.isConnected || E.crop) { E.selBox.hidden = true; if (el && !el.isConnected) select(null); return; }
@@ -651,10 +791,11 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     if (handle && E.selected) { e.preventDefault(); e.stopPropagation(); takeFocus(); startResize(e, handle); return; }
     if (E.editing && (E.editing === e.target || E.editing.contains(e.target))) return; // 浏览器自己放光标、拖选
     if (E.editing) exitEditing();
-    const el = markFrom(e.target);
+    const edge = edgeTarget(e);
+    const el = edge || markFrom(e.target);
     if (!el) { e.preventDefault(); takeFocus(); select(null); return; }
     const caps = capsOf(el);
-    if (caps.includes('text') && !(caps.includes('move') && nearEdge(el, e))) { enterEditing(el, e); return; }
+    if (caps.includes('text') && !edge) { enterEditing(el, e); return; }
     e.preventDefault();
     takeFocus();
     select(el);
@@ -678,12 +819,15 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       return;
     }
     if (e.buttons) return;
-    const el = markFrom(e.target);
-    E.hovered = el;
+    const edge = edgeTarget(e);
+    const under = markFrom(e.target);
+    const el = edge || under;
+    E.hovered = el && movable(capsOf(el)) ? el : null;
     let cursor = '';
-    if (el && el !== E.editing) {
+    if (edge) cursor = 'move';
+    else if (el && el !== E.editing) {
       const caps = capsOf(el);
-      if (caps.includes('text')) cursor = caps.includes('move') && nearEdge(el, e) ? 'move' : 'text';
+      if (caps.includes('text')) cursor = 'text';
       else if (caps.includes('move')) cursor = 'move';
     }
     if (cursor) doc.documentElement.setAttribute('data-vw-cursor', cursor); else doc.documentElement.removeAttribute('data-vw-cursor');
@@ -966,6 +1110,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         case 'step': playStep().catch(error => postError(error, 'step')); break;
         case 'toEnd': playToEnd().catch(error => postError(error, 'toEnd')); break;
         case 'leave': playLeave(m.direction).catch(error => postError(error, 'leave')); break;
+        case 'screen': gotoScreenMessage(m.screen); break;
         case 'settle': settle(m.timeout).then(() => post({ vw: 'settled', ok: true, height: contentHeight() }), error => post({ vw: 'settled', ok: false, error: describe(error).message, height: contentHeight() })); break;
         case 'mode': switchMode(m.mode); break;
         case 'scroll': window.scrollTo(window.scrollX, Number(m.top) || 0); break;
@@ -973,9 +1118,35 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       }
     } catch (error) { postError(error, m.vw); }
   }
+  // ---------- 编辑画布的「第 N 屏」 ----------
+  const screenNum = v => (Number.isInteger(Number(v)) && Number(v) >= 1 ? Number(v) : null);
+  let currentScreen = null; // null = 全部显示（没跑 init）
+  async function gotoScreen(k) {
+    if (!motion) await startPlay({ edit: true, target: k - 1 });
+    else {
+      const state = motion;
+      await state.ready;
+      await queue(state, async () => {
+        state.fast = true; state.finishAll();
+        const target = Math.min(k - 1, state.total);
+        while (state.nextStep < target && !state.controller.signal.aborted) await state.runStep(state.nextStep);
+        state.finishAll();
+      });
+    }
+    currentScreen = k;
+    if (edit) edit.lastRect = '';
+  }
+  async function gotoScreenMessage(value) {
+    const k = screenNum(value);
+    if (mode !== 'edit' || !k || (currentScreen !== null && k < currentScreen)) { post({ vw: 'screen-done', screen: value, applied: false }); return; }
+    if (edit) { exitEditing(); if (edit.crop) edit.crop.finish(true); }
+    try { await gotoScreen(k); } catch (error) { postError(error, 'screen'); }
+    post({ vw: 'screen-done', screen: k, applied: true, nextStep: motion ? motion.nextStep : 0, steps: Math.max(0, Number(cfg.steps) || 0) });
+  }
+
   function switchMode(next) {
     if (next === mode || (next !== 'edit' && next !== 'play')) return;
-    if (mode === 'edit') teardownEdit();
+    if (mode === 'edit') { teardownEdit(); stopPlay(); currentScreen = null; }
     if (mode === 'play') stopPlay();
     mode = next;
     if (mode === 'edit') setupEdit();
@@ -999,7 +1170,10 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
 
   function boot(config) {
     if (cfg) return;
-    cfg = Object.assign({ mode: 'edit', edits: [], steps: 0, fast: false, assets: {} }, config || {});
+    cfg = Object.assign({ mode: 'edit', edits: [], steps: 0, fast: false, assets: {}, screen: null, cropFallback: false }, config || {});
+    STATE.cropFallback = !!cfg.cropFallback;
+    mode = cfg.mode === 'play' ? 'play' : 'edit';
+    setupInputGuard();
     window.addEventListener('message', onMessage);
     window.addEventListener('error', event => { postError(event.error || event.message, 'page'); });
     window.addEventListener('unhandledrejection', event => { postError(event.reason || new Error('未处理的 Promise 拒绝'), 'page'); });
@@ -1018,8 +1192,14 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       if (typeof ResizeObserver === 'function') new ResizeObserver(reportHeight).observe(doc.documentElement);
       window.addEventListener('load', reportHeight);
       if (mode === 'edit') {
-        setupEdit();
-        post({ vw: 'ready', pageId: cfg.pageId, mode, height: lastHeight, marks: listMarks(doc), steps: Math.max(0, Number(cfg.steps) || 0), nextStep: 0 });
+        const k = screenNum(cfg.screen);
+        const go = () => {
+          if (mode !== 'edit') return;
+          setupEdit();
+          post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: Math.max(0, Number(cfg.steps) || 0), nextStep: motion ? motion.nextStep : 0, screen: k });
+        };
+        if (k) gotoScreen(k).then(go, error => { postError(error, 'screen'); go(); });
+        else go();
       } else {
         startPlay().then(() => { if (!motion) return; post({ vw: 'ready', pageId: cfg.pageId, mode, height: contentHeight(), marks: listMarks(doc), steps: motion.total, nextStep: motion.nextStep }); });
       }

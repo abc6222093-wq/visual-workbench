@@ -1,4 +1,5 @@
-// 第 12 轮运行时测试的夹具：临时 v3 小项目、最简静态服务（web/ 挂在 /，数据目录挂在 /data/，GET 加 CORS）、测试宿主页。
+// 第 12 轮运行时测试的夹具：临时 v3 小项目、最简静态服务（web/ 挂在 /，数据目录挂在 /data/，GET 加 CORS；GET /api/projects/<id> 同真实服务）、测试宿主页。
+// 注意：真实服务的 /data/projects/ 不提供 project.json，放映页这类读项目的地方要走 /api/projects/<id>（见 round12-fix-runtime-player 测试）。
 // 不用真实的数据目录和用户主目录；结束后清理临时目录。
 import http from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -29,9 +30,10 @@ export function makePng(width, height) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-/** 在临时数据目录里写一个 v3 项目：pages 是 [{ id, html, steps?, edits?, device?, size? }]。返回 { dataDir, projectDir, project, cleanup }。 */
-export function writeProject({ id = 'rt-test', kind = 'deck', artboard = { preset: 'custom', width: 960, height: 540 }, pages, assets = [], files = {} }) {
-  const dataDir = mkdtempSync(join(tmpdir(), 'vw-r12-runtime-'));
+/** 在临时数据目录里写一个 v3 项目：pages 是 [{ id, html, steps?, edits?, device?, size? }]，prefix 是临时目录前缀。返回 { dataDir, projectDir, project, cleanup }。 */
+export function writeProject({ id = 'rt-test', kind = 'deck', artboard = { preset: 'custom', width: 960, height: 540 }, pages, assets = [], files = {}, prefix = 'vw-r12-runtime-' }) {
+  // prefix：临时数据目录的前缀，可以带中文和空格（例如「我的云端硬盘 测试-」）
+  const dataDir = mkdtempSync(join(tmpdir(), prefix));
   const projectDir = join(dataDir, 'projects', id);
   mkdirSync(join(projectDir, 'pages'), { recursive: true });
   mkdirSync(join(projectDir, 'assets'), { recursive: true });
@@ -60,6 +62,13 @@ export async function startServer(dataDir) {
   const requests = [];
   const server = http.createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    // 放映页读项目走 GET /api/projects/<id>（和真实服务一样返回 { project, revision }）；同源请求，不记进 requests
+    const api = /^\/api\/projects\/([^/]+)$/.exec(path);
+    if (api && req.method === 'GET' && !req.headers.origin) {
+      try { const project = JSON.parse(readFileSync(join(dataDir, 'projects', api[1], 'project.json'), 'utf8')); res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ project, revision: null, syncConflicts: [] })); }
+      catch { res.writeHead(404, { 'Content-Type': MIME['.json'] }); res.end('{"error":"Project not found"}'); }
+      return;
+    }
     if (path.startsWith('/api/')) { requests.push({ method: req.method, path, origin: req.headers.origin ?? null }); res.writeHead(403, { 'Access-Control-Allow-Origin': '*' }); res.end('forbidden'); return; }
     if (path === '/harness.html') { res.writeHead(200, { 'Content-Type': MIME['.html'] }); res.end(HARNESS); return; }
     const isData = path.startsWith('/data/');

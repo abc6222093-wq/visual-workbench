@@ -44,9 +44,16 @@ async function start() {
   if (!projectId) { message.textContent = '缺少项目编号：请从工作台点「放映」打开。'; return; }
   let project;
   try {
-    const response = await fetch(`/data/projects/${encodeURIComponent(projectId)}/project.json`, { cache: 'no-cache' });
-    if (!response.ok) throw new Error(response.status === 423 ? '另一台电脑上的工作台还开着，请先在工作台里确认' : `读不到项目（${response.status}）`);
-    project = await response.json();
+    // 走 /api/projects/<id>：返回 { project, revision, syncConflicts }，旧格式（v2）项目服务会先自动转换。
+    // （数据目录的 /data/projects/ 只提供 pages/assets/fonts 等子文件夹，读不到 project.json。）
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { cache: 'no-cache' });
+    if (!response.ok) {
+      let detail = '';
+      try { detail = (await response.json())?.error || ''; } catch { /* 不是 JSON */ }
+      throw new Error(response.status === 423 ? '另一台电脑上的工作台还开着，请先在工作台里确认' : `读不到项目（${response.status}${detail ? `：${detail}` : ''}）`);
+    }
+    const body = await response.json();
+    project = body && body.project ? body.project : body;
   } catch (error) { message.textContent = `无法放映：${error.message}`; return; }
   document.title = `放映 · ${project.name || project.id}`;
   if (!Array.isArray(project.pages) || !project.pages.length) { message.textContent = '这个项目还没有页面。'; return; }

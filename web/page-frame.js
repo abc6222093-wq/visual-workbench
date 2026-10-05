@@ -3,7 +3,7 @@
 //
 // 对外：
 //   createPageFrame(options) → 控制对象（见函数注释）
-//   buildSrcdoc({ html, mode, project, page, edits, baseHref, runtimeText, fast, assetBase, assetUrls, uiScale, timeout }) → 注入后的 HTML 字符串（纯字符串运算，Node 里也能用）
+//   buildSrcdoc({ html, mode, project, page, edits, baseHref, runtimeText, fast, assetBase, assetUrls, uiScale, timeout, screen, cropFallback }) → 注入后的 HTML 字符串（纯字符串运算，Node 里也能用）
 //   staticDocument({ html, project, page, edits, baseHref, assetBase, assetUrls }) → 缩略图用的静态 HTML（叠修改单、删脚本），放进 sandbox="" 的 iframe
 //   loadRuntimeText() → Promise<string>：/page-runtime.js 全文（缓存；导出的单文件可用 globalThis.__VW_EXPORT__.runtimeText 提供）
 //   pageFileUrl(project, page, assetBase?) → /data/projects/<id>/<page.file>
@@ -91,13 +91,17 @@ function inject(html, head, tail = '') {
 }
 
 /** 生成 iframe.srcdoc：<base>、基础样式、运行时、启动参数，按约定放在 <head> 最前。 */
-export function buildSrcdoc({ html, mode = 'edit', project, page, edits, baseHref, runtimeText, fast = false, assetBase, assetUrls, uiScale, timeout } = {}) {
+// screen：编辑画布的「第 k 屏」（k ≥ 1；1 = init 完成、step(0) 之前）。不给 = 全部显示（不跑 init）。
+// cropFallback：true 时裁切一律走兼容方案（背景图），测试和不支持 object-view-box 的浏览器用。
+const screenOf = v => (Number.isInteger(Number(v)) && Number(v) >= 1 ? Number(v) : null);
+export function buildSrcdoc({ html, mode = 'edit', project, page, edits, baseHref, runtimeText, fast = false, assetBase, assetUrls, uiScale, timeout, screen, cropFallback } = {}) {
   if (typeof runtimeText !== 'string' || !runtimeText) throw new Error('buildSrcdoc 需要页面运行时全文（loadRuntimeText()）');
   const base = baseHref === null ? '' : (baseHref || defaultBaseHref(project, page, assetBase));
   const boot = {
     mode, pageId: page?.id, size: frameSize(project, page), edits: Array.isArray(edits) ? edits : (page?.edits || []),
     steps: Math.max(0, Number(page?.motion?.steps) || 0), fast: !!fast, assetBase: assetBase || null,
-    assets: assetUrls || assetUrlMap(project, page, { assetBase: baseHref === null ? assetBase : undefined }), uiScale: uiScale || 1, timeout: timeout || 5000
+    assets: assetUrls || assetUrlMap(project, page, { assetBase: baseHref === null ? assetBase : undefined }), uiScale: uiScale || 1, timeout: timeout || 5000,
+    screen: screenOf(screen), cropFallback: !!cropFallback
   };
   const head = (base ? `<base href="${escapeAttr(base)}">` : '')
     + `<style data-vw-base>${baseStyle(project, page)}</style>`
@@ -132,15 +136,16 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.
 
 /**
  * 在 container 里放一个页面 iframe。
- * options：{ project, page, mode: 'edit'|'play', container, baseHref?, html?, edits?, fast?, assetBase?, assetUrls?, uiScale?, timeout?, runtimeText?,
+ * options：{ project, page, mode: 'edit'|'play', container, baseHref?, html?, edits?, fast?, screen?, cropFallback?, assetBase?, assetUrls?, uiScale?, timeout?, runtimeText?,
  *            onMessage(msg), onReady(msg), onError(msg) }
  *   html 不给时按 pageFileUrl(project, page, assetBase) 取；edits 不给时用 page.edits。
- * 返回 { iframe, ready, send, setEdits, select, set, addImage, removeImage, step, toEnd, leave, settle, setMode, scrollTo, setUiScale, destroy, reload }
+ * 返回 { iframe, ready, send, setEdits, select, set, addImage, removeImage, step, toEnd, leave, settle, screen, setMode, scrollTo, setUiScale, destroy, reload }
+ *   screen(k) → Promise<screen-done 消息>：edit 模式里原地快进到第 k 屏（applied:true）；k 比当前屏小时不能原地回退（applied:false），调用方用 reload({ screen: k }) 另建。
  *   ready：Promise<ready 消息>（reload 后换成新的）；step()/toEnd() → Promise<step-done 消息>；leave(dir) → Promise<left 消息>；settle(ms) → Promise<settled 消息>
  *   页面 → 父的所有消息都会交给 onMessage（ready、edit、select、editing、paste-image、menu、step-done、left、height、scroll、key、nav、error、settled）。
  */
 export function createPageFrame(options = {}) {
-  let { project, page, mode = 'edit', container, html, edits, fast = false } = options;
+  let { project, page, mode = 'edit', container, html, edits, fast = false, screen = null } = options;
   const iframe = document.createElement('iframe');
   iframe.setAttribute('sandbox', 'allow-scripts');
   iframe.setAttribute('referrerpolicy', 'no-referrer');
@@ -153,7 +158,7 @@ export function createPageFrame(options = {}) {
   applySize();
   let destroyed = false, isReady = false, queue = [], generation = 0;
   let resolveReady;
-  const waiters = { 'step-done': [], left: [], settled: [] };
+  const waiters = { 'step-done': [], left: [], settled: [], 'screen-done': [] };
   const api = {};
   const newReady = () => { isReady = false; api.ready = new Promise(resolve => { resolveReady = resolve; }); };
   newReady();
@@ -190,7 +195,7 @@ export function createPageFrame(options = {}) {
         options.runtimeText || loadRuntimeText()
       ]);
       if (destroyed || mine !== generation) return;
-      iframe.srcdoc = buildSrcdoc({ html: text, mode, project, page, edits: edits ?? page.edits ?? [], baseHref: options.baseHref, runtimeText, fast, assetBase: options.assetBase, assetUrls: options.assetUrls, uiScale: options.uiScale, timeout: options.timeout });
+      iframe.srcdoc = buildSrcdoc({ html: text, mode, project, page, edits: edits ?? page.edits ?? [], baseHref: options.baseHref, runtimeText, fast, assetBase: options.assetBase, assetUrls: options.assetUrls, uiScale: options.uiScale, timeout: options.timeout, screen, cropFallback: options.cropFallback });
     } catch (error) {
       if (destroyed || mine !== generation) return;
       options.onError?.({ vw: 'error', phase: 'load', message: error.message, stack: String(error.stack || '') });
@@ -210,11 +215,13 @@ export function createPageFrame(options = {}) {
     toEnd() { return request('step-done', { vw: 'toEnd' }); },
     leave(direction = 1) { return request('left', { vw: 'leave', direction }); },
     settle(timeout) { return request('settled', { vw: 'settle', timeout }); },
+    screen(k) { return request('screen-done', { vw: 'screen', screen: k }).then(msg => { if (msg?.applied) screen = msg.screen; return msg; }); },
     setMode(next) { mode = next; send({ vw: 'mode', mode: next }); },
     scrollTo(top) { send({ vw: 'scroll', top }); },
     setUiScale(scale) { send({ vw: 'uiScale', scale }); },
     get mode() { return mode; },
     get page() { return page; },
+    get currentScreen() { return screen; },
     reload(next = {}) {
       if (destroyed) return api.ready;
       if (next.page) page = next.page;
@@ -222,6 +229,7 @@ export function createPageFrame(options = {}) {
       if ('edits' in next) edits = next.edits;
       html = typeof next.html === 'string' ? next.html : (next.page ? undefined : html);
       if ('fast' in next) fast = !!next.fast;
+      if ('screen' in next) screen = next.screen ?? null;
       if (next.mode) mode = next.mode;
       queue = [];
       for (const list of Object.values(waiters)) for (const w of list.splice(0)) w(null);
