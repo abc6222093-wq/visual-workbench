@@ -31,9 +31,16 @@
     for (const el of doc.querySelectorAll('[data-vw-id]')) if (el.getAttribute('data-vw-id') === id) return el;
     return null;
   }
+  // 整页背景（<html> / <body> 上的标记）：画布上点空白仍是取消选中，改底色从父页面的工具条进（marks 里带 page:true 与当前值）
+  const isPageMark = el => !!el && (el === el.ownerDocument.documentElement || el === el.ownerDocument.body);
   function listMarks(doc) {
     const out = [];
-    for (const el of doc.querySelectorAll('[data-vw-id]')) { const caps = capsOf(el); if (caps.length) out.push({ id: el.getAttribute('data-vw-id'), caps }); }
+    for (const el of doc.querySelectorAll('[data-vw-id]')) {
+      const caps = capsOf(el); if (!caps.length) continue;
+      const mark = { id: el.getAttribute('data-vw-id'), caps };
+      if (isPageMark(el)) { mark.page = true; const view = doc.defaultView; if (view && caps.includes('background')) mark.values = { background: toHex(view.getComputedStyle(el).backgroundColor) }; }
+      out.push(mark);
+    }
     return out;
   }
 
@@ -611,7 +618,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   function markFrom(node) {
     for (let el = node && node.nodeType === 1 ? node : node && node.parentElement; el && el !== doc.documentElement; el = el.parentElement) {
       if (el === edit.host) return null;
-      if (el.hasAttribute('data-vw-id') && capsOf(el).length) return el;
+      if (el.hasAttribute('data-vw-id') && capsOf(el).length && !isPageMark(el)) return el;
     }
     return null;
   }

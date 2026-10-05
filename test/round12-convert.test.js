@@ -175,7 +175,7 @@ function assertStructure(projectDir, before, result) {
     assert.deepEqual(duplicates, []); assert.deepEqual(invalidIds, []);
     const walk = list => { for (const el of list) { walk(el.children || []); const caps = marks.get(el.id); assert.ok(caps, `${el.id} 没有标记`);
       if (el.locked) assert.deepEqual(caps, []);
-      else if (el.type === 'text') assert.deepEqual(caps, ['text', 'color']);
+      else if (el.type === 'text') assert.deepEqual(caps, ['text', 'move', 'color']);
       else if (el.type === 'image' && !el.tint && !el.flipX && !el.flipY) assert.deepEqual(caps, ['move', 'resize', 'crop']);
       else if (el.type === 'shape') assert.deepEqual(caps, ['move', 'resize', ...(el.fill && ['rect', 'ellipse'].includes(el.shape || 'rect') ? ['background'] : [])]);
       else assert.ok(caps.includes('move') && caps.includes('resize'));

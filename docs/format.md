@@ -211,7 +211,7 @@
 - 交接包（网页项目）：改动清单 = 修改单（按页、按目标，写明原网页定位 `data-vw-origin`、改前改后），加每页改前改后对比图和「复制给 agent」文字。
 
 ## 12. 旧项目转换（v2 → v3）
-v2 项目第一次被工作台打开时：先自动存版「转换为 v3 前自动存版」，再把每页元素转成绝对定位的 HTML（`pages/<页面编号>.html`），文字标 `text color`、图片标 `move resize crop`、形状等纯色色块标 `move resize background`、整页底色标 `background`；v2 的 `motion.source` 包一层兼容层照搬（`ctx.element(id)` 仍可用，`transition` 换页效果搬不了，写进该页 `notes`）。转换后画面与原来一致。转换失败的项目保持原样，并给出中文说明。命令行：`npm run convert -- <项目>`。
+v2 项目第一次被工作台打开时：先自动存版「转换为 v3 前自动存版」，再把每页元素转成绝对定位的 HTML（`pages/<页面编号>.html`），文字标 `text move color`（能改字、挪动、改色）、图片标 `move resize crop`、形状等纯色色块标 `move resize background`、整页底色标 `background`；v2 的 `motion.source` 包一层兼容层照搬（`ctx.element(id)` 仍可用，`transition` 换页效果搬不了，写进该页 `notes`）。转换后画面与原来一致。转换失败的项目保持原样，并给出中文说明。命令行：`npm run convert -- <项目>`。
 
 ## 13. 旧 HTML 导入
 `总览 → 导入 HTML / 网页`：按页切开后**保留原来的 HTML、CSS 和动画**，自动把看得出的文字（标题、段落、列表项、按钮等）标成 `text color`、图片标成 `move resize crop`、纯色色块标成 `move resize background`（整页背景只标 `background`），编号 `t1`、`t2`…、`i1`…；原文件原样放进 `import/`，绝不修改。细节见 `docs/import-html.md`。

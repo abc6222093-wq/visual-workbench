@@ -13,6 +13,7 @@ export const WEBKIT_TEST_FILES = Object.freeze([
   'test/round12-editor-layout.test.js', // 窄窗口工具条一行、专注模式、折叠栏
   'test/image-tint.test.js',            // SVG 上传安全检查（贴图、素材库走同一条上传）
   'test/round12-fix-export-real.test.js', // 转换来的 / 旧 HTML 导入的项目导出放映版，file:// 打开：动效、点击、翻页
+  'test/round12-fix-runtime-crop.test.js', // 裁切在不支持 object-view-box 的浏览器（Safari）用背景图方式显示，画面与 Chromium 一致
 ]);
 export function webkitTestArgs() { return ['--test', ...WEBKIT_TEST_FILES]; }
 export function webkitMissingMessage() {

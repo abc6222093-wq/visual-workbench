@@ -685,6 +685,7 @@ function onFrameReady(token, msg = {}) {
   const keep = F.pendingSelect;
   F.pendingSelect = null;
   if (keep && (msg.marks || []).some((m) => m.id === keep)) F.frame?.select(keep);
+  if (!S.mark) refreshQuickToolbar(); // 没选中东西时也要按这一页有没有整页背景标记决定工具条
 }
 // iframe 回报的消息（只认当前这个 iframe 的）
 function onFrameMessage(token, msg = {}) {
@@ -765,9 +766,16 @@ function markValue(kind) {
   if (edit) return edit.after?.[kind];
   return S.mark?.values?.[kind] ?? null;
 }
+// 整页背景（页面文件里标在 <body> 上、只能改颜色的那条标记）：没选中东西时工具条给「页面底色」
+function pageBgMark() { return (F?.ready?.marks || []).find((m) => m.page && (m.caps || []).includes("background")) || null; }
 function quickbarHTML() {
   const mark = S.mark;
-  if (!mark) return "";
+  if (!mark) {
+    const bg = pageBgMark();
+    if (!bg) return "";
+    const edit = (page().edits || []).find((e) => e.target === bg.id && e.kind === "background");
+    return `<div class="qt-inner" data-mark="${esc(bg.id)}"><label class="g-field qt-field qt-color" title="整页背景颜色"><span>页面底色</span><input type="color" data-q="background" value="${toHex(edit ? edit.after?.background : bg.values?.background, "#ffffff")}" aria-label="页面底色"></label></div>`;
+  }
   const caps = new Set(mark.caps || []), parts = [];
   if (caps.has("text")) { const size = markValue("fontSize"); parts.push(`<label class="g-field qt-field" title="字号（像素）"><span>字号</span><input type="number" min="1" max="2000" step="1" data-q="fontSize" value="${size == null ? "" : Math.round(Number(size) * 100) / 100}" aria-label="字号"></label>`); }
   if (caps.has("color")) parts.push(`<label class="g-field qt-field qt-color" title="文字颜色"><span>文字颜色</span><input type="color" data-q="color" value="${toHex(markValue("color"), "#000000")}" aria-label="文字颜色"></label>`);
@@ -778,7 +786,7 @@ function quickbarHTML() {
 function refreshQuickToolbar() {
   const bar = $(".ed-quickbar");
   if (!bar) return;
-  const html = quickbarHTML(), key = JSON.stringify([S.mark?.id, S.mark?.caps]);
+  const html = quickbarHTML(), key = JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps]);
   const hide = !html;
   if (bar.hidden !== hide) { bar.hidden = hide; queueMicrotask(() => syncGlass(app)); }
   if (hide) { bar.replaceChildren(); bar._key = null; return; }
@@ -793,7 +801,7 @@ function refreshQuickToolbar() {
   }
 }
 function quickChange(input) {
-  const id = S.mark?.id, kind = input.dataset.q;
+  const id = S.mark?.id || pageBgMark()?.id, kind = input.dataset.q;
   if (!id || !F?.frame) return;
   let after;
   if (kind === "fontSize") { const n = Number(input.value); if (!Number.isFinite(n) || n <= 0) return refreshQuickToolbar(); after = { fontSize: Math.min(2000, n) }; }
