@@ -1,24 +1,35 @@
-# 当前移交 · 第 12 轮收尾（Mac 本机：更新代码、重新制作桌面应用、真机验证）
+# 当前移交 · 第 13 轮（整理和复用）
 
-分支 `claude/round12-free-pages`（**没有合并进 main**，等统筹窗口安排）。规则见 `CLAUDE.md`（= `AGENTS.md`，最前面是硬原则），格式见 `docs/format.md`（v3），内部约定见 `docs/round12-contract.md`，桌面应用见 `docs/desktop.md`。
+分支 `claude/round13-organize`（基于已合并第 12 轮的 `main` 531390c；**没有合并进 main**，等用户验收后统筹窗口安排）。规则见 `CLAUDE.md`（= `AGENTS.md`），格式见 `docs/format.md`（v3，本轮加 §15–§19），内部约定见 `docs/round12-contract.md` 和 `docs/round13-contract.md`（§14 是做完后的最终形状），桌面应用见 `docs/desktop.md`。
 
 ## 本轮做了什么
-1. **用户 Mac 上的代码与桌面应用已更新**：仓库停在本分支最新提交；`~/Applications/视觉工作台.app` 已重新制作（版本 0.2.0，ad-hoc 签名，`app-config.json` 指向本仓库），程序坞里原来的图标继续指向它；`--smoke` 自测通过。
-2. **真机验证（Playwright 驱动安装好的 Electron 应用，数据目录是含中文和空格的临时路径）全部正常**：改字时右键出剪切 / 复制 / 粘贴 / 全选且四项都有效（属性栏输入框同样）；Cmd+C / V / X / A / Z 在改字时有效；第 N 屏切换；编辑画布点击不播放动效；玻璃层不重建、磨砂玻璃全程可见；文字 / 图片 / 色块的悬停框、把手、拖动、缩放、改色；放映打开并推进；导出放映版有进度条、导出的文件用 file:// 打开能放映有动效；顶部没有「旧版本应用」提示。
-3. **修了一个真机上才发现的放映死锁**（`web/playback.js`、`web/page-frame.js`、`web/page-runtime.js`）：放映壳以前先等页面 `ready` 再显示 iframe，而 `ready` 要等 `init` 跑完；`init` 里 `await ctx.animate(...)` 的入场动画（示例课件封面就是）在 `visibility:hidden` 的 iframe 里不会走（Chromium 不推进隐藏 iframe 的动画），所以放映一直停在「正在准备放映…」。现在运行时在 play 模式先报 `loaded`（文档加载完、修改单叠完），放映壳收到就显示新页、销毁旧页，再等 `ready`。导出的放映版用同一个放映壳，一并修好。测试：`test/round12-fix-playback-reveal.test.js`。
-4. **导入的旧 HTML / 网页里的文字也能拖动**（`src/import-html/inpage.js`）：导入时文字标 `text move color`（以前只有 `text color`），和 v2 转换来的文字一致；迁移说明、`docs/import-html.md`、`docs/format.md` 同步。测试：`test/round12-fix-import-text-move.test.js`（导入输出的能力 + 编辑画布上从框线拖动产生 `move` 修改）。原有导入测试里断言的 `text color` 相应改成 `text move color`。
-5. 本机 Chrome 154 把 srcdoc iframe 的 url 报成 `about:blank`，`test/round12-fix-export-real.test.js` 的能力探针改为按元素取 frame（断言不变）。
+- **第 12 轮验收没通过的两处 + 一处遗留**：
+  - 0a「第 N 屏」一定看得见：屏按钮挪到画布下方一排大标签；没写 `motion.steps` 但有 `vw.motion` 的页由工作台在隐藏 iframe 里快进数出屏数并提醒「请 agent 在 project.json 写上 motion.steps」；只有页面自带动画、没有分屏的页写一句说明；页面栏显示「N 屏」。用户以前看不到的原因：她的两个项目（44 页导入的旧 HTML、11 页 v2 课件）没有任何页写 `steps`、也没有页用 `vw.motion`，旧 HTML 的动画是页面自己的 CSS / JS 动画，而旧按钮只在 `steps ≥ 1` 时出现，且在工具条里很小。
+  - 0b 文字：第一下点击选中整个文字框（框 + 把手，按住就拖、方向键微调），已选中再点一下（或双击）才出光标；改字期间手感不变。
+  - 0c 放映预加载的下一页用 `hold` 启动，翻过去才跑 `init`，入场动画从头播；导出的放映版同样。
+- **草稿分页**（`web/draft-model.js` 纯逻辑 + `src/drafts.js` + `web/drafts.js`）：从文案新建 / 添加草稿页 / 拖入 .md .txt；草稿页 = 工作台生成并改写的页面文件（`draft: true`）；画布上像 Word 一样改、层级下拉、Cmd+Enter 分页、合并、属性栏「文字超出页面 N px」；「复制给 agent → 请设计」。
+- **拼页 + 统一风格**：「添加页面 → 从其他项目…」；跨项目复制写 `origin.project / page / copiedAt`；「复制给 agent → 请统一风格」附本项目设计卡片。
+- **设计卡片**：总览图标 + 弹窗 + 「复制给 agent」；规则文档写明每次做完设计必写；示例项目已有一张。
+- **文件夹与命名**：`workbench-state.json` 的 `folders`；总览新建 / 重命名 / 删除 / 拖放 / 右键移到… / 面包屑；`npm run organize`（begin / list / folder / move / rename / restore）+ `organize-backup.json` + 总览「退回整理前」；「复制给 agent → 请整理文件夹」。
+- **批注**：`pages[].annotations`，画布工具条「批注」拖框写字，只在编辑画布显示（导出文件的内嵌项目数据也去掉了 annotations）；`npm run annotations`；三种 brief 每页末尾列批注。
+- **拖进来导入**：总览拖 HTML / 文件夹 / zip 直接导入成新项目；编辑器页面栏拖入或右键「导入为页面…」插进当前项目（原文件进 `import/<时间>/`）。
+- **本地常用字体库**：`src/fonts/catalog.js` 五套官方直链（简体是 Adobe 仓库的 CN 文件）；`npm run fonts -- install / status`；已经装进用户的数据目录 `library/fonts/`（62 MB，含许可证，清单 `fonts.json`）；编辑画布 / 放映页 / 导出渲染页注入同名字族的完整字体（Chromium 分段回退，实测字集外的字落到完整字体）；导出放映版按最终文字子集化嵌入；「数据文件夹」弹窗显示字体库状态。
+- 文档：PLAN（路线图、「整理和复用」一节）、CLAUDE/AGENTS、README、format.md、两份内部约定、import-html.md。
+- 桌面应用已重新制作并安装（0.2.0，壳没变），`--smoke` 通过；真机验证脚本 60 项全部正常。
 
-## 已知限制与未验证
-- 放映壳预加载的下一页在隐藏状态下已经开始跑 `init`：用 `ctx.animate` 的入场在显示后才走（Chromium 冻结隐藏 iframe 的动画），用计时器的入场在显示前就走完了。要彻底解决需要让预加载页在显示时才跑 `init`（运行时与放映壳的约定要加一条），本轮没做。
-- Safari / WebKit 的表现仍由 Actions 的 `webkit` job 给答案；触屏设备上放映版仍用挡板接滑动。
-- Cmd 快捷键在真机上是用 Playwright 发键 + 应用菜单的 role 验证的，没有用系统级真实按键（需要辅助功能权限）。
-- 桌面应用里「放映」是在同一个窗口里打开（应用壳不开新窗口），README 里「在新窗口全屏播放」是浏览器形态的说法。
-- `web/ui/glass.js` 往运行中的玻璃实例里追加玻璃片用到了 `web/vendor/liquidglass.esm.js` 的内部字段，升级这个库要重查。
+## 已知限制与未做
+- 草稿页的「分页」「合并」不进撤销历史（撤销只管页内文字）；正在保存草稿时同时改页名，页名可能被服务端返回覆盖（`pagesOp` 原有问题）。
+- 「导入为页面」不支持网址来源（界面没给入口，服务端支持）。
+- 放映时 `motion.steps` 缺失的页仍按 0 步放映（数屏只用于编辑画布和提醒）；要分屏放映请 agent 写上 steps。
+- 字体回退：多字符串开着 kerning 时宽度比完整字体约宽 1%。
+- 在文件夹里点「新建项目」，新项目不会自动放进当前文件夹。
+- 画布上的层（草稿 / 批注）刚出现的一两帧里点击会被送进下面的隔离 iframe（真人操作碰不到，测试里等两帧）。
+- Windows 电脑本轮不更新。
 
 ## 下一步
-- 用户在 Mac 上直接打开程序坞里的「视觉工作台」验收；统筹窗口决定何时合并进 main。
-- 第 13 轮按 PLAN「项目目标」做：草稿分页、跨项目拼页统一风格、设计卡片、文件夹与命名、页面上画框写批注。
+- 用户在 Mac 上验收（程序坞里的「视觉工作台」已是新版），统筹窗口决定何时合并进 main、何时更新 Windows。
+- 第 14 轮按 PLAN：印刷版和线上版两种导出、PPTX 导出。
 
 ## 需要用户决定
-- 预加载页的 `init` 时机（见「已知限制」第 1 条）要不要在第 13 轮一起改。
+- 放映时要不要也用工作台数出的屏数（现在只在编辑画布用，放映按 agent 写的 steps）。建议：不用，让 agent 写上 steps 更稳。
+- 草稿页「分页 / 合并」要不要进撤销。建议：第 14 轮顺手做。
