@@ -201,7 +201,7 @@ if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.
  *   countSteps：数屏探测（自动用 play + fast）：ready 里带 countedSteps、hasStep；用完销毁。
  *   fontLibrary：字体库清单（见 fontLibraryStyle）。
  *   html 不给时按 pageFileUrl(project, page, assetBase) 取；edits 不给时用 page.edits。
- * 返回 { iframe, ready, loaded, held, start, send, setEdits, select, set, addImage, removeImage, step, toEnd, leave, settle, screen, setMode, scrollTo, setUiScale, destroy, reload }
+ * 返回 { iframe, ready, loaded, held, start, send, setEdits, select（编号或编号数组）, set（目标或目标数组）, addImage, removeImage, step, toEnd, leave, settle, screen, setMode, scrollTo, setUiScale, destroy, reload }
  *   screen(k) → Promise<screen-done 消息>：edit 模式里原地快进到第 k 屏（applied:true）；k 比当前屏小时不能原地回退（applied:false），调用方用 reload({ screen: k }) 另建。
  *   ready：Promise<ready 消息>（reload 后换成新的）；loaded：Promise<loaded 或 ready 消息>（play 模式里文档加载完、修改单叠完，init 可能还在跑；reload 后换成新的）；step()/toEnd() → Promise<step-done 消息>；leave(dir) → Promise<left 消息>；settle(ms) → Promise<settled 消息>
  *   页面 → 父的所有消息都会交给 onMessage（ready、edit、select、editing、paste-image、menu、step-done、left、height、scroll、key、nav、error、settled）。
@@ -283,8 +283,8 @@ export function createPageFrame(options = {}) {
       });
     },
     setEdits(next) { edits = Array.isArray(next) ? next : []; send({ vw: 'edits', edits }); },
-    select(id) { send({ vw: 'select', id: id ?? null }); },
-    set(target, kind, after) { send({ vw: 'set', target, kind, after }); },
+    select(id) { send(Array.isArray(id) ? { vw: 'select', ids: id } : { vw: 'select', id: id ?? null }); },
+    set(target, kind, after) { send(Array.isArray(target) ? { vw: 'set', targets: target, kind, after } : { vw: 'set', target, kind, after }); },
     addImage(entry, assets) { send({ vw: 'addImage', entry, ...(assets ? { assets } : {}) }); },
     removeImage(id) { send({ vw: 'removeImage', target: id }); },
     step() { return request('step-done', { vw: 'step' }); },

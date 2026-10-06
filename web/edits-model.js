@@ -1,8 +1,9 @@
 // 修改单（第 12 轮）：纯逻辑，浏览器和 Node 共用（src/ 与 web/ 都 import 这里）。
 // 规则见 docs/format.md §7：同一目标同一种修改只有一条，before 是第一次改之前的原样，after 是最新值；改回原样就删掉。
-export const EDIT_KINDS = Object.freeze(['text', 'fontSize', 'move', 'resize', 'color', 'background', 'crop', 'addImage']);
+export const EDIT_KINDS = Object.freeze(['text', 'fontSize', 'move', 'resize', 'color', 'background', 'crop', 'addImage', 'remove']);
 // 每种修改需要页面给出的能力（addImage 不需要：用户贴的图只在修改单里）
-export const KIND_CAP = Object.freeze({ text: 'text', fontSize: 'text', move: 'move', resize: 'resize', color: 'color', background: 'background', crop: 'crop', addImage: null });
+export const KIND_CAP = Object.freeze({ text: 'text', fontSize: 'text', move: 'move', resize: 'resize', color: 'color', background: 'background', crop: 'crop', addImage: null, remove: null });
+// remove（用户删掉了这个元素）：页面里标了任何能力的元素都能删；运行时用 visibility:hidden 藏起来，不改源码
 export const CAPS = Object.freeze(['text', 'move', 'resize', 'color', 'background', 'crop']);
 export const USER_IMAGE_PREFIX = 'u_';
 export const USER_IMAGE_CAPS = Object.freeze(['move', 'resize', 'crop']);
@@ -39,6 +40,7 @@ export function isNoop(kind, before, after) {
   if (kind === 'move') return !after || (round2(after.dx) === 0 && round2(after.dy) === 0);
   if (kind === 'crop') return !after || after.crop === null || after.crop === undefined;
   if (kind === 'addImage') return false;
+  if (kind === 'remove') return !after || after.removed !== true;
   return deepEqual(before, after);
 }
 
@@ -108,6 +110,7 @@ export function describeEdit(edit) {
     case 'background': return `「${target}」底色从 ${before?.background ?? '（未设）'} 改成 ${after?.background}`;
     case 'crop': { const c = after?.crop; return c ? `「${target}」裁切为源图的 (${fmt(c.x * 100)}%, ${fmt(c.y * 100)}%) 起、宽 ${fmt(c.width * 100)}%、高 ${fmt(c.height * 100)}%` : `「${target}」取消裁切`; }
     case 'addImage': return `新增图片「${target}」（素材 ${after?.asset}），位置 (${fmt(after?.x)}, ${fmt(after?.y)})，尺寸 ${fmt(after?.width)}×${fmt(after?.height)}`;
+    case 'remove': return `删除了「${target}」（用户不要这个元素了）`;
     default: return `「${target}」${kind}`;
   }
 }

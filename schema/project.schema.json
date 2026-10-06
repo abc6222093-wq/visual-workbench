@@ -47,6 +47,11 @@
       "maxLength": 200,
       "description": "项目所在的文件夹名（一层，不嵌套；文件夹列表在数据目录 workbench-state.json 的 folders）；空字符串或省略表示未分类"
     },
+    "marksRule": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "页面标记按第几版规则标的（工作台打开项目时按最新规则补标记后写上；agent 不用写）"
+    },
     "designCard": {
       "description": "设计卡片；没有写 null 或省略",
       "oneOf": [
@@ -527,7 +532,8 @@
             "color",
             "background",
             "crop",
-            "addImage"
+            "addImage",
+            "remove"
           ]
         },
         "at": {
@@ -811,6 +817,43 @@
                   },
                   "height": {
                     "$ref": "#/$defs/positivePx"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "remove"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "removed"
+                ],
+                "properties": {
+                  "removed": {
+                    "const": false
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "removed"
+                ],
+                "properties": {
+                  "removed": {
+                    "const": true
                   }
                 }
               }

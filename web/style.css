@@ -285,3 +285,12 @@ html .ed-work > .ed-quickbar[hidden] { display: none; }
 .ex-progress progress::-webkit-progress-value {background:var(--g-accent);border-radius:999px;transition:width .2s ease}
 .ex-progress progress::-moz-progress-bar {background:var(--g-accent);border-radius:999px}
 .ex-progress__label {margin:6px 0 0}
+
+/* 第 14 轮：从画布四周的空白处拖出的框选（第 11 轮的样子） */
+.ed-marquee { position: absolute; z-index: 30; pointer-events: none; border: 1px solid #4f7cff; background: rgba(79, 124, 255, 0.12); border-radius: 2px; }
+/* 第 14 轮：桌面应用里在应用窗口内放映（黑底全屏，和 player.html 一样） */
+.vw-show { position: fixed; inset: 0; z-index: 100000; background: #000; overflow: hidden; }
+.vw-show__stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #000; }
+.vw-show__hint { position: fixed; right: 16px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font: 13px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; opacity: 0; transition: opacity .4s; pointer-events: none; }
+.vw-show__hint.show { opacity: 1; }
+.ed-marquee-shield { position: absolute; inset: 0; z-index: 29; cursor: default; }

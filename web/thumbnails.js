@@ -17,6 +17,11 @@ export function pageFileURL(project, page, stamp = '') {
   return `/data/projects/${encodeURIComponent(project.id)}/${String(file).split('/').map(encodeURIComponent).join('/')}${stamp ? `?v=${stamp}` : ''}`;
 }
 const texts = new Map(); // 地址 → Promise<文本>（只留最近的一些）
+/** 打开项目时忘掉这个项目的页面文本：打开时服务端可能刚改过页面文件（旧格式转换、按新规则补标记），总览缩略图取的是改之前的 */
+export function forgetPageTexts(projectId) {
+  const prefix = `/data/projects/${encodeURIComponent(projectId)}/`;
+  for (const url of [...texts.keys()]) if (url.startsWith(prefix)) texts.delete(url);
+}
 export function fetchPageText(url) {
   if (!texts.has(url)) {
     const p = fetch(url, { cache: 'no-cache' }).then(r => (r.ok ? r.text() : '')).catch(() => '');

@@ -11,7 +11,9 @@
   const CAPS = ['text', 'move', 'resize', 'color', 'background', 'crop'];
   const USER_PREFIX = 'u_';
   const USER_CAPS = ['move', 'resize', 'crop'];
-  const KIND_CAP = { text: 'text', fontSize: 'text', move: 'move', resize: 'resize', color: 'color', background: 'background', crop: 'crop' };
+  // remove（用户删掉的元素）：标了任何能力的元素都能删，能力要求记为 null
+  const KIND_CAP = { text: 'text', fontSize: 'text', move: 'move', resize: 'resize', color: 'color', background: 'background', crop: 'crop', remove: null };
+  const allows = (caps, kind) => caps.length > 0 && (KIND_CAP[kind] === null || caps.includes(KIND_CAP[kind]));
   const r2 = v => Math.round(Number(v) * 100) / 100;
   const r4 = v => Math.round(v * 1e4) / 1e4;
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -33,14 +35,26 @@
   }
   // 整页背景（<html> / <body> 上的标记）：画布上点空白仍是取消选中，改底色从父页面的工具条进（marks 里带 page:true 与当前值）
   const isPageMark = el => !!el && (el === el.ownerDocument.documentElement || el === el.ownerDocument.body);
+  // 整页背景：<html> / <body>，以及（编辑画布里）铺满页面、只能改底色的层。main 是看得见的那一层（文档里最后一个有底色的），
+  // 「页面底色」改它
   function listMarks(doc) {
     const out = [];
+    let main = null;
     for (const el of doc.querySelectorAll('[data-vw-id]')) {
       const caps = capsOf(el); if (!caps.length) continue;
       const mark = { id: el.getAttribute('data-vw-id'), caps };
-      if (isPageMark(el)) { mark.page = true; const view = doc.defaultView; if (view && caps.includes('background')) mark.values = { background: toHex(view.getComputedStyle(el).backgroundColor) }; }
+      const view = doc.defaultView;
+      if (isPageMark(el) || (view && doc === document && edit && isBackdrop(el))) {
+        mark.page = true;
+        if (view && caps.includes('background')) {
+          const bg = view.getComputedStyle(el).backgroundColor;
+          mark.values = { background: toHex(bg) };
+          if (!/^(transparent|rgba\(.*,\s*0\))$/.test(bg.replace(/\s+/g, ' ').trim())) main = mark;
+        }
+      }
       out.push(mark);
     }
+    if (main) main.main = true;
     return out;
   }
 
@@ -56,7 +70,7 @@
   const BG = ['background-color', 'background-image', 'background-position', 'background-size', 'background-repeat', 'background-attachment', 'background-origin', 'background-clip'];
   // 裁切：原生用 object-view-box；兼容方案（Safari 等）用同一张图做背景、把 <img> 自己的画面挪出框外（见 applyCrop）
   const CROP_FALLBACK_PROPS = ['object-position', 'background-image', 'background-repeat', 'background-size', 'background-position', 'background-origin', 'background-clip'];
-  const STYLE_PROPS = { fontSize: ['font-size'], move: ['translate', '--vw-dx', '--vw-dy'], resize: ['width', 'height'], color: ['color'], background: BG, crop: ['object-fit', 'object-view-box'].concat(CROP_FALLBACK_PROPS) };
+  const STYLE_PROPS = { fontSize: ['font-size'], move: ['translate', '--vw-dx', '--vw-dy'], resize: ['width', 'height'], color: ['color'], background: BG, crop: ['object-fit', 'object-view-box'].concat(CROP_FALLBACK_PROPS), remove: ['visibility'] };
   function snapshot(el, kind) {
     if (kind === 'text') return { html: el.innerHTML };
     const out = {};
@@ -81,6 +95,7 @@
       case 'color': return typeof a.color === 'string' && !!a.color;
       case 'background': return typeof a.background === 'string' && !!a.background;
       case 'crop': return a.crop === null || (a.crop && ['x', 'y', 'width', 'height'].every(k => num(a.crop[k])) && a.crop.width > 0 && a.crop.height > 0);
+      case 'remove': return a.removed === true;
       default: return false;
     }
   }
@@ -96,6 +111,7 @@
       case 'color': s.setProperty('color', a.color); break;
       case 'background': s.setProperty('background', a.background); break;
       case 'crop': if (a.crop) applyCrop(el, a.crop); else { s.removeProperty('object-view-box'); dropCropFallback(el); } break;
+      case 'remove': s.setProperty('visibility', 'hidden', 'important'); break;
     }
   }
 
@@ -208,7 +224,7 @@
       if (e.kind === 'addImage') continue;
       if (!(e.kind in KIND_CAP)) { skipped.push(e.id); continue; }
       const el = isUser(e.target) ? st.users.get(e.target) : findTarget(doc, e.target);
-      if (!el || !capsOf(el).includes(KIND_CAP[e.kind]) || !validAfter(e.kind, e.after)) { skipped.push(e.id); continue; }
+      if (!el || !allows(capsOf(el), e.kind) || !validAfter(e.kind, e.after)) { skipped.push(e.id); continue; }
       if (e.kind === 'crop' && String(el.tagName).toLowerCase() !== 'img') { skipped.push(e.id); continue; }
       slot(desired, el)[e.kind] = e;
     }
@@ -292,6 +308,7 @@
       case 'color': return { color: toHex(cs.color) };
       case 'background': return { background: toHex(cs.backgroundColor) };
       case 'crop': return { crop: cropOf(el) };
+      case 'remove': return { removed: false };
     }
     return null;
   }
@@ -304,6 +321,7 @@
   function isNoop(kind, before, after) {
     if (kind === 'move') return r2(after.dx) === 0 && r2(after.dy) === 0;
     if (kind === 'crop') return !after.crop;
+    if (kind === 'remove') return !after.removed;
     return same(before, after);
   }
   // 运行时自己叠一个修改（拖动中也调用：live=true 只叠不发）
@@ -579,6 +597,9 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
 .hover { border: calc(var(--lw) * 2) solid rgba(79, 124, 255, 0.95); }
 .sel { border: calc(var(--lw) * 2) solid #4f7cff; }
 .sel.editing { border-style: dashed; }
+.sel.group { border-style: dashed; border-width: calc(var(--lw) * 1.5); }
+.multi { border: calc(var(--lw) * 1.5) solid rgba(79, 124, 255, 0.9); }
+.marquee { border: var(--lw) solid #4f7cff; background: rgba(79, 124, 255, 0.12); }
 .h { position: absolute; width: var(--hs); height: var(--hs); background: #fff; border: calc(var(--lw) * 2) solid #4f7cff; border-radius: calc(var(--lw) * 2); box-sizing: border-box; box-shadow: 0 0 0 var(--lw) rgba(255, 255, 255, 0.9), 0 calc(var(--lw) * 1) calc(var(--lw) * 3) rgba(0, 0, 0, 0.25); transform: translate(-50%, -50%); pointer-events: auto; }
 .crop { position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
 .crop img { position: absolute; max-width: none; max-height: none; display: block; pointer-events: none; }
@@ -615,11 +636,11 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     host.setAttribute('data-vw-ui', '');
     host.style.cssText = 'all:initial !important;position:absolute !important;left:0 !important;top:0 !important;width:0 !important;height:0 !important;overflow:visible !important;z-index:2147483647 !important;pointer-events:none !important;display:block !important';
     const ui = host.attachShadow({ mode: 'open' });
-    ui.innerHTML = `<style>${UI_CSS}</style><div class="box hover" hidden></div><div class="box sel" hidden>${Object.keys(HANDLES).map(h => `<i class="h" data-h="${h}" style="left:${HANDLES[h][0] * 100}%;top:${HANDLES[h][1] * 100}%;cursor:${CURSOR[h]}-resize"></i>`).join('')}</div>`;
+    ui.innerHTML = `<style>${UI_CSS}</style><div class="box hover" hidden></div><div class="multis"></div><div class="box marquee" hidden></div><div class="box sel" hidden>${Object.keys(HANDLES).map(h => `<i class="h" data-h="${h}" style="left:${HANDLES[h][0] * 100}%;top:${HANDLES[h][1] * 100}%;cursor:${CURSOR[h]}-resize"></i>`).join('')}</div>`;
     doc.documentElement.appendChild(host);
     const E = edit = {
-      style, host, ui, hoverBox: ui.querySelector('.hover'), selBox: ui.querySelector('.sel'),
-      selected: null, hovered: null, editing: null, editStart: null, composing: false, textTimer: 0,
+      style, host, ui, hoverBox: ui.querySelector('.hover'), selBox: ui.querySelector('.sel'), multis: ui.querySelector('.multis'), marqueeBox: ui.querySelector('.marquee'),
+      sel: [], get selected() { return this.sel.length === 1 ? this.sel[0] : null; }, hovered: null, editing: null, editStart: null, composing: false, textTimer: 0,
       drag: null, crop: null, lastRect: '', raf: 0, scale: Number(cfg.uiScale) || 1, listeners: new AbortController()
     };
     applyScale();
@@ -669,6 +690,46 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     }
     return null;
   }
+  // 整页背景层：只带底色 / 文字颜色能力（没有 text / move / resize / crop），是 <html> / <body> 或铺满页面的块。
+  // 画布上点它等于点空白（取消选中、拖出框选），颜色从工具条「页面底色」改（第 14 轮：导入的页面整页都盖着这种层，点不到下面的字和图）
+  const OBJECT_CAPS = ['text', 'move', 'resize', 'crop'];
+  const isObject = el => capsOf(el).some(c => OBJECT_CAPS.includes(c));
+  function isBackdrop(el) {
+    if (isPageMark(el)) return true;
+    if (isObject(el)) return false;
+    const r = el.getBoundingClientRect(), W = doc.documentElement.clientWidth || window.innerWidth, H = window.innerHeight;
+    return r.width >= W * 0.9 && r.height >= H * 0.9;
+  }
+  const isRemoved = el => !!STATE.applied.get(el)?.remove;
+  const selectable = el => !!el && el.nodeType === 1 && el.isConnected && capsOf(el).length > 0 && !isRemoved(el) && !isBackdrop(el);
+  function shown(el) {
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) return false;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none' || Number(cs.opacity) === 0) return false; }
+    return getComputedStyle(el).visibility !== 'hidden';
+  }
+  // 点到的元素（参照第 11 轮 web/editor-hit-test.js 的 pickCanvasElement）：取这一点上从上到下的所有元素，各自最近的标记；
+  // 多选时已选中的优先（重叠时能拖动整组），否则取最上面的对象（文字 / 图片 / 色块），没有对象时取小的底色块；整页背景层不算
+  function pick(e, preferSelected = true) {
+    const E = edit;
+    let stack;
+    try { stack = doc.elementsFromPoint(e.clientX, e.clientY); } catch (error) { stack = [e.target]; }
+    let cands = [];
+    for (const node of stack) { if (node === E.host) continue; const el = markFrom(node); if (el && !cands.includes(el) && selectable(el)) cands.push(el); }
+    // 看不见的（透明、隐藏的）不算：导入的旧页面常有隐藏的重复标题盖在上面。只有在「第 N 屏」、这一点上没有看得见的元素时，
+    // 才让还没出场的元素能点到（往后的屏才出现的内容）
+    const visible = cands.filter(shown);
+    cands = visible.length || currentScreen === null ? visible : cands.filter(isObject);
+    // 原页面写了 pointer-events:none 的元素（导入的旧页面常把文字层这样写）点击会穿过去：按几何位置补上，这时取框最小的那个
+    const through = [...doc.querySelectorAll('[data-vw-id]')].filter(el => !cands.includes(el) && isObject(el) && getComputedStyle(el).pointerEvents === 'none' && selectable(el) && shown(el) && (r => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)(el.getBoundingClientRect()));
+    if (preferSelected && E.sel.length > 1) { const s = cands.concat(through).find(el => E.sel.includes(el)); if (s) return s; }
+    if (through.length) {
+      const area = el => { const r = el.getBoundingClientRect(); return r.width * r.height; };
+      const objects = cands.filter(isObject).concat(through).sort((a, b) => area(a) - area(b));
+      return objects[0];
+    }
+    return cands.find(isObject) || cands[0] || null;
+  }
   // 框线附近（参照 PowerPoint 文本框）：内侧 10px、外侧 6px（屏幕像素，按 uiScale 换算成页面像素）
   const EDGE_IN = 10, EDGE_OUT = 6;
   function nearEdge(el, e) {
@@ -695,60 +756,90 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     }
     return false;
   }
-  const movable = caps => caps.includes('move') || caps.includes('resize') || caps.includes('text');
-  // 带 text 又带 move 的元素：鼠标离框线很近时（含框外 6px，e.target 不是它）按几何位置找到它。先看选中的、悬停的，再看其余（后面的盖在上面）
+  // 改字中的文字框：鼠标离框线很近时（含框外 6px）按几何位置找到它，可以从框线拖动（框里是放光标）
   function edgeTarget(e) {
-    const E = edit;
-    const list = [E.selected, E.hovered];
-    const marks = [...doc.querySelectorAll('[data-vw-id]')];
-    for (let i = marks.length - 1; i >= 0; i--) list.push(marks[i]);
-    const seen = new Set();
-    for (const el of list) {
-      if (!el || seen.has(el) || !el.isConnected) continue;
-      seen.add(el);
-      if (el === E.editing) { // 改字中：框里是放光标，只有框外那一圈能拖
-        const r = el.getBoundingClientRect();
-        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) continue;
-      }
-      const caps = capsOf(el);
-      if (caps.includes('text') && caps.includes('move') && nearEdge(el, e)) return el;
-    }
-    return null;
+    const el = edit.editing;
+    if (!el || !el.isConnected || !capsOf(el).includes('move')) return null;
+    const r = el.getBoundingClientRect();
+    if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return null;
+    return nearEdge(el, e) ? el : null;
   }
   function setBox(box, r) { box.style.left = `${r.x}px`; box.style.top = `${r.y}px`; box.style.width = `${r.width}px`; box.style.height = `${r.height}px`; }
+  function unionRect(list, rectOf = pageRect) {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const el of list) { const r = rectOf(el); x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y); x2 = Math.max(x2, r.x + r.width); y2 = Math.max(y2, r.y + r.height); }
+    return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+  }
+  const clientRect = el => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; };
+  const idOf = el => el.getAttribute('data-vw-id');
+  const unionCaps = list => CAPS.filter(c => list.some(el => capsOf(el).includes(c)));
   function refreshUi() {
     const E = edit;
-    if (E.hovered && E.hovered !== E.selected && E.hovered.isConnected && !E.drag && !E.crop) { E.hoverBox.hidden = false; setBox(E.hoverBox, pageRect(E.hovered)); }
+    const hov = E.hovered;
+    if (hov && !E.sel.includes(hov) && hov.isConnected && !E.drag && !E.crop) { E.hoverBox.hidden = false; setBox(E.hoverBox, pageRect(hov)); }
     else E.hoverBox.hidden = true;
-    const el = E.selected;
-    if (!el || !el.isConnected || E.crop) { E.selBox.hidden = true; if (el && !el.isConnected) select(null); return; }
-    const r = pageRect(el);
+    const live = E.sel.filter(el => el.isConnected && !isRemoved(el));
+    if (live.length !== E.sel.length) { E.sel = live; E.lastRect = ''; if (!live.length) post({ vw: 'select', id: null, ids: [], caps: [], rect: null }); }
+    if (!E.sel.length || E.crop) { E.selBox.hidden = true; E.multis.replaceChildren(); return; }
+    const single = E.sel.length === 1, el = E.sel[E.sel.length - 1];
+    const r = single ? pageRect(el) : unionRect(E.sel);
     E.selBox.hidden = false;
     setBox(E.selBox, r);
     E.selBox.classList.toggle('editing', !!E.editing);
+    E.selBox.classList.toggle('group', !single);
+    // 多选：每个元素一个细框，外面一个整体框（四个角拖动 = 整体等比缩放）
+    const want = single ? 0 : E.sel.length;
+    while (E.multis.childElementCount > want) E.multis.lastElementChild.remove();
+    while (E.multis.childElementCount < want) { const b = doc.createElement('div'); b.className = 'box multi'; E.multis.append(b); }
+    if (!single) E.sel.forEach((x, i) => setBox(E.multis.children[i], pageRect(x)));
     const caps = capsOf(el);
-    const free = caps.includes('resize') && !E.editing;
+    // 窄的一边在屏幕上不到 24px（比把手大不了多少）：这一边的把手挪到框外，按住中间仍是拖动
+    const smallX = single && r.width * (E.scale || 1) < 24, smallY = single && r.height * (E.scale || 1) < 24;
     for (const h of E.selBox.querySelectorAll('.h')) {
       const name = h.dataset.h;
-      const show = free && (caps.includes('move') || !/[nw]/.test(name));
+      let show;
+      if (single) show = caps.includes('resize') && !E.editing && (caps.includes('move') || !/[nw]/.test(name));
+      else show = name.length === 2 && E.sel.some(x => { const c = capsOf(x); return c.includes('move') || c.includes('resize'); });
+      const [hx, hy] = HANDLES[name];
+      const out = (small, f) => (!small || f === 0.5 ? -50 : f === 0 ? -100 : 0);
+      h.style.transform = smallX || smallY ? `translate(${out(smallX, hx)}%, ${out(smallY, hy)}%)` : '';
       h.style.display = show ? '' : 'none';
+      // 元素伸出页面时，把手收进看得见的范围里（页面在 iframe 里，伸出去的部分点不到）
+      if (show) {
+        const [fx, fy] = HANDLES[name], m = 7 / (E.scale || 1);
+        const vx = window.scrollX, vy = window.scrollY, vw = doc.documentElement.clientWidth || window.innerWidth, vh = window.innerHeight;
+        const x = clamp(r.x + fx * r.width, vx + m, Math.max(vx + m, vx + vw - m)), y = clamp(r.y + fy * r.height, vy + m, Math.max(vy + m, vy + vh - m));
+        h.style.left = `${x - r.x}px`; h.style.top = `${y - r.y}px`;
+      }
     }
-    const key = `${r.x},${r.y},${r.width},${r.height}`;
+    const key = `${E.sel.map(idOf).join(',')}|${r.x},${r.y},${r.width},${r.height}`;
     if (key !== E.lastRect) {
       E.lastRect = key;
-      // 当前值给父页面的工具条回显（字号 / 文字颜色 / 底色）
+      // 当前值给父页面的工具条回显（字号 / 文字颜色 / 底色；多选时取最后选中的那个）
       const cs = getComputedStyle(el);
       const values = { fontSize: r2(parseFloat(cs.fontSize)) || null, color: toHex(cs.color), background: toHex(cs.backgroundColor) };
-      post({ vw: 'select', id: el.getAttribute('data-vw-id'), caps, rect: { x: r2(r.x), y: r2(r.y), width: r2(r.width), height: r2(r.height) }, values });
+      post({ vw: 'select', id: idOf(el), ids: E.sel.map(idOf), caps: single ? caps : unionCaps(E.sel), rect: { x: r2(r.x), y: r2(r.y), width: r2(r.width), height: r2(r.height) }, values });
     }
   }
-  function select(el) {
+  // 选中的一组元素：外层和里层都选中时只留外层（挪外层里层跟着走，不会挪两遍）
+  const roots = list => list.filter(el => !list.some(o => o !== el && o.contains(el)));
+  function setSel(list) {
     const E = edit;
-    if (E.selected === el) return;
-    if (E.editing && E.editing !== el) exitEditing();
-    E.selected = el; E.lastRect = '';
-    if (!el) { post({ vw: 'select', id: null, caps: [], rect: null }); E.selBox.hidden = true; }
+    const next = roots([...new Set(list)].filter(selectable));
+    if (next.length === E.sel.length && next.every((el, i) => el === E.sel[i])) return;
+    if (E.editing && !(next.length === 1 && next[0] === E.editing)) exitEditing();
+    E.sel = next; E.lastRect = '';
+    if (!next.length) { post({ vw: 'select', id: null, ids: [], caps: [], rect: null }); E.selBox.hidden = true; E.multis.replaceChildren(); }
     else refreshUi();
+  }
+  function select(el) { setSel(el ? [el] : []); }
+  // 框选和全选的候选：这一页里看得见的、能选的元素
+  const candidates = () => [...doc.querySelectorAll('[data-vw-id]')].filter(el => selectable(el) && shown(el));
+  function selectAll() { exitEditing(); setSel(candidates()); }
+  // 框选：完全框在里面的才选中（参照 PowerPoint / Keynote）；box 是 iframe 视口坐标 { left, top, right, bottom }
+  function marqueeSelect(box, base) {
+    const inside = el => { const r = el.getBoundingClientRect(); return r.left >= box.left - 0.5 && r.top >= box.top - 0.5 && r.right <= box.right + 0.5 && r.bottom <= box.bottom + 0.5; };
+    setSel(base.concat(candidates().filter(el => !base.includes(el) && inside(el))));
   }
 
   // 改字
@@ -859,70 +950,114 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     file.arrayBuffer().then(buffer => post({ vw: 'paste-image', name: file.name || 'paste', type: file.type, buffer }, [buffer]), error => postError(error, 'paste'));
   }
 
-  // 鼠标
+  // 一次操作改了几处（多选一起拖、缩放同时改尺寸和位置、一起删除）：一起告诉父页面，撤销时一步撤回
+  function commitMany(list) {
+    const out = [];
+    for (const [el, kind, after] of list) {
+      if (!el || !after) continue;
+      const before = beforeOf(el, kind);
+      setLive(el, kind, after);
+      out.push({ target: idOf(el), kind, before, after });
+      if (isNoop(kind, before, after)) { delete slot(STATE.applied, el)[kind]; delete slot(STATE.befores, el)[kind]; }
+    }
+    if (out.length === 1) post(Object.assign({ vw: 'edit' }, out[0]));
+    else if (out.length) post({ vw: 'edit-batch', edits: out });
+  }
+  const movable = el => capsOf(el).includes('move');
+  function nudge(dx, dy) {
+    const movers = edit.sel.filter(movable);
+    if (!movers.length) return false;
+    commitMany(movers.map(el => { const m = moveOf(el); beforeOf(el, 'move'); return [el, 'move', { dx: r2((m.dx || 0) + dx), dy: r2((m.dy || 0) + dy) }]; }));
+    edit.lastRect = '';
+    return true;
+  }
+  // 删除：记进修改单（remove），画面上藏起来，不改 agent 的源码；可以撤销
+  function removeSelection() {
+    const E = edit;
+    const list = E.sel.slice();
+    if (!list.length) return false;
+    exitEditing();
+    setSel([]);
+    E.hovered = null;
+    commitMany(list.map(el => [el, 'remove', { removed: true }]));
+    return true;
+  }
+
+  // 鼠标（第 11 轮的选择习惯：点选、Shift / Cmd 点加选减选、空白处拖出框选、按住拖动（多选一起）、拖把手缩放）
   function onDown(e) {
     const E = edit;
     if (E.crop) { E.crop.down(e); return; }
     const path = e.composedPath ? e.composedPath() : [];
     const handle = path[0] && path[0].dataset && path[0].dataset.h;
     if (e.button !== 0) return;
-    if (handle && E.selected) { e.preventDefault(); e.stopPropagation(); takeFocus(); startResize(e, handle); return; }
+    if (E.drag) { E.drag.editOnClick = false; E.drag.reduceTo = null; finishDrag(e); } // 上一次没收到松开
+    onDownInner(e, handle);
+    if (E.drag) dragging(true);
+  }
+  function onDownInner(e, handle) {
+    const E = edit;
+    if (handle && E.sel.length) { e.preventDefault(); e.stopPropagation(); takeFocus(); if (E.sel.length === 1) startResize(e, handle); else startGroupScale(e, handle); return; }
     if (E.editing && (E.editing === e.target || E.editing.contains(e.target))) return; // 浏览器自己放光标、拖选
-    if (E.editing) exitEditing();
     const edge = edgeTarget(e);
-    const el = edge || markFrom(e.target);
-    if (!el) { e.preventDefault(); takeFocus(); select(null); return; }
+    if (E.editing && !edge) exitEditing();
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const el = edge || pick(e);
+    if (!el) { e.preventDefault(); takeFocus(); startMarquee(e, additive); return; }
+    if (additive) { e.preventDefault(); takeFocus(); setSel(E.sel.includes(el) ? E.sel.filter(x => x !== el) : E.sel.concat(el)); return; }
     const caps = capsOf(el);
+    const wasSelected = E.sel.includes(el);
     // 选中优先（第 13 轮 §4.1）：带 text 的元素第一下只选中整块（可拖、可方向键）；已选中再点一下（没拖动）才在点的位置出光标；
-    // 双击（第二下按下时已选中）直接进入改字，不拦默认行为，浏览器照常选词。框线附近（edge）的点击永远只是选中 / 拖动。
-    const wasSelected = E.selected === el;
-    const textClick = caps.includes('text') && !edge && wasSelected;
+    // 双击（第二下按下时已选中）直接进入改字，不拦默认行为，浏览器照常选词。
+    const textClick = caps.includes('text') && !edge && E.sel.length === 1 && E.sel[0] === el;
     if (textClick && e.detail >= 2) { enterEditing(el, e); return; }
     e.preventDefault();
     takeFocus();
-    select(el);
+    if (!wasSelected) setSel([el]);
+    const reduceTo = wasSelected && E.sel.length > 1 ? el : null; // 点多选里的一个、没拖动：只留它
+    const base = { id: e.pointerId, sx: e.clientX, sy: e.clientY, el, editOnClick: textClick, reduceTo };
     if (caps.includes('move')) {
-      E.drag = { type: 'move', el, id: e.pointerId, sx: e.clientX, sy: e.clientY, scrollX: window.scrollX, scrollY: window.scrollY, base: Object.assign({ dx: 0, dy: 0 }, moveOf(el)), moved: false, before: beforeOf(el, 'move'), editOnClick: textClick };
-    } else if (textClick) {
-      E.drag = { type: 'click', el, id: e.pointerId, sx: e.clientX, sy: e.clientY, editOnClick: true };
-    }
+      const items = E.sel.filter(movable).map(x => { beforeOf(x, 'move'); return { el: x, base: Object.assign({ dx: 0, dy: 0 }, moveOf(x)) }; });
+      E.drag = Object.assign(base, { type: 'move', items, scrollX: window.scrollX, scrollY: window.scrollY, moved: false });
+    } else if (textClick || reduceTo) E.drag = Object.assign(base, { type: 'click' });
   }
+  // 拖动中鼠标出了页面（iframe）范围，iframe 就收不到移动和松开：请父页面在这期间把外面的移动 / 松开转进来（消息 pointer）
+  function dragging(on) { post({ vw: 'drag', on }); }
   // 按下时 preventDefault 会让浏览器不把焦点给 iframe；手动拿一下，键盘（Delete、方向键、Esc）才能到这里
   function takeFocus() {
     if (doc.activeElement && doc.activeElement !== doc.body && doc.activeElement.blur) doc.activeElement.blur();
     if (!doc.hasFocus()) try { window.focus(); } catch (error) { /* 忽略 */ }
   }
+  function capture(id) { try { doc.documentElement.setPointerCapture(id); } catch (error) { /* 没有真实指针 */ } }
   function onMove(e) {
     const E = edit;
     if (E.crop) { E.crop.move(e); return; }
     const d = E.drag;
+    if (d && e.pointerId === d.id && e.buttons === 0 && e.type === 'pointermove') { finishDrag(e); return; }
     if (d && e.pointerId === d.id) {
       d.lastX = e.clientX; d.lastY = e.clientY;
-      if (d.type === 'click') { if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) >= 3) d.editOnClick = false; }
+      if (d.type === 'click') { if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) >= 3) { d.editOnClick = false; d.reduceTo = null; } }
       else if (d.type === 'move') dragMove(d, e.clientX, e.clientY);
+      else if (d.type === 'marquee') dragMarquee(d, e.clientX, e.clientY);
+      else if (d.type === 'group') dragGroup(d, e);
       else dragResize(d, e);
       return;
     }
     if (e.buttons) return;
     const edge = edgeTarget(e);
-    const under = markFrom(e.target);
-    const el = edge || under;
-    E.hovered = el && movable(capsOf(el)) ? el : null;
+    const el = edge || pick(e, false);
+    E.hovered = el;
     let cursor = '';
-    if (edge) cursor = 'move';
-    else if (el && el !== E.editing && capsOf(el).includes('move')) cursor = 'move'; // 带 text 的也是 move（第一下是选中整块）；改字中的元素由样式给 I 形
+    if (edge || (el && el !== E.editing && movable(el))) cursor = 'move'; // 带 text 的也是 move（第一下是选中整块）；改字中的元素由样式给 I 形
     if (cursor) doc.documentElement.setAttribute('data-vw-cursor', cursor); else doc.documentElement.removeAttribute('data-vw-cursor');
   }
   function dragMove(d, cx, cy) {
-    const dx = d.base.dx + (cx - d.sx) + (window.scrollX - d.scrollX);
-    const dy = d.base.dy + (cy - d.sy) + (window.scrollY - d.scrollY);
+    const ox = (cx - d.sx) + (window.scrollX - d.scrollX), oy = (cy - d.sy) + (window.scrollY - d.scrollY);
     if (!d.moved && Math.hypot(cx - d.sx, cy - d.sy) < 3) return;
     if (!d.moved) {
-      d.moved = true; startAutoScroll(d);
-      // 真拖起来才捕获指针（拖出窗口也跟随）；只是点一下时不捕获，双击等事件的目标仍是元素本身
-      try { doc.documentElement.setPointerCapture(d.id); } catch (error) { /* 没有真实指针 */ }
+      d.moved = true; d.editOnClick = false; d.reduceTo = null; startAutoScroll(d);
+      capture(d.id); // 真拖起来才捕获指针（拖出窗口也跟随）；只是点一下时不捕获，双击等事件的目标仍是元素本身
     }
-    setLive(d.el, 'move', { dx: r2(dx), dy: r2(dy) });
+    for (const it of d.items) setLive(it.el, 'move', { dx: r2(it.base.dx + ox), dy: r2(it.base.dy + oy) });
   }
   // 网页页面：拖到窗口上下边缘自动滚动
   function startAutoScroll(d) {
@@ -937,56 +1072,152 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     };
     requestAnimationFrame(tick);
   }
+  // 框选（在页面空白处或整页背景上按下拖动）；Shift / Cmd 按着时在原来的选中上加
+  function startMarquee(e, additive) {
+    const E = edit;
+    const base = additive ? E.sel.slice() : [];
+    if (!additive) setSel([]);
+    E.drag = { type: 'marquee', id: e.pointerId, sx: e.clientX, sy: e.clientY, base, moved: false };
+  }
+  function dragMarquee(d, cx, cy) {
+    const E = edit;
+    if (!d.moved && Math.hypot(cx - d.sx, cy - d.sy) < 3) return;
+    if (!d.moved) { d.moved = true; capture(d.id); }
+    const box = { left: Math.min(d.sx, cx), top: Math.min(d.sy, cy), right: Math.max(d.sx, cx), bottom: Math.max(d.sy, cy) };
+    E.marqueeBox.hidden = false;
+    setBox(E.marqueeBox, { x: box.left + window.scrollX, y: box.top + window.scrollY, width: box.right - box.left, height: box.bottom - box.top });
+    marqueeSelect(box, d.base);
+  }
   function onUp(e) {
     const E = edit;
     if (E.crop) { E.crop.up(e); return; }
     const d = E.drag;
     if (!d || e.pointerId !== d.id) return;
+    finishDrag(e);
+  }
+  function finishDrag(e) {
+    const E = edit, d = E.drag;
     E.drag = null;
+    dragging(false);
     try { doc.documentElement.releasePointerCapture(e.pointerId); } catch (error) { /* 忽略 */ }
-    if (d.type === 'move' && d.moved) commit(d.el, 'move', STATE.applied.get(d.el).move);
-    else if (d.editOnClick && E.selected === d.el && d.el.isConnected) { // 已选中的文字再点一下：在点的位置出光标
+    E.lastRect = '';
+    if (d.type === 'marquee') { E.marqueeBox.hidden = true; return; }
+    if (d.type === 'move' && d.moved) { commitMany(d.items.map(it => [it.el, 'move', STATE.applied.get(it.el)?.move])); return; }
+    if (d.type === 'resize') { if (d.changed) commitMany(d.result()); return; }
+    if (d.type === 'group') { if (d.changed) commitMany(d.result()); return; }
+    if (d.editOnClick && E.sel.length === 1 && E.sel[0] === d.el && d.el.isConnected) { // 已选中的文字再点一下：在点的位置出光标
       enterEditing(d.el, e);
       E.justEntered = d.el;
       setTimeout(() => { if (E.justEntered === d.el) E.justEntered = null; }, 800);
-    }
-    if (d.type === 'resize' && d.changed) {
-      commit(d.el, 'resize', STATE.applied.get(d.el).resize);
-      if (d.moves) commit(d.el, 'move', STATE.applied.get(d.el).move);
-    }
-    E.lastRect = '';
+    } else if (d.reduceTo) setSel([d.reduceTo]);
   }
+
+  // 缩放（第 11 轮的规则）：拖角 = 等比（文字的字号一起等比变；按住 Shift 自由拉伸）；拖左右边 = 改宽度（文字重新换行，高度跟内容走）；拖上下边 = 改高度。
+  // 先叠尺寸，再量一次实际的框，用位移把对边 / 对角钉在原处（绝对定位、流式布局都对）
   function startResize(e, handle) {
-    const el = edit.selected;
+    const el = edit.sel[0];
     const caps = capsOf(el);
-    if (!caps.includes('resize')) return;
+    if (!caps.includes('resize') || (/[nw]/.test(handle) && !caps.includes('move'))) return;
     const r = el.getBoundingClientRect();
     const size = cssSize(el);
     const kx = r.width && el.offsetWidth ? el.offsetWidth / r.width : 1, ky = r.height && el.offsetHeight ? el.offsetHeight / r.height : 1;
-    beforeOf(el, 'resize'); if (caps.includes('move')) beforeOf(el, 'move');
-    edit.drag = { type: 'resize', el, handle, id: e.pointerId, sx: e.clientX, sy: e.clientY, r, size, kx, ky, base: Object.assign({ dx: 0, dy: 0 }, moveOf(el)), image: String(el.tagName).toLowerCase() === 'img', changed: false, moves: false };
-    try { doc.documentElement.setPointerCapture(e.pointerId); } catch (error) { /* 忽略 */ }
+    const text = caps.includes('text');
+    let autoHeight = false;
+    if (text) { // 文字高度没写死（跟内容走）：拖左右边时不钉高度
+      const h0 = el.offsetHeight, prev = [el.style.getPropertyValue('height'), el.style.getPropertyPriority('height')];
+      el.style.setProperty('height', 'auto', 'important');
+      autoHeight = Math.abs(el.offsetHeight - h0) < 1;
+      if (prev[0]) el.style.setProperty('height', prev[0], prev[1]); else el.style.removeProperty('height');
+    }
+    beforeOf(el, 'resize'); if (caps.includes('move')) beforeOf(el, 'move'); if (text) beforeOf(el, 'fontSize');
+    const d = { type: 'resize', el, caps, handle, id: e.pointerId, sx: e.clientX, sy: e.clientY, r, size, kx, ky, text, autoHeight, fs: parseFloat(getComputedStyle(el).fontSize) || 0, base: Object.assign({ dx: 0, dy: 0 }, moveOf(el)), changed: false, font: false, moves: false };
+    d.result = () => {
+      const a = STATE.applied.get(el) || {};
+      const list = [[el, 'resize', a.resize]];
+      if (d.font) list.push([el, 'fontSize', a.fontSize]);
+      if (d.moves) list.push([el, 'move', a.move]);
+      return list;
+    };
+    edit.drag = d;
+    capture(e.pointerId);
+  }
+  function pinTo(el, base, x, y) {
+    const now = el.getBoundingClientRect();
+    const dx = r2(base.dx + (x == null ? 0 : x - now.left)), dy = r2(base.dy + (y == null ? 0 : y - now.top));
+    setLive(el, 'move', { dx, dy });
   }
   function dragResize(d, e) {
     const [fx, fy] = HANDLES[d.handle];
+    const W = d.r.width, H = d.r.height;
     const px = e.clientX - d.sx, py = e.clientY - d.sy;
-    let w = d.r.width + (fx === 1 ? px : fx === 0 ? -px : 0);
-    let h = d.r.height + (fy === 1 ? py : fy === 0 ? -py : 0);
-    w = Math.max(MIN_BOX, w); h = Math.max(MIN_BOX, h);
+    let w = Math.max(MIN_BOX, W + (fx === 1 ? px : fx === 0 ? -px : 0));
+    let h = Math.max(MIN_BOX, H + (fy === 1 ? py : fy === 0 ? -py : 0));
     const corner = fx !== 0.5 && fy !== 0.5;
-    if (d.image && corner && !e.shiftKey && d.r.height > 0) {
-      const ratio = d.r.width / d.r.height;
-      if (Math.abs(w - d.r.width) / d.r.width >= Math.abs(h - d.r.height) / d.r.height) h = w / ratio; else w = h * ratio;
+    let k = null;
+    if (corner && !e.shiftKey && W > 0 && H > 0) {
+      k = Math.abs(w / W - 1) >= Math.abs(h / H - 1) ? w / W : h / H;
+      k = Math.max(k, MIN_BOX / Math.min(W, H));
+      w = W * k; h = H * k;
     }
-    const cw = fx === 0.5 ? d.size.width : Math.max(1, d.size.width + (w - d.r.width) * d.kx);
-    const ch = fy === 0.5 ? d.size.height : Math.max(1, d.size.height + (h - d.r.height) * d.ky);
     const after = {};
-    if (fx !== 0.5 || corner) after.width = r2(cw); else after.width = r2(d.size.width);
-    after.height = r2(fy === 0.5 && !corner ? d.size.height : ch);
-    setLive(d.el, 'resize', after);
+    after.width = r2(fx === 0.5 ? d.size.width : Math.max(1, d.size.width + (w - W) * d.kx));
+    after.height = r2(fy === 0.5 && !corner ? d.size.height : Math.max(1, d.size.height + (h - H) * d.ky));
+    if (d.text && k !== null) { setLive(d.el, 'fontSize', { fontSize: r2(Math.max(1, d.fs * k)) }); d.font = true; }
+    else if (d.font) setLive(d.el, 'fontSize', { fontSize: r2(d.fs) });
+    if (d.text && d.autoHeight && fy === 0.5) { // 只改宽度：文字重新换行，高度按内容
+      setLive(d.el, 'resize', { width: after.width });
+      after.height = r2(cssSize(d.el).height);
+      slot(STATE.applied, d.el).resize = after;
+    } else setLive(d.el, 'resize', after);
     d.changed = true;
-    const shiftX = fx === 0 ? d.r.width - w : 0, shiftY = fy === 0 ? d.r.height - h : 0;
-    if ((shiftX || shiftY || d.moves) && capsOf(d.el).includes('move')) { d.moves = true; setLive(d.el, 'move', { dx: r2(d.base.dx + shiftX), dy: r2(d.base.dy + shiftY) }); }
+    if (d.caps.includes('move')) {
+      const now = d.el.getBoundingClientRect();
+      const x = fx === 0 ? d.r.right - now.width : d.r.left, y = fy === 0 ? d.r.bottom - now.height : d.r.top;
+      if (d.moves || Math.abs(x - now.left) > 0.01 || Math.abs(y - now.top) > 0.01) { pinTo(d.el, moveOf(d.el), x, y); d.moves = true; }
+    }
+  }
+  // 多选拖角：整体等比缩放，对角固定；每个元素的尺寸、位置（和文字的字号）按同一比例变
+  function startGroupScale(e, handle) {
+    if (handle.length !== 2) return;
+    const items = edit.sel.map(el => {
+      const caps = capsOf(el), r = el.getBoundingClientRect();
+      if (caps.includes('resize')) beforeOf(el, 'resize');
+      if (caps.includes('move')) beforeOf(el, 'move');
+      if (caps.includes('text')) beforeOf(el, 'fontSize');
+      return { el, caps, r, size: cssSize(el), kx: r.width && el.offsetWidth ? el.offsetWidth / r.width : 1, ky: r.height && el.offsetHeight ? el.offsetHeight / r.height : 1, fs: parseFloat(getComputedStyle(el).fontSize) || 0 };
+    }).filter(it => it.caps.includes('move') || it.caps.includes('resize'));
+    if (!items.length) return;
+    const U = unionRect(items.map(it => it.el), clientRect);
+    const [fx, fy] = HANDLES[handle];
+    const anchor = { x: fx === 1 ? U.x : U.x + U.width, y: fy === 1 ? U.y : U.y + U.height };
+    const d = { type: 'group', handle, id: e.pointerId, sx: e.clientX, sy: e.clientY, items, U, anchor, changed: false };
+    d.result = () => items.flatMap(({ el, caps }) => {
+      const a = STATE.applied.get(el) || {};
+      return [caps.includes('resize') && [el, 'resize', a.resize], caps.includes('text') && [el, 'fontSize', a.fontSize], caps.includes('move') && [el, 'move', a.move]].filter(Boolean);
+    });
+    edit.drag = d;
+    capture(e.pointerId);
+  }
+  function dragGroup(d, e) {
+    const [fx, fy] = HANDLES[d.handle];
+    const { U, anchor } = d;
+    if (!(U.width > 0 && U.height > 0)) return;
+    const w = U.width + (fx === 1 ? 1 : -1) * (e.clientX - d.sx), h = U.height + (fy === 1 ? 1 : -1) * (e.clientY - d.sy);
+    let k = Math.abs(w / U.width - 1) >= Math.abs(h / U.height - 1) ? w / U.width : h / U.height;
+    k = Math.max(k, MIN_BOX / Math.min(U.width, U.height), 0.02);
+    for (const it of d.items) {
+      const { el, caps, r } = it;
+      if (caps.includes('resize')) setLive(el, 'resize', { width: r2(Math.max(1, it.size.width + (r.width * k - r.width) * it.kx)), height: r2(Math.max(1, it.size.height + (r.height * k - r.height) * it.ky)) });
+      if (caps.includes('text') && it.fs) setLive(el, 'fontSize', { fontSize: r2(Math.max(1, it.fs * k)) });
+      if (caps.includes('move')) {
+        const now = el.getBoundingClientRect();
+        // 能缩放的：左上角按比例落位；不能缩放的：中心按比例落位
+        const x = caps.includes('resize') ? anchor.x + (r.left - anchor.x) * k : anchor.x + (r.left + r.width / 2 - anchor.x) * k - now.width / 2;
+        const y = caps.includes('resize') ? anchor.y + (r.top - anchor.y) * k : anchor.y + (r.top + r.height / 2 - anchor.y) * k - now.height / 2;
+        pinTo(el, moveOf(el), x, y);
+      }
+    }
+    d.changed = true;
   }
   function onClick(e) {
     const E = edit;
@@ -998,19 +1229,20 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     // 双击未选中的文字：第二下松开时刚进入改字（按下时还不可编辑，浏览器没选词），这里补选点到的词
     if (E.editing && E.editing.contains(e.target) && E.editing === E.justEntered) { E.justEntered = null; selectWordAt(E.editing, e.clientX, e.clientY); return; }
     if (E.crop || E.editing) return;
-    const hit = e.target === doc.documentElement || e.target === doc.body ? doc.elementFromPoint(e.clientX, e.clientY) : e.target;
-    const el = markFrom(hit);
+    const el = pick(e);
     if (el && String(el.tagName).toLowerCase() === 'img' && capsOf(el).includes('crop')) { e.preventDefault(); startCrop(el); }
   }
+  // 右键：改字时用浏览器 / 桌面应用的原生菜单（剪切 / 复制 / 粘贴 / 全选）；点在元素上先选中它，再请父页面弹「删除」菜单
   function onContextMenu(e) {
     const E = edit;
-    if (E.editing && E.editing.contains(e.target)) return; // 改字时用浏览器 / 桌面应用的原生菜单
-    const el = markFrom(e.target);
-    if (el && isUser(el.getAttribute('data-vw-id')) && el.hasAttribute('data-vw-user')) {
-      e.preventDefault();
-      select(el);
-      post({ vw: 'menu', id: el.getAttribute('data-vw-id'), x: e.clientX, y: e.clientY });
-    }
+    if (E.editing && E.editing.contains(e.target)) return;
+    e.preventDefault();
+    if (E.crop) return;
+    const el = pick(e);
+    if (!el) { setSel([]); return; }
+    if (!E.sel.includes(el)) setSel([el]);
+    if (!E.sel.length) return;
+    post({ vw: 'menu', id: idOf(E.sel[E.sel.length - 1]), ids: E.sel.map(idOf), x: e.clientX, y: e.clientY });
   }
   function onKey(e) {
     const E = edit;
@@ -1023,29 +1255,25 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         const range = doc.createRange(); range.selectNodeContents(E.editing);
         const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
       }
-      return; // 其余按键交给浏览器（光标、选区、撤销）
+      return; // 其余按键交给浏览器（光标、选区、Backspace 只删字、撤销）
     }
-    const el = E.selected;
+    const sel = E.sel, el = sel.length === 1 ? sel[0] : null;
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-    if (el && arrows[e.key] && !mod && capsOf(el).includes('move')) {
-      e.preventDefault();
-      const step = e.shiftKey ? 10 : 1, m = moveOf(el);
-      beforeOf(el, 'move');
-      commit(el, 'move', { dx: r2((m.dx || 0) + arrows[e.key][0] * step), dy: r2((m.dy || 0) + arrows[e.key][1] * step) });
-      E.lastRect = '';
-      return;
+    if (sel.length && arrows[e.key] && !mod) {
+      const step = e.shiftKey ? 10 : 1;
+      if (nudge(arrows[e.key][0] * step, arrows[e.key][1] * step)) { e.preventDefault(); return; }
     }
+    if (mod && !e.shiftKey && !e.altKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAll(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && sel.length) { e.preventDefault(); removeSelection(); return; }
     if (el && e.key === 'Enter' && capsOf(el).includes('text')) { e.preventDefault(); enterEditing(el, null); selectAllIn(el); return; }
-    if (e.key === 'Escape' && el) { select(null); }
+    if (e.key === 'Escape' && sel.length) { setSel([]); }
     if (e.target && e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
-    post({ vw: 'key', key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, id: el ? el.getAttribute('data-vw-id') : null });
+    post({ vw: 'key', key: e.key, code: e.code, metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, id: el ? idOf(el) : null });
     if (mod && /^[zZyY]$/.test(e.key)) e.preventDefault();
-    if ((e.key === 'Delete' || e.key === 'Backspace') && el) e.preventDefault();
   }
   function selectAllIn(el) {
     setTimeout(() => { el.focus({ preventScroll: true }); const range = doc.createRange(); range.selectNodeContents(el); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }, 0);
   }
-
   // 裁切（第 10 轮 web/crop-tool.js 的交互搬进来）：拖边角改框、框内拖图、滚轮缩放；Esc / 点外面 / 双击 / 完成 都是完成
   function startCrop(el) {
     const E = edit;
@@ -1139,9 +1367,11 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
       if (!commitIt || !dirty) return;
       const x = clamp(r4((B.x - I.x) / I.w), 0, 1), y = clamp(r4((B.y - I.y) / I.h), 0, 1);
       const crop = { x, y, width: Math.min(r4(B.w / I.w), r4(1 - x)), height: Math.min(r4(B.h / I.h), r4(1 - y)) };
-      if (canResize && (Math.abs(B.w - R.width) > 0.5 || Math.abs(B.h - R.height) > 0.5)) commit(el, 'resize', { width: r2(size.width + (B.w - R.width) * kx), height: r2(size.height + (B.h - R.height) * ky) });
-      if (canMove && (B.x || B.y)) commit(el, 'move', { dx: r2(m0.dx + B.x), dy: r2(m0.dy + B.y) });
-      commit(el, 'crop', { crop });
+      const list = [];
+      if (canResize && (Math.abs(B.w - R.width) > 0.5 || Math.abs(B.h - R.height) > 0.5)) list.push([el, 'resize', { width: r2(size.width + (B.w - R.width) * kx), height: r2(size.height + (B.h - R.height) * ky) }]);
+      if (canMove && (B.x || B.y)) list.push([el, 'move', { dx: r2(m0.dx + B.x), dy: r2(m0.dy + B.y) }]);
+      list.push([el, 'crop', { crop }]);
+      commitMany(list);
     }
     E.crop = session;
     layout();
@@ -1164,17 +1394,39 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         }
         case 'select': {
           if (!edit) break;
+          const byId = id => (isUser(id) ? STATE.users.get(id) : findTarget(doc, id));
+          if (Array.isArray(m.ids)) { setSel(m.ids.map(byId).filter(Boolean)); break; }
           if (m.id == null) { exitEditing(); select(null); break; }
-          const el = isUser(m.id) ? STATE.users.get(m.id) : findTarget(doc, m.id);
+          const el = byId(m.id);
           if (el && capsOf(el).length) { select(el); if (!el.getBoundingClientRect().height) break; const r = pageRect(el); if (r.y < window.scrollY || r.y + r.height > window.scrollY + window.innerHeight) window.scrollTo(window.scrollX, Math.max(0, r.y - 40)); }
           break;
         }
-        case 'set': {
-          const el = isUser(m.target) ? STATE.users.get(m.target) : findTarget(doc, m.target);
-          if (!el || !capsOf(el).includes(KIND_CAP[m.kind]) || !validAfter(m.kind, m.after)) break;
-          if (m.kind === 'text') { saveOriginal(STATE, el, 'text'); beforeOf(el, 'text'); applyKind(el, 'text', m.after); }
-          commit(el, m.kind, m.after);
+        case 'set': { // targets：多选时一起改（只改有这种能力的）
+          const list = [];
+          for (const id of Array.isArray(m.targets) ? m.targets : [m.target]) {
+            const el = isUser(id) ? STATE.users.get(id) : findTarget(doc, id);
+            if (!el || !allows(capsOf(el), m.kind) || !validAfter(m.kind, m.after)) continue;
+            if (m.kind === 'text') { saveOriginal(STATE, el, 'text'); beforeOf(el, 'text'); applyKind(el, 'text', m.after); }
+            list.push([el, m.kind, m.after]);
+          }
+          commitMany(list);
           if (edit) edit.lastRect = '';
+          break;
+        }
+        // 父页面的菜单 / 键盘（焦点在父页面时）：删除选中的、方向键微调、全选、从画布外拖出的框选
+        case 'remove': if (edit) removeSelection(); break;
+        case 'pointer': { // 父页面转来的、发生在页面范围外的移动 / 松开（坐标已换成这个页面的视口坐标）
+          if (!edit || !edit.drag) break;
+          const ev = { clientX: Number(m.x) || 0, clientY: Number(m.y) || 0, pointerId: edit.drag.id, shiftKey: !!m.shiftKey, buttons: m.kind === 'up' ? 0 : 1, type: m.kind === 'up' ? 'pointerup' : 'forwarded', button: 0 };
+          if (m.kind === 'up') finishDrag(ev); else onMove(ev);
+          break;
+        }
+        case 'nudge': if (edit) nudge(Number(m.dx) || 0, Number(m.dy) || 0); break;
+        case 'selectAll': if (edit) selectAll(); break;
+        case 'marquee': {
+          if (!edit) break;
+          if (m.phase === 'start') { exitEditing(); edit.marqueeBase = m.additive ? edit.sel.slice() : []; if (!m.additive) setSel([]); }
+          if (m.rect) marqueeSelect(m.rect, edit.marqueeBase || []);
           break;
         }
         case 'addImage': {
@@ -1191,7 +1443,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         case 'removeImage': {
           const id = m.target || m.id;
           cfg.edits = (cfg.edits || []).filter(e => e.target !== id);
-          if (edit && edit.selected === STATE.users.get(id)) select(null);
+          if (edit && edit.sel.includes(STATE.users.get(id))) setSel(edit.sel.filter(el => el !== STATE.users.get(id)));
           applyEditsToDocument(doc, cfg.edits, { assets: assetsMap() });
           break;
         }
@@ -1245,7 +1497,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
   // play 模式：点击 / 右键 / 按键交给父页面翻页（页面自己处理过的不算）
   function setupPlayInput() {
     window.addEventListener('click', e => {
-      if (mode !== 'play' || e.defaultPrevented || e.button !== 0) return;
+      if (mode !== 'play' || e.defaultPrevented || e.button !== 0 || e.ctrlKey) return; // Mac 上 Ctrl+单击 = 右键（contextmenu 那边已经推进过）
       if (e.target && e.target.closest && e.target.closest('a,button,input,select,textarea,label,summary,video,audio,[contenteditable]')) return;
       post({ vw: 'nav', dir: 1 });
     });
