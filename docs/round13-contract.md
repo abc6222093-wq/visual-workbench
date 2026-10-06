@@ -103,7 +103,7 @@ import { DRAFT_LEVELS, parseDraftText, draftPageHtml, blocksFromDraftHtml, isDra
 - `draftPageHtml({ name, blocks, artboard })` → 完整 HTML 文本（白底、朴素字、`white-space: pre-wrap`、字号按画板高度缩放；`<meta name="vw-draft" content="1">`；`<main data-vw-draft>` 里每块 `<p data-vw-level="<level>">文字</p>`，空行是空的 `<p>`）。不标 `data-vw`（草稿不走修改单）。
 - `blocksFromDraftHtml(html)` → `blocks`（把页面文件解析回块，`<br>` 当换行）。`isDraftHtml(html)` 看 meta。
 - 草稿页在 `project.json` 里 `draft: true`；用户在草稿页上的所有改动由界面（B 的 `web/drafts.js`）算成新的 `blocks`，发 `op: 'draft-update'`，服务端重写页面文件。**草稿页不用 iframe 改字**：B 在画布上盖一层和页面同尺寸、同缩放、同样式的 contenteditable 表单（样式用 `draftPageHtml` 里同一段 CSS，`draft-model.js` 导出 `draftCss(artboard)`），下面的 iframe 照常显示（或隐藏）。
-- 界面要点（B）：页面栏草稿页有「草稿」标记；工具条有层级下拉框（Word 样式框那样，选项 = `DRAFT_LEVELS`），对光标所在块或选中的几块生效；`Ctrl/Cmd + Enter` 在光标处分页；工具条「和下一页合并」（下一页是草稿时可用）；输入 600ms 节流后发 `draft-update`，`#save-status` 照常；撤销 / 重做走 `draft-update` 的历史（界面自己记块的历史即可）。属性栏显示「文字超出页面 N px」（只是数值，不做判断）。
+- 界面要点（B）：页面栏草稿页有「草稿」标记；工具条有层级下拉框（Word 样式框那样，选项 = `DRAFT_LEVELS`），对光标所在块或选中的几块生效；`Ctrl/Cmd + Enter` 在光标处分页；工具条「和下一页合并」（下一页是草稿时可用）；输入 600ms 节流后发 `draft-update`，`#save-status` 照常；撤销 / 重做走 `draft-update` 的历史（界面自己记块的历史即可）。第 14 轮起分页、合并也进撤销；属性栏不显示任何「超出」之类的提示（工作台不对设计做提示）。
 - 「复制给 agent → 请设计」（`intent=design`）：列出草稿页的块（层级 + 文字）和 notes，要求 agent 把草稿页改写成正式页面、保留页面编号、去掉 `draft`。
 
 ## 6. 批注（B 写 `web/annotations.js`；C 写 CLI 与 brief）
@@ -112,6 +112,8 @@ import { DRAFT_LEVELS, parseDraftText, draftPageHtml, blocksFromDraftHtml, isDra
 - 改动走 `S.project.pages[].annotations` → `changed()`（撤销 / 自动保存和修改单一样）。
 - `npm run annotations -- <项目> [--page <页面编号>] [--clear [<编号>…]]`：列出 / 清除。
 - 三种 brief 都在每页末尾列出批注：`批注（n 条）：· an_xxx 「这里加一个字」（位置 x, y, 宽 w, 高 h）`。
+- **第 15 轮 划线批注（画笔）**：工具条「批注」旁边「画笔」，随手画线 / 箭头 / 圈选，5 种颜色；数据 `{ id, kind: 'stroke', points: [[x, y], …], color, width?, arrow?, text?, at }`（schema `annotationStroke`，页面 CSS 像素）。线可以点选、拖动（整体移动，不改单个点）、Delete / 右键删除、撤销、配一句话；首尾重合的圈不会被抽稀成两个点。
+- **第 15 轮 批注截图**（`src/annotation-shots.js`）：「复制给 agent」时，有批注的页先用真浏览器截「页面 + 修改单」，叠上批注框 / 线和编号（编号 = `annotations` 里的顺序，从 1 起），写到 `<项目>/annotations/<页面编号>.png`；brief 文字写截图路径和每条的编号、那句话。截图可再生成，不进版本存档。
 
 ## 7. 「复制给 agent」（B 做菜单，C 做文本）
 按钮改成分裂菜单（点开列出四项）：
@@ -173,4 +175,4 @@ import { DRAFT_LEVELS, parseDraftText, draftPageHtml, blocksFromDraftHtml, isDra
 - 0b：双击未选中的文字直接进入改字（Chromium 不会自己选词，运行时用 `Intl.Segmenter` 补选点到的词）；有 `move` 的文字悬停指针是 `move`。
 - 字体回退用的是 **CSS 分段回退**（字体库 face 同名先声明，页面自己的子集后声明）；Chromium 实测字集外的字落到字体库完整字体。多字符串开着 kerning 时宽度和完整字体差约 1%。
 - 字体库：简体用 Adobe 仓库的 **CN** 文件（`SourceHanSerifCN-VF.otf`、`SourceHanSansCN-VF.otf`，仓库里没有 SC 命名），key / family 仍叫 SC，别名含 CN 写法；`fonts.json` 的 `files` 含许可证（`kind: 'license'`）。`GET /api/fonts` 回 `{ dir, exists, families: [...], fontLibrary: [...] }`，`fontLibrary` 是装好的全部字族（给浏览器侧 `createPageFrame` 用，`web/font-library.js` 的 `loadFontLibrary()` 取并缓存；编辑画布、放映页、导出渲染页都传）；`exportHtml` 加 `dataDir` 选项，不传时按 `projectDir` 上两级推断。
-- 界面：屏按钮在 `.ed-foot .ed-screens`，说明在 `[data-screens-note]`，页面栏 chip `[data-chip="screens"]` / `[data-chip="draft"]`；草稿编辑层 `.vw-draft-layer main[contenteditable]`，层级下拉 `select[data-draft-level]`，`[data-action="draft-split"]` / `[data-action="draft-merge"]`，超出提示 `[data-draft-overflow]`；批注按钮 `[data-action="annotate"]`，批注框 `.vw-annot`，输入框 `.vw-annot-input input`；拼页弹窗 `.ap-sheet`（`[data-ap-project]`、`[data-ap-check]`、`[data-ap-after]`、`[data-ap-add]`）；总览文件夹卡片 `.hm-cell--folder[data-folder]`、面包屑 `.hm-crumb`、新建文件夹表单 `[data-folder-form]`、设计卡片 `[data-action="design-card"]` / `[data-dcard-copy]`、草稿 chip `.hm-chip--draft`、新建对话框 `#new-form textarea[name="draft"]`。草稿页的「分页」「合并」不进撤销历史（撤销只管页内文字）。
+- 界面：屏按钮在 `.ed-foot .ed-screens`，说明在 `[data-screens-note]`，页面栏 chip `[data-chip="screens"]` / `[data-chip="draft"]`；草稿编辑层 `.vw-draft-layer main[contenteditable]`，层级下拉 `select[data-draft-level]`，`[data-action="draft-split"]` / `[data-action="draft-merge"]`；批注按钮 `[data-action="annotate"]`，批注框 `.vw-annot`，输入框 `.vw-annot-input input`；拼页弹窗 `.ap-sheet`（`[data-ap-project]`、`[data-ap-check]`、`[data-ap-after]`、`[data-ap-add]`）；总览文件夹卡片 `.hm-cell--folder[data-folder]`、面包屑 `.hm-crumb`、新建文件夹表单 `[data-folder-form]`、设计卡片 `[data-action="design-card"]` / `[data-dcard-copy]`、草稿 chip `.hm-chip--draft`、新建对话框 `#new-form textarea[name="draft"]`。草稿页的「分页」「合并」第 14 轮起进撤销历史。

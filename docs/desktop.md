@@ -26,7 +26,7 @@
 - 找不到系统 Node 22+：弹「未找到 Node.js 22 或更新版本…」，可点「打开下载页」。Mac 从程序坞打开时 PATH 很短，应用会自己补上 `/opt/homebrew/bin`、`/usr/local/bin` 等。
 - 页面里点「关闭工作台」按钮：服务退出后应用也跟着退出。
 - 右键（第 12 轮起）：可编辑的地方（工作台的输入框、页面里正在改的字）弹原生菜单「剪切 / 复制 / 粘贴 / 全选」，按能不能用变灰；不可编辑但选中了文字时只有「复制」；其他地方不弹（工作台自己的菜单照旧）。页面在沙箱 iframe 里，右键事件仍在窗口的 webContents 上触发，`params.frame` 指向那个 iframe，`Menu.popup({ window, frame })` 把它传过去；菜单项用 role（cut / copy / paste / selectAll，作用于聚焦的 frame），另外绑定 `contents.copy()` 等作兜底（`desktop/lib/edit-menu.cjs` 的 `bindToContents`）。应用菜单的「编辑」也用 role，Mac 上 Cmd+X/C/V/A/Z 靠它。
-- 外链和 `window.open` 用系统浏览器打开；工作台自己的页面留在窗口里。`Ctrl/Cmd+R` 重新载入，Windows 上 `F12`、Mac 上 `Alt+Cmd+I` 打开开发者工具。
+- 放映在应用窗口内进行（第 14 轮起）：桌面应用里点「放映」不开新窗口、不开系统浏览器，在同一个窗口里全屏放映，Esc 或放完回到编辑器原来那一页。工作台自己的页面都留在窗口里；只有指向工作台以外的链接（http / https / mailto）才交给系统浏览器。`Ctrl/Cmd+R` 重新载入，Windows 上 `F12`、Mac 上 `Alt+Cmd+I` 打开开发者工具。
 - 运行日志：Windows `%APPDATA%\视觉工作台\desktop.log`，Mac `~/Library/Application Support/视觉工作台/desktop.log`。
 
 ## 仓库位置怎么找
