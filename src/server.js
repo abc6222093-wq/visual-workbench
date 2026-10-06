@@ -269,6 +269,16 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     })().finally(() => converting.delete(id)));
     return converting.get(id);
   };
+  // 旧项目标记按新规则补（src/upgrade-marks.js 先自动存版，只改 data-vw 属性）；同一项目同时只升级一次；失败不挡打开
+  const upgrading = new Map();
+  const upgradeMarks = (dir, id) => {
+    if (!upgrading.has(id)) upgrading.set(id, (async () => {
+      try { const mod = await import('./upgrade-marks.js'); await mod.upgradeProjectMarks({ projectDir: dir }); }
+      catch (e) { console.warn(`[upgrade-marks] ${id} 补标记失败，项目原样打开：${e.message || e}`); }
+      finally { watcher.noteSelfSnapshot(id); }
+    })().finally(() => upgrading.delete(id)));
+    return upgrading.get(id);
+  };
   const masterList = () => readMasters(dataDir).filter(id => ID.test(id) && existsSync(join(dataDir,'projects',id,'project.json')));
   const server = http.createServer(async(req,res)=>{ try {
     if(nullOrigin(req)&&MUTATING.has(req.method)) throw fail(403,'页面里的脚本不能修改工作台数据');
@@ -359,6 +369,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
       if(parts.length===3&&req.method==='GET') { // 旧格式（v2）第一次打开时先转换（转换前自动存版）；失败则项目原样不动
         let current=readProject(dir);
         if(isLegacyProject(current.project)) { assertUsage(); await convertLegacy(dir,id); current=readProject(dir); }
+        if(!isLegacyProject(current.project)&&!(Number.isInteger(current.project.marksRule)&&current.project.marksRule>=2)&&!shuttingDown&&!usage.status().blocked) { await upgradeMarks(dir,id); current=readProject(dir); }
         return json(res,200,{...current,syncConflicts:detectSyncConflicts(dir)}); }
       if(parts.length===3&&req.method==='PUT') { const b=await checkedBody(req),old=readProject(dir); checkRevision(b.revision,old.revision); if(!b.project||b.project.id!==id||b.project.createdAt!==old.project.createdAt) throw fail(400,'Invalid project identity'); const project={...b.project,updatedAt:new Date().toISOString()}; const revision=saveProject(dir,project,selfWrite(id)); return json(res,200,{project,revision}); }
       if(parts[3]==='events'&&parts.length===4&&req.method==='GET') { // 推送：文件变化 + agent 状态（Server-Sent Events）

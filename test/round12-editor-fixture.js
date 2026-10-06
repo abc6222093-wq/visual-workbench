@@ -8,7 +8,7 @@ export function pageHTML(title,{bg='#fde9d9',body=''}={}){
 }
 /** v3 项目对象。pages 给页名数组；web=true 时第 1 页电脑端、其余交替手机端。 */
 export function v3Project({id='demo',name='第 12 轮验收',pages=['第1页','第2页','第3页'],web=false,artboard={preset:'slide-16x9',width:1920,height:1080}}={}){
- return {format:'visual-workbench/project',formatVersion:3,id,name,createdAt:now,updatedAt:now,...(web?{kind:'web'}:{}),
+ return {format:'visual-workbench/project',formatVersion:3,marksRule:2,id,name,createdAt:now,updatedAt:now,...(web?{kind:'web'}:{}),
   artboard:web?{preset:'web-desktop',width:1440,height:900}:artboard,assets:[],fonts:[],
   pages:pages.map((n,i)=>{const pid=`page_p${String(i+1).padStart(2,'0')}`;const device=web?(i%2?'mobile':'desktop'):null;
    return {id:pid,name:n,file:`pages/${pid}.html`,edits:[],...(web?{device,size:{width:device==='mobile'?390:1440,height:device==='mobile'?2000:2400}}:{})};})};

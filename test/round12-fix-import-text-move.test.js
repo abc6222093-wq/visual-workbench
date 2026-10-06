@@ -50,9 +50,9 @@ test('导入的 HTML：每一处文字都标 text move color（能改字、挪�
   assert.equal(project.pages.length, 1);
   const texts = scanMarks(html[0]).items.filter(m => /^t\d+$/.test(m.id));
   assert.equal(texts.length, 3, JSON.stringify(scanMarks(html[0]).items));
-  for (const m of texts) assert.deepEqual(m.caps, ['text', 'move', 'color'], `${m.id}（${m.tag}）`);
+  for (const m of texts) assert.deepEqual(m.caps, ['text', 'move', 'resize', 'color'], `${m.id}（${m.tag}）`);
   assert.deepEqual(texts.map(m => m.tag), ['h1', 'p', 'span']);
-  assert.match(project.pages[0].notes, /可改的文字 3 处（data-vw-id t1、t2…，能力 text move color）/);
+  assert.match(project.pages[0].notes, /可改的文字 3 处（data-vw-id t1、t2…，能力 text move resize color）/);
 });
 
 test('编辑画布上：导入的文字从框线拖动 → move 修改写进修改单；点在字上仍是改字', { timeout: 120000 }, async t => {
@@ -67,10 +67,10 @@ test('编辑画布上：导入的文字从框线拖动 → move 修改写进修�
   await frame.waitForSelector('[data-vw-id="t1"]'); await frame.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
   const outer = await page.locator('#artboard > iframe').evaluate(f => { const r = f.getBoundingClientRect(); return { x: r.left, y: r.top, scale: r.width / f.offsetWidth }; });
   const box = await frame.locator('[data-vw-id="t1"]').evaluate(n => { const r = n.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
-  // 先点一下选中，再从左框线（框内 2 个屏幕像素）拖
-  await clickInFrame(page, '[data-vw-id="t1"]', { at: { x: 2 / outer.scale, y: box.h / 2 } });
+  // 先点一下选中，再从左框线（框内 2 个屏幕像素）拖；文字现在也能缩放，左框线正中是缩放把手，所以抓在上四分之一处
+  await clickInFrame(page, '[data-vw-id="t1"]', { at: { x: 2 / outer.scale, y: box.h / 4 } });
   await page.waitForTimeout(200);
-  const sx = outer.x + box.x * outer.scale + 2, sy = outer.y + (box.y + box.h / 2) * outer.scale;
+  const sx = outer.x + box.x * outer.scale + 2, sy = outer.y + (box.y + box.h / 4) * outer.scale;
   await page.mouse.move(sx, sy); await page.mouse.down();
   await page.mouse.move(sx + 40, sy + 20, { steps: 6 }); await page.mouse.move(sx + 80, sy + 40, { steps: 6 }); await page.mouse.up();
   await page.waitForFunction(() => document.querySelector('#save-status')?.textContent === '已保存');

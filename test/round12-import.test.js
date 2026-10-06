@@ -70,7 +70,7 @@ async function runImport(body) {
   return { job, project, projectDir, html };
 }
 const items = html => scanMarks(html).items;
-const texts = html => items(html).filter(m => m.caps.join(' ') === 'text move color');
+const texts = html => items(html).filter(m => m.caps.join(' ') === 'text move resize color');
 const imgs = html => items(html).filter(m => m.tag === 'img');
 /** 直接用浏览器打开生成的页面文件：没有页面错误；返回可见文字和动画数。 */
 async function openPage(file, viewport = { width: 1920, height: 1080 }) {
@@ -105,7 +105,7 @@ test('round12 import: deck-data JSON — each slide document kept whole, CSS ani
   assert.deepEqual(project.pages.map(p => p.name), ['课件第一页', '课件第二页']);
   for (const h of html) { assert.match(h, /@keyframes rise/); assert.match(h, /animation:rise 1\.5s/); }
   assert.deepEqual(texts(html[0]).map(m => m.id), ['t1', 't2']);
-  assert.match(html[0], /<h1 data-vw-id="t1" data-vw="text move color" data-vw-origin="h1">课件第一页<\/h1>/);
+  assert.match(html[0], /<h1 data-vw-id="t1" data-vw="text move resize color" data-vw-origin="h1">课件第一页<\/h1>/);
   assert.deepEqual(imgs(html[0]).map(m => [m.id, m.caps.join(' ')]), [['i1', 'move resize crop']]);
   assert.equal(project.assets.length, 1); assert.equal(project.assets[0].kind, 'image'); assert.match(html[0], new RegExp(`src="\\.\\./${project.assets[0].file}"`));
   assert.doesNotMatch(html[0], /data:image/, '内嵌图片复制进 assets/');

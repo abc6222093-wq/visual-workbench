@@ -5,7 +5,7 @@
 //   clues(path)                  原页面的动画、脚本库、分步线索（只记录，写进迁移说明）
 //   prepare(o) / finish(o)       生成一页的 HTML：取原文档（未执行脚本的原文，或网址抓取时的当前 DOM），
 //                                标出可改的文字 / 图片 / 纯色色块（data-vw-id、data-vw、data-vw-origin），只留这一页的那一块；
-//                                文字标 text move color：用户会把 agent 在别处做好的 HTML 设计（多为绝对定位）导进来，要能挪文字；
+//                                文字标 text move resize color：用户会把 agent 在别处做好的 HTML 设计（多为绝对定位）导进来，要能挪文字；
 //                                资源引用先换成绝对地址交给 Node 复制，再按 Node 给的对照表改写，最后序列化。
 // 标记全部用 DOM 操作完成，不用正则改 HTML。
 export function install() {
@@ -136,7 +136,7 @@ export function install() {
       }
       if (isText(el)) {
         const origin = selectorOf(el, doc);
-        el.setAttribute('data-vw-id', nextId('t')); el.setAttribute('data-vw', 'text move color'); el.setAttribute('data-vw-origin', origin); stats.text++;
+        el.setAttribute('data-vw-id', nextId('t')); el.setAttribute('data-vw', 'text move resize color'); el.setAttribute('data-vw-origin', origin); stats.text++;
         return; // 文字里面不再标
       }
       for (const c of [...el.children]) visit(c);

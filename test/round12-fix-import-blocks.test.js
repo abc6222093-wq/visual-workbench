@@ -66,8 +66,8 @@ test('导入旧 HTML：色条、卡片底、印章、渐变圆点标 move resize
     ['bg3', 'div', 'background', 'div.overlay'], // 铺满整页的装饰层：只改颜色
     ['b1', 'div', 'move resize background', 'div.bar'],
     ['b2', 'div', 'move resize background', 'div.card'],
-    ['t1', 'h3', 'text move color', 'h3'],
-    ['t2', 'p', 'text move color', 'p'],
+    ['t1', 'h3', 'text move resize color', 'h3'],
+    ['t2', 'p', 'text move resize color', 'p'],
     ['b3', 'span', 'move resize background', 'span.seal'],
     ['b4', 'i', 'move resize background', 'i.dot'],
     ['b5', 'b', 'move resize background', 'b.chip'],
@@ -75,7 +75,7 @@ test('导入旧 HTML：色条、卡片底、印章、渐变圆点标 move resize
   ]);
   // 背景是图片的、透明的容器、不显示的、没有尺寸的都不标
   for (const cls of ['photo', 'wrap', 'ghost', 'zero']) assert.match(html[0], new RegExp(`<div class="${cls}">`), cls);
-  assert.deepEqual(marks(html[1]), [['bg1', 'body', 'background', 'body'], ['bg2', 'section', 'background', 'section:nth-of-type(2)'], ['t1', 'h1', 'text move color', 'h1']]);
+  assert.deepEqual(marks(html[1]), [['bg1', 'body', 'background', 'body'], ['bg2', 'section', 'background', 'section:nth-of-type(2)'], ['t1', 'h1', 'text move resize color', 'h1']]);
   assert.match(project.pages[0].notes, /纯色色块 5 个（b1、b2…，能力 move resize background），整页背景 3 处/);
   assert.equal(job.summary.blocks, 5); assert.equal(job.summary.backgrounds, 5);
 });
@@ -84,7 +84,7 @@ test('导入网页（本地文件）：导航栏、首屏、卡片、圆点是�
   const files = walk(WEB).map(f => ({ path: 'web-blocks/' + relative(WEB, f).split('\\').join('/'), file: f }));
   const { project, html } = await runImport({ name: '色块网页', kind: 'web', devices: ['desktop'], files: files.map(f => fileEntry(f.path, f.file)) });
   assert.equal(project.kind, 'web');
-  assert.deepEqual(marks(html[0]).filter(m => m[2] !== 'text move color'), [
+  assert.deepEqual(marks(html[0]).filter(m => m[2] !== 'text move resize color'), [
     ['bg1', 'body', 'background', 'body'],
     ['bg2', 'div', 'background', 'div.page'], // 铺满整页的外层容器
     ['b1', 'nav', 'move resize background', 'nav.nav'],
@@ -94,13 +94,13 @@ test('导入网页（本地文件）：导航栏、首屏、卡片、圆点是�
     ['b5', 'div', 'move resize background', 'div > div:nth-of-type(1) > div:nth-of-type(2)'],
   ]);
   // 卡片里的文字照旧
-  assert.ok(marks(html[0]).filter(m => m[2] === 'text move color').map(m => m[1]).join(' ').includes('h3 p h3 p'));
+  assert.ok(marks(html[0]).filter(m => m[2] === 'text move resize color').map(m => m[1]).join(' ').includes('h3 p h3 p'));
 });
 
 test('导入网页（网址）：抓当前画面时同样标出色块和整页背景', async () => {
   const { project, html } = await runImport({ name: '色块网址', kind: 'web', devices: ['desktop'], urls: [`${site.origin}/index.html`] });
   assert.equal(project.pages.length, 1);
-  assert.deepEqual(marks(html[0]).filter(m => m[2] !== 'text move color').map(m => m.slice(0, 3)), [
+  assert.deepEqual(marks(html[0]).filter(m => m[2] !== 'text move resize color').map(m => m.slice(0, 3)), [
     ['bg1', 'body', 'background'], ['bg2', 'div', 'background'],
     ['b1', 'nav', 'move resize background'], ['b2', 'section', 'move resize background'], ['b3', 'span', 'move resize background'],
     ['b4', 'div', 'move resize background'], ['b5', 'div', 'move resize background'],
