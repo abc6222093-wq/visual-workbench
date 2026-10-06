@@ -63,9 +63,9 @@ function listFiles(dir, base, skipTop = []) {
   return out.sort();
 }
 
-/** 项目快照范围：versions/ 以外的所有普通文件（顶层 meta.json 也跳过，免得和版本说明冲突）。 */
+/** 项目快照范围：versions/ 以外的所有普通文件（顶层 meta.json、批注截图 annotations/ 也跳过）。 */
 function snapshotFiles(projectDir) {
-  return listFiles(projectDir, projectDir, [PROJECT_LAYOUT.versions, META]);
+  return listFiles(projectDir, projectDir, [PROJECT_LAYOUT.versions, META, 'annotations']); // annotations/：批注截图，可再生成
 }
 
 /** project.json 在最前，其余按路径排序。 */

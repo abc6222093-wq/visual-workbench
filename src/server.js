@@ -105,7 +105,8 @@ function dims(o) { for(const key of ['width','height']) if(!Number.isInteger(o[k
 // ---------- 导出 ----------
 // 导出文件放在 <数据目录>/exports/<项目编号>/<时间>-<类型>/，不在项目文件夹里：
 // 实时连接不会把导出当成 agent 在改，存版本时也不会把导出文件存进去。
-const EXPORT_KINDS = ['html', 'images', 'pdf'];
+const EXPORT_KINDS = ['html', 'images', 'pdf', 'pptx'];
+const EXPORT_PURPOSES = ['print', 'web'], PPTX_MODES = ['image', 'editable'];
 const pad = n => String(n).padStart(2, '0');
 const stamp = (d = new Date()) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 const exportName = (project, id) => String(project?.name || id).replace(/[<>\"|?*\\/:\x00-\x1f]/g, '-').replace(/^\.+/, '').trim().slice(0, 120) || id;
@@ -387,7 +388,11 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         const {project}=readProject(dir); const ids=url.searchParams.get('pageIds')?.split(',').filter(Boolean);
         const intent=url.searchParams.get('intent')||'edits'; if(!BRIEF_INTENTS.includes(intent)) throw fail(400,'intent 只能是 edits、design 或 unify');
         if(ids&&ids.some(pid=>!project.pages?.some(p=>p.id===pid))) throw fail(400,'页面编号不对');
-        return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project,pageIds:ids,intent}),filePath:join(dir,'project.json')}); }
+        // 有批注的页先截一张叠上批注的图（annotations/<页面编号>.png，第 15 轮）；截图失败照常出文字
+        let annotationShots;
+        try { if(project.pages?.some(p=>(!ids||ids.includes(p.id))&&p.annotations?.length)) annotationShots=await (await import('./annotation-shots.js')).renderAnnotationShots({projectDir:dir,pageIds:ids}); }
+        catch(e) { console.warn('批注截图没生成：',e.message); }
+        return json(res,200,{text:agentBrief({repoDir:REPO,dataDir,projectDir:dir,project,pageIds:ids,intent,...(annotationShots?{annotationShots}:{})}),filePath:join(dir,'project.json')}); }
       if(parts[3]==='pages'&&parts.length===4&&req.method==='POST') { const b=await checkedBody(req); return json(res,200,pageOperation({dataDir,dir,id,body:b,selfWrite:selfWrite(id)})); }
       // 第 11 轮：交接包（改动清单 + 改前改后对比图 + 复制给 agent 的文字）；改前基准是 import/baseline.json
       if(parts[3]==='handoff'&&parts.length===4&&req.method==='POST') {
@@ -408,12 +413,14 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         return json(res,200,{id:vid,...out});
       }
       if(parts[3]==='export'&&parts.length===4&&req.method==='POST') { // 导出：放映版 HTML / 每页图片 / PDF；带 progressId 时可看进度、可取消
-        const b=await checkedBody(req); if(!EXPORT_KINDS.includes(b.kind)) throw fail(400,'导出类型只能是 html（放映版）、images（每页图片）或 pdf');
+        const b=await checkedBody(req); if(!EXPORT_KINDS.includes(b.kind)) throw fail(400,'导出类型只能是 html（放映版）、images（每页图片）、pdf 或 pptx');
+        if(b.purpose!==undefined&&!EXPORT_PURPOSES.includes(b.purpose)) throw fail(400,'导出用途只能是 print（印刷版）或 web（线上浏览版）');
+        if(b.pptxMode!==undefined&&!PPTX_MODES.includes(b.pptxMode)) throw fail(400,'PPTX 只能是 image（图片版）或 editable（可改字版）');
         if(b.progressId!==undefined&&(typeof b.progressId!=='string'||!PROGRESS_ID.test(b.progressId))) throw fail(400,'导出进度编号不对');
         const record=b.progressId?exportProgress.get(id,b.progressId):null;
         if(record&&(record.running||record.done)) throw fail(409,'这个导出进度编号已经用过了');
         const outDir=exportDir(dataDir,id,b.kind); let out;
-        const options={projectDir:dir,kind:b.kind,outDir,name:exportName(readProject(dir).project,id)};
+        const options={projectDir:dir,kind:b.kind,outDir,name:exportName(readProject(dir).project,id),...(b.purpose?{purpose:b.purpose}:{}),...(b.kind==='pptx'?{pptxMode:b.pptxMode||'image'}:{})};
         if(record) { record.running=true; clearTimeout(record.timer); Object.assign(options,{onProgress:info=>exportProgress.progress(record,info),signal:record.controller.signal}); }
         const cancelled=()=>{ rmSync(outDir,{recursive:true,force:true}); exportProgress.finish(record,{ok:false,error:'已取消导出',cancelled:true}); return json(res,409,{error:'已取消导出',cancelled:true}); };
         try { if(record?.controller.signal.aborted) return cancelled(); out=await exporter(options); }
@@ -427,7 +434,7 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
         const finalDir=resolve(out?.outDir||outDir);
         const files=(out?.files||[]).map(f=>{ const path=resolve(finalDir,String(f.path)); return {path,bytes:Number(f.bytes)||0,name:path.startsWith(finalDir+sep)?path.slice(finalDir.length+1):basename(path)}; });
         if(record) exportProgress.finish(record,{ok:true});
-        return json(res,201,{kind:b.kind,outDir:finalDir,files});
+        return json(res,201,{kind:b.kind,outDir:finalDir,files,notes:[...(out?.notes||[]),...(out?.warnings||[])].map(String).slice(0,20)});
       }
       if(parts[3]==='export'&&parts[4]==='progress'&&parts.length===6&&req.method==='GET') { // 导出进度（Server-Sent Events：progress / done）
         if(!PROGRESS_ID.test(parts[5])) throw fail(400,'导出进度编号不对');

@@ -867,6 +867,17 @@
       "pattern": "^an_[A-Za-z0-9_-]{4,}$"
     },
     "annotation": {
+      "description": "批注：画框（没有 kind）或划线（kind: stroke）",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/annotationBox"
+        },
+        {
+          "$ref": "#/$defs/annotationStroke"
+        }
+      ]
+    },
+    "annotationBox": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -892,6 +903,58 @@
         },
         "height": {
           "$ref": "#/$defs/positivePx"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "description": "画框批注（没有 kind）"
+    },
+    "annotationStroke": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "划线批注（第 15 轮）：用户用画笔画的线 / 箭头，点是页面 CSS 像素",
+      "required": [
+        "id",
+        "kind",
+        "points",
+        "color"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/annotationId"
+        },
+        "kind": {
+          "const": "stroke"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2000,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "arrow": {
+          "type": "boolean"
         },
         "text": {
           "type": "string",

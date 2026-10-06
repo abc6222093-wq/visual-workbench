@@ -45,8 +45,9 @@ export function pageEditSummary(projectDir, page) {
  * 生成一段中文纯文本。
  * @param {{repoDir: string, dataDir?: string, projectDir: string, project?: object, pageIds?: string[]}} opts
  *   pageIds：只处理这些页（「当前页」）；不给 = 全部页。
+ *   annotationShots：可选，renderAnnotationShots 的返回值 { [pageId]: 'annotations/<页面编号>.png' }，有的页在批注段列出截图路径。
  */
-export function agentBrief({ repoDir, dataDir, projectDir, project, pageIds, intent = 'edits' }) {
+export function agentBrief({ repoDir, dataDir, projectDir, project, pageIds, intent = 'edits', annotationShots = null }) {
   if (!BRIEF_INTENTS.includes(intent)) throw new Error(`不认识的 intent：${intent}`);
   if (typeof repoDir !== 'string' || !repoDir) throw new Error('缺少工作台代码文件夹路径');
   if (typeof projectDir !== 'string' || !projectDir) throw new Error('缺少项目文件夹路径');
@@ -90,9 +91,9 @@ export function agentBrief({ repoDir, dataDir, projectDir, project, pageIds, int
   const card = intent === 'unify' ? '' : designCardText(p);
   if (card) lines.push('', '本项目的设计卡片（保持这个风格）：', ...card.split('\n').map((l) => `  ${l}`));
 
-  if (intent === 'design') designSection(lines, { repoDir, projectDir, allPages, pages, id, only });
-  else if (intent === 'unify') unifySection(lines, { repoDir, projectDir, p, allPages, pages, id, only });
-  else editsSection(lines, { repoDir, projectDir, allPages, pages, id, only });
+  if (intent === 'design') designSection(lines, { repoDir, projectDir, allPages, pages, id, only, shots: annotationShots });
+  else if (intent === 'unify') unifySection(lines, { repoDir, projectDir, p, allPages, pages, id, only, shots: annotationShots });
+  else editsSection(lines, { repoDir, projectDir, allPages, pages, id, only, shots: annotationShots });
   lines.push('', DESIGN_CARD_REMINDER, '', '工作台开着的话，你改完文件界面会自动刷新，不用让用户手动刷新。');
   return lines.join('\n') + '\n';
 }
@@ -111,11 +112,12 @@ function editLines(projectDir, page) {
   }
   return { lines, total: summary.length, stale };
 }
+const shotFor = (projectDir, shots, page) => (shots && typeof shots[page.id] === 'string' ? join(projectDir, shots[page.id]) : null);
 function annotationsHint(lines, pages, id, only) {
   const count = pages.reduce((n, page) => n + (Array.isArray(page.annotations) ? page.annotations.length : 0), 0);
   if (!count) return '';
   const pageArg = only && pages.length === 1 ? ` --page ${pages[0].id}` : '';
-  lines.push('', `用户在页面上留了 ${count} 条批注（她自己改不了、要你改的地方），请一并处理。`);
+  lines.push('', `用户在页面上留了 ${count} 条批注（她自己改不了、要你改的地方），请一并处理。有批注截图（annotations/<页面编号>.png）时先打开看图，再按编号对照文字改。`);
   return `npm run annotations -- ${id} --clear${pageArg || ' [--page <页面编号>]'} [<批注编号>…]`;
 }
 function startSteps(lines, id, pageArg, repoDir) {
@@ -128,7 +130,7 @@ function startSteps(lines, id, pageArg, repoDir) {
   );
 }
 
-function editsSection(lines, { repoDir, projectDir, allPages, pages, id, only }) {
+function editsSection(lines, { repoDir, projectDir, allPages, pages, id, only, shots }) {
   lines.push('', only ? `这次只处理下面 ${pages.length} 页（其他页不要动）：` : `全部 ${pages.length} 页：`);
   let total = 0, stale = 0;
   for (const page of pages) {
@@ -136,7 +138,7 @@ function editsSection(lines, { repoDir, projectDir, allPages, pages, id, only })
     const e = editLines(projectDir, page);
     total += e.total; stale += e.stale;
     if (!e.total) lines.push('  修改单：无'); else lines.push(...e.lines);
-    lines.push(...annotationLines(page));
+    lines.push(...annotationLines(page, '  ', shotFor(projectDir, shots, page)));
   }
   if (total) {
     lines.push('', `用户在工作台里改了 ${total} 处${stale ? `（其中 ${stale} 处对不上：页面里已没有那个编号或没给那种能力，请按意思判断）` : ''}。请把这些修改真正写进页面文件，顺手调和周围版面。`);
@@ -154,7 +156,7 @@ function editsSection(lines, { repoDir, projectDir, allPages, pages, id, only })
   if (clearNotes) lines.push(`4. 把处理过的批注清掉：${clearNotes}`);
 }
 
-function designSection(lines, { repoDir, projectDir, allPages, pages, id, only }) {
+function designSection(lines, { repoDir, projectDir, allPages, pages, id, only, shots }) {
   const drafts = pages.filter((page) => page.draft === true);
   lines.push('', drafts.length ? `下面 ${drafts.length} 页是草稿页（用户从文案分好的页，还没有设计）：` : '这次要处理的页里没有草稿页。');
   for (const page of drafts) {
@@ -171,7 +173,7 @@ function designSection(lines, { repoDir, projectDir, allPages, pages, id, only }
       }
     }
     if (typeof page.notes === 'string' && page.notes.trim()) lines.push('  备注（不上页面，给你参考）：', ...page.notes.trim().split('\n').map((l) => `    ${l}`));
-    lines.push(...annotationLines(page));
+    lines.push(...annotationLines(page, '  ', shotFor(projectDir, shots, page)));
   }
   const others = pages.filter((page) => page.draft !== true);
   if (only && others.length) lines.push('', `另外 ${others.length} 页不是草稿页，这次不用设计。`);
@@ -189,7 +191,7 @@ function designSection(lines, { repoDir, projectDir, allPages, pages, id, only }
   if (clearNotes) lines.push(`3. 把处理过的批注清掉：${clearNotes}`);
 }
 
-function unifySection(lines, { repoDir, projectDir, p, allPages, pages, id, only }) {
+function unifySection(lines, { repoDir, projectDir, p, allPages, pages, id, only, shots }) {
   const foreign = pages.filter((page) => isForeign(page, id));
   lines.push('', foreign.length ? `下面 ${foreign.length} 页是从别的项目拼进来的：` : '这次要处理的页里没有从别的项目拼进来的页。');
   const names = new Map();
@@ -204,7 +206,7 @@ function unifySection(lines, { repoDir, projectDir, p, allPages, pages, id, only
     lines.push(`${pageLine(projectDir, allPages, page)}，来自项目 ${src}${srcName ? `「${srcName}」` : '（已找不到）'}${page.origin.page ? ` 的 ${page.origin.page}` : ''}`);
     const e = editLines(projectDir, page);
     if (e.total) lines.push(...e.lines);
-    lines.push(...annotationLines(page));
+    lines.push(...annotationLines(page, '  ', shotFor(projectDir, shots, page)));
   }
   const card = designCardText(p);
   lines.push('', '本项目的设计卡片：');

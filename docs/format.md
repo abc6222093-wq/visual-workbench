@@ -244,7 +244,7 @@ agent 每次做完设计，把设计卡片写进 `project.json` 的 `designCard`
 用户在总览点卡片图标能看，并「复制给 agent」当风格参考；「请统一风格」的开场白也带着它。
 
 ## 18. 批注（第 13 轮）
-用户在页面上拖一个框、写一句话（「这里加一个字」「这段太挤」），记在这一页的 `annotations`（页面 CSS 像素的位置和大小、文字、时间），只在编辑画布上显示；放映、导出、缩略图里没有。批注和修改单分开存：修改单是用户自己已经改了的，批注是用户改不了、要 agent 改的。agent 读「复制给 agent」里的批注（三种开场白每页末尾都列），改完用 `npm run annotations -- <项目> [--page <页面编号>] --clear [<编号>…]` 清掉；`npm run annotations -- <项目>` 列出。
+用户在页面上拖一个框、写一句话（「这里加一个字」「这段太挤」），记在这一页的 `annotations`（页面 CSS 像素的位置和大小、文字、时间），只在编辑画布上显示；放映、导出、缩略图里没有。批注和修改单分开存：修改单是用户自己已经改了的，批注是用户改不了、要 agent 改的。agent 读「复制给 agent」里的批注（三种开场白每页末尾都列），改完用 `npm run annotations -- <项目> [--page <页面编号>] --clear [<编号>…]` 清掉；`npm run annotations -- <项目>` 列出。有批注截图（annotations/<页面编号>.png）时先打开看图，再按编号对照文字改。
 
 ## 19. 本地常用字体库（第 13 轮）
 用户的常用字体固定 5 套：站酷小薇（ZCOOL XiaoWei）、思源宋体 SC / JP（Source Han Serif = Noto Serif CJK）、思源黑体 SC / JP（Source Han Sans = Noto Sans CJK）。完整字体文件（全部粗细）存在数据目录 `library/fonts/<key>/`，清单在 `library/fonts/fonts.json`（`npm run fonts -- install` 从官方开源发布处下载一次，两台电脑经 Google Drive 共用）。
