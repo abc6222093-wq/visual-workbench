@@ -149,7 +149,7 @@ function readName(t) {
 const ALIGN = { left: 'left', start: 'left', center: 'center', right: 'right', end: 'right', justify: 'justify' };
 
 /** 导出 PPTX。mode：'image'（每页一张图）或 'editable'（背景图 + 可改的文本框）。返回 { file, bytes, warnings }。 */
-export async function exportPptx({ projectDir, outFile, mode = 'image', purpose, onProgress, signal, timeout } = {}) {
+export async function exportPptx({ projectDir, outFile, mode = 'image', onProgress, signal, timeout } = {}) {
   if (!projectDir || !outFile) throw new Error('exportPptx 需要 projectDir 和 outFile');
   if (mode !== 'image' && mode !== 'editable') throw new Error(`不支持的 PPTX 模式：${mode}（只能是 image 或 editable）`);
   if (signal?.aborted) throw cancelledError();
@@ -171,10 +171,10 @@ export async function exportPptx({ projectDir, outFile, mode = 'image', purpose,
   if (shrink < 1) { W *= shrink; H *= shrink; warnings.push(`页面太大（PowerPoint 幻灯片最大 56 英寸），整体按 ${Math.round(shrink * 100)}% 缩小`); }
   // 截图倍数：默认 2；长页把最长边限制在约 12000 像素以内，免得图片过大
   const maxPx = Math.max(...sizes.map(s => Math.max(s.width, s.height)), 1);
-  // 用途：线上浏览版用 JPEG、1.5 倍（文件小）；印刷版和不指定时用 PNG、2 倍（清晰）
-  const web = purpose === 'web';
-  const scale = Math.max(0.5, Math.min(web ? 1.5 : 2, 12000 / maxPx));
-  const type = web ? 'jpeg' : 'png';
+  // PPTX 只用于大屏幕和其他设备演示：固定 JPEG（质量 85）、1.5 倍，清晰又不太大（印刷用 PDF）
+  const web = true;
+  const scale = Math.max(0.5, Math.min(1.5, 12000 / maxPx));
+  const type = 'jpeg';
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'VW', width: W, height: H });
   pptx.layout = 'VW';

@@ -569,6 +569,8 @@ function pageBase(p) {
 }
 function destroyFrame() {
   frameToken++;
+  try { if (swapShown && swapShown !== F?.frame) swapShown.destroy(); } catch {}
+  swapShown = swapPending = null;
   try { F?.frame?.destroy(); } catch {}
   F = null;
   S.mark = null;
@@ -636,10 +638,16 @@ async function refreshBoard({ force = false } = {}) {
     F.html = html;
     const edits = clone(p.edits || []);
     if (reuse) {
+      // 换页 / 页面文件被换掉（第 16 轮）：双缓冲——新页先藏在旧页后面加载，新页报 ready 的那一刻再换上，切页不闪白。
+      // 等待期间旧页只是占位：不接鼠标，消息也不再处理（F.frame 已经是新页）
       F.pendingSelect = keep;
-      reuse.reload({ page: framePage(p), edits, html, project: S.project, screen });
+      const shown = swapShown || reuse;
+      if (swapPending && swapPending !== shown) swapPending.destroy();
+      shown.iframe.style.pointerEvents = "none";
+      const next = mountFrame({ mod, stage, p, html, edits, screen, token, pending: true });
+      swapShown = shown; swapPending = next;
+      F.frame = next;
       F.uiScale = null;
-      fitBoard();
     } else {
       stage.replaceChildren();
       F.pendingSelect = keep;
@@ -650,6 +658,14 @@ async function refreshBoard({ force = false } = {}) {
     if (token === frameToken) notice(`这一页显示不出来：${error.message}`);
   }
 }
+let swapShown = null, swapPending = null; // 换页双缓冲：正显示着的旧页、正在加载的新页
+function finishPageSwap(next) {
+  next.iframe.classList.remove("vw-frame-pending");
+  if (swapShown && swapShown !== next) swapShown.destroy();
+  swapShown = swapPending = null;
+  F.uiScale = null;
+  fitBoard();
+}
 // 在 #artboard 里放一个编辑用的 iframe。消息只认当前显示的那个（F.frame）：
 // 换屏时新 iframe 先藏在旧的后面加载，加载好之前它的消息不处理。
 function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false }) {
@@ -658,7 +674,12 @@ function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false
     project: S.project, page: framePage(p), mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1, fontLibrary: S.fontLibrary || [],
     ...(screen ? { screen } : {}),
     onMessage: (msg) => { if (F?.frame === frame) onFrameMessage(token, msg); },
-    onReady: (msg) => { if (F?.frame === frame) onFrameReady(token, msg); },
+    onReady: (msg) => {
+      if (F?.frame !== frame) return;
+      if (frame !== swapPending) return onFrameReady(token, msg);
+      // 换页双缓冲：新页的字体、图片画出来再换上（最多等 1.5 秒），之前一直显示旧页
+      frame.painted(1500).then(() => { if (F?.frame === frame && frame === swapPending) { finishPageSwap(frame); onFrameReady(token, msg); } });
+    },
     onError: (err) => { if (F?.frame === frame && F?.token === token) console.warn("页面显示出错", err); },
   });
   if (pending) frame.iframe.classList.add("vw-frame-pending");
@@ -799,8 +820,10 @@ function frameDrag(on) {
   dragForward = ctl;
   const send = (kind) => (ev) => {
     const r = frame.iframe.getBoundingClientRect(), k = r.width / (frame.iframe.offsetWidth || 1) || 1;
-    frame.send({ vw: "pointer", kind, x: (ev.clientX - r.left) / k, y: (ev.clientY - r.top) / k, shiftKey: ev.shiftKey });
-    if (kind === "up") { ctl.abort(); if (dragForward === ctl) dragForward = null; }
+    // 在应用窗口外松开鼠标时收不到 pointerup：之后第一次移动时按键已经松开（buttons 为 0），也当作松开
+    const up = kind === "up" || !(ev.buttons & 1);
+    frame.send({ vw: "pointer", kind: up ? "up" : kind, x: (ev.clientX - r.left) / k, y: (ev.clientY - r.top) / k, shiftKey: ev.shiftKey });
+    if (up) { ctl.abort(); if (dragForward === ctl) dragForward = null; }
   };
   window.addEventListener("pointermove", send("move"), { capture: true, signal: ctl.signal });
   window.addEventListener("pointerup", send("up"), { capture: true, signal: ctl.signal });
@@ -822,6 +845,7 @@ function startWellMarquee(e) {
   try { well.setPointerCapture(e.pointerId); } catch {}
   const toFrame = (x, y) => { const r = frame.iframe.getBoundingClientRect(), k = r.width / (frame.iframe.offsetWidth || 1) || 1; return { x: (x - r.left) / k, y: (y - r.top) / k }; };
   const move = (ev) => {
+    if (!(ev.buttons & 1)) { up(); return; } // 在窗口外松开了鼠标（收不到 pointerup）：框选到此结束，框不留在画布上
     if (!started && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 3) return;
     if (!started) { started = true; overlay = document.createElement("div"); overlay.className = "ed-marquee"; well.append(overlay); frame.send({ vw: "marquee", phase: "start", additive }); }
     const wr = well.getBoundingClientRect();
@@ -1391,7 +1415,7 @@ const EXPORT_KINDS = [
   ["html", "放映版 HTML", "一个网页文件，双击就能在浏览器里放映（带动效）", "play"],
   ["images", "每页图片", "每一页存成一张 PNG 图片", "image"],
   ["pdf", "PDF", "所有页面合成一个 PDF 文件", "copy"],
-  ["pptx-image", "PPTX 图片版", "每页一张高清图铺满幻灯片，和原稿一模一样，不能改字", "images"],
+  ["pptx-image", "PPTX 图片版", "演示用：每页一张清晰的图铺满幻灯片，和原稿一模一样，不能改字", "images"],
   ["pptx-editable", "PPTX 可改字版", "背景和装饰是图片，文字是 PowerPoint 里能改的文本框（动画不搬）", "type"],
   ["handoff", "交接包（改动清单 + 对比图）", "改前 = agent 写的样子，改后 = 加上你的修改；给写前端的 agent", "link"],
 ];
@@ -1400,7 +1424,9 @@ const EXPORT_PURPOSES = [
   ["web", "线上浏览版", "文件小，手机也能流畅打开（图片按显示尺寸压缩，字体只留用到的字）"],
   ["print", "印刷版", "高清（按 300 dpi 换算的尺寸，图片不压缩），文件比较大"],
 ];
-const exportRequest = (kind, purpose) => (kind.startsWith("pptx-") ? { kind: "pptx", pptxMode: kind.slice(5), purpose } : { kind, purpose });
+// PPTX 只用于演示（第 16 轮）：不分用途；交接包也不分
+const hasPurpose = (kind) => kind !== "handoff" && !kind.startsWith("pptx-");
+const exportRequest = (kind, purpose) => (kind.startsWith("pptx-") ? { kind: "pptx", pptxMode: kind.slice(5) } : { kind, purpose });
 function formatBytes(n) {
   if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n || 0))} B`;
   const units = ["KB", "MB", "GB"];
@@ -1410,7 +1436,7 @@ function formatBytes(n) {
 }
 function exportDialog() {
   const kind = S.exportKind, purpose = S.exportPurpose || "web";
-  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><h3 class="ed-heading ex-purpose__head" ${kind === "handoff" ? "hidden" : ""}>用途</h3><div class="g-sheet__list ex-purpose" role="radiogroup" aria-label="用途" id="export-purposes" ${kind === "handoff" ? "hidden" : ""}>${EXPORT_PURPOSES.map(([k, label, desc]) => `<button class="g-row ${k === purpose ? "selected" : ""}" data-action="export-purpose" data-purpose="${k}" role="radio" aria-checked="${k === purpose}"><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
+  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><h3 class="ed-heading ex-purpose__head" ${hasPurpose(kind) ? "" : "hidden"}>用途</h3><div class="g-sheet__list ex-purpose" role="radiogroup" aria-label="用途" id="export-purposes" ${hasPurpose(kind) ? "" : "hidden"}>${EXPORT_PURPOSES.map(([k, label, desc]) => `<button class="g-row ${k === purpose ? "selected" : ""}" data-action="export-purpose" data-purpose="${k}" role="radio" aria-checked="${k === purpose}"><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
 }
 function chooseExportPurpose(purpose) {
   if (!EXPORT_PURPOSES.some(([k]) => k === purpose)) return;
@@ -1424,7 +1450,7 @@ function chooseExportPurpose(purpose) {
 function chooseExportKind(kind) {
   if (!EXPORT_KINDS.some(([k]) => k === kind)) return;
   S.exportKind = kind;
-  for (const node of document.querySelectorAll("#export-purposes, .ex-purpose__head")) node.hidden = kind === "handoff"; // 交接包不分用途
+  for (const node of document.querySelectorAll("#export-purposes, .ex-purpose__head")) node.hidden = !hasPurpose(kind); // 交接包、PPTX 不分用途
   document.querySelectorAll('[data-action="export-kind"]').forEach((row) => {
     const on = row.dataset.kind === kind;
     row.classList.toggle("selected", on);
@@ -1446,7 +1472,7 @@ function showExportProgress(sheet, { current, total, label } = {}) {
 async function startExport(button) {
   if (S.exporting) return;
   const kind = S.exportKind, sheet = button.closest(".g-sheet");
-  const label = `${EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind}${kind === "handoff" ? "" : `（${EXPORT_PURPOSES.find(([k]) => k === (S.exportPurpose || "web"))?.[1]}）`}`;
+  const label = `${EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind}${hasPurpose(kind) ? `（${EXPORT_PURPOSES.find(([k]) => k === (S.exportPurpose || "web"))?.[1]}）` : ""}`;
   S.exporting = true;
   const controls = [...sheet.querySelectorAll("button")];
   controls.forEach((c) => (c.disabled = true));

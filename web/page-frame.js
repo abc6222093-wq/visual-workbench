@@ -221,7 +221,7 @@ export function createPageFrame(options = {}) {
   let destroyed = false, isReady = false, queue = [], generation = 0;
   let held = !!options.hold && mode === 'play' && !options.countSteps;
   let resolveReady, resolveLoaded;
-  const waiters = { 'step-done': [], left: [], settled: [], 'screen-done': [] };
+  const waiters = { 'step-done': [], left: [], settled: [], 'screen-done': [], painted: [] };
   const api = {};
   const newReady = () => { isReady = false; api.ready = new Promise(resolve => { resolveReady = resolve; }); api.loaded = new Promise(resolve => { resolveLoaded = resolve; }); };
   newReady();
@@ -291,6 +291,8 @@ export function createPageFrame(options = {}) {
     toEnd() { return request('step-done', { vw: 'toEnd' }); },
     leave(direction = 1) { return request('left', { vw: 'leave', direction }); },
     settle(timeout) { return request('settled', { vw: 'settle', timeout }); },
+    // 字体、图片都画出来了（编辑画布换页双缓冲用，不动动画；最多等 timeout）→ Promise<painted 消息>
+    painted(timeout) { return request('painted', { vw: 'painted', timeout }); },
     screen(k) { return request('screen-done', { vw: 'screen', screen: k }).then(msg => { if (msg?.applied) screen = msg.screen; return msg; }); },
     setMode(next) { mode = next; send({ vw: 'mode', mode: next }); },
     scrollTo(top) { send({ vw: 'scroll', top }); },

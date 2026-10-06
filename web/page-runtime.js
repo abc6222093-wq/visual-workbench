@@ -559,6 +559,13 @@
     }
     post({ vw: 'left', direction });
   }
+  // 画出来了：字体就绪、图片加载并解码完，再等两帧（不碰动画）；最多 timeout 毫秒
+  function whenPainted(timeout) {
+    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+    const images = Promise.all([...doc.images].map(img => (img.complete ? Promise.resolve() : new Promise(resolve => { img.addEventListener('load', resolve, { once: true }); img.addEventListener('error', resolve, { once: true }); })).then(() => (img.decode ? img.decode().catch(() => {}) : null))));
+    const work = Promise.all([doc.fonts && doc.fonts.ready, images]).then(frame).then(frame);
+    return Promise.race([work, delay(Number(timeout) || 1500)]);
+  }
   // 截图前等画面静止：字体、图片、有限动画；无限循环的动画停在当前帧
   async function settle(timeout) {
     const limit = Number(timeout) || 5000, deadline = Date.now() + limit;
@@ -1476,6 +1483,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         case 'toEnd': playToEnd().catch(error => postError(error, 'toEnd')); break;
         case 'leave': playLeave(m.direction).catch(error => postError(error, 'leave')); break;
         case 'screen': gotoScreenMessage(m.screen); break;
+        case 'painted': whenPainted(m.timeout).then(() => post({ vw: 'painted', ok: true }), () => post({ vw: 'painted', ok: false })); break;
         case 'settle': settle(m.timeout).then(() => post({ vw: 'settled', ok: true, height: contentHeight() }), error => post({ vw: 'settled', ok: false, error: describe(error).message, height: contentHeight() })); break;
         case 'mode': switchMode(m.mode); break;
         case 'start': if (heldStart) { const run = heldStart; heldStart = null; run(); } break;

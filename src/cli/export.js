@@ -7,7 +7,7 @@ import { resolveProject } from '../data-dir.js';
 import { exportProject, EXPORT_KINDS } from '../export/index.js';
 import { describeBreakdown, formatBytes } from '../export/html.js';
 
-const USAGE = '用法：npm run export -- <项目目录或编号> [--html|--images|--pdf|--pptx|--pptx-editable|--all] [--print|--web] [--out <目录>] [--data-dir <数据目录>]\n  --print 印刷版（300 dpi 高清、图片不压缩）；--web 线上版（文件小、手机流畅）；两个都给就各导一份；都不给按原来的做法\n  --pptx PPTX 图片版（每页一张画面）；--pptx-editable PPTX 可改字版';
+const USAGE = '用法：npm run export -- <项目目录或编号> [--html|--images|--pdf|--pptx|--pptx-editable|--all] [--print|--web] [--out <目录>] [--data-dir <数据目录>]\n  --print 印刷版（300 dpi 高清、图片不压缩）；--web 线上版（文件小、手机流畅）；两个都给就各导一份；都不给按原来的做法\n  --pptx PPTX 图片版（每页一张画面）；--pptx-editable PPTX 可改字版（PPTX 只用于演示，不分印刷版 / 线上版）';
 
 function parse(args) {
   const out = { positional: [], kinds: new Set(), purposes: [], pptxModes: new Set(), outDir: null };
@@ -46,7 +46,7 @@ try {
   const outDir = args.outDir ? resolve(args.outDir) : join(needDataDir(), 'exports', project.id);
   let failed = false;
   const jobs = [];
-  for (const kind of EXPORT_KINDS.filter(k => args.kinds.has(k))) for (const purpose of args.purposes.length ? args.purposes : [undefined]) {
+  for (const kind of EXPORT_KINDS.filter(k => args.kinds.has(k))) for (const purpose of kind === 'pptx' ? [undefined] : args.purposes.length ? args.purposes : [undefined]) { // PPTX 不分用途
     for (const pptxMode of kind === 'pptx' ? [...args.pptxModes] : [undefined]) jobs.push({ kind, purpose, pptxMode });
   }
   for (const { kind, purpose, pptxMode } of jobs) {

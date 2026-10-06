@@ -58,9 +58,10 @@ export async function exportProject({ projectDir, kind, outDir, name, onProgress
     try { pptx = await import('./pptx.js'); }
     catch (error) { throw new Error(`导出 PPTX 的功能还没准备好：${error.message}`); }
     if (typeof pptx.exportPptx !== 'function') throw new Error('导出 PPTX 的功能还没准备好：找不到 exportPptx');
-    const outFile = join(outDir, `${plain}（${PPTX_LABEL[pptxMode]}${purpose ? ` · ${PURPOSE_LABEL[purpose]}` : ''}）.pptx`);
-    const result = await pptx.exportPptx({ projectDir, outFile, mode: pptxMode, purpose, onProgress: progress, signal });
-    return { kind, purpose, pptxMode, outDir, files: [{ path: result.file, bytes: result.bytes }], warnings: result.warnings || [], notes: result.notes || [] };
+    // PPTX 只用于大屏幕和其他设备演示（第 16 轮）：不分用途，固定用适合演示的清晰度
+    const outFile = join(outDir, `${plain}（${PPTX_LABEL[pptxMode]}）.pptx`);
+    const result = await pptx.exportPptx({ projectDir, outFile, mode: pptxMode, onProgress: progress, signal });
+    return { kind, pptxMode, outDir, files: [{ path: result.file, bytes: result.bytes }], warnings: result.warnings || [], notes: result.notes || [] };
   }
   let images;
   try { images = await import('./images.js'); }
