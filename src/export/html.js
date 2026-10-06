@@ -27,7 +27,7 @@ const isSvg = buffer => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^
  * 图片瘦身：第 12 轮页面是自由 HTML，不知道显示尺寸，只把宽度超过 maxWidth（= 2 × 页面宽）的图按比例缩小；
  * 不透明的再试 JPEG，取最小的（原文件更小就用原文件）。SVG、动图原样。
  */
-export async function slimImage(buffer, { maxWidth } = {}) {
+export async function slimImage(buffer, { maxWidth, quality = 85 } = {}) {
   if (isSvg(buffer)) return { mime: 'image/svg+xml', data: buffer, note: '原样 svg' };
   let meta;
   try { meta = await sharp(buffer, { animated: true }).metadata(); } catch { return { mime: 'application/octet-stream', data: buffer, note: '原样（无法识别）' }; }
@@ -42,7 +42,7 @@ export async function slimImage(buffer, { maxWidth } = {}) {
   const base = () => { const image = sharp(buffer).rotate(); return resize ? image.resize(resize.width, resize.height, { fit: 'fill' }) : image; };
   const transparent = meta.hasAlpha && !(await sharp(buffer).stats()).isOpaque;
   const candidates = [{ mime: 'image/png', data: await base().png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer() }];
-  if (!transparent) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality: 85, mozjpeg: true }).toBuffer() });
+  if (!transparent) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality, mozjpeg: true }).toBuffer() });
   if (!rotated && !resize && (format === 'png' || format === 'jpeg' || format === 'webp')) candidates.push(original);
   const best = candidates.reduce((a, b) => (b.data.length < a.data.length ? b : a));
   const size = resize || { width, height };
@@ -193,7 +193,7 @@ function inferDataDir(projectDir) {
  * 导出放映版单文件。
  * @returns {Promise<{file:string, bytes:number, breakdown:object, items:object[], skipped:string[], warnings:string[]}>}
  */
-export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT, onProgress = () => {}, signal } = {}) {
+export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT, onProgress = () => {}, signal, purpose } = {}) {
   const cancelled = () => { if (signal?.aborted) throw Object.assign(new Error('已取消导出'), { cancelled: true }); };
   cancelled();
   projectDir = resolve(projectDir);
@@ -209,7 +209,9 @@ export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_R
   const items = [];
   const files = {};
   const sources = {}; // key → { kind, file }
-  const maxWidth = 2 * Math.max(project.artboard?.width || 0, ...project.pages.map(page => pageSize(project, page).width));
+  // purpose：不给 = 原来的做法（宽于 2 × 页面宽的图缩小，再取 PNG / JPEG 85 / 原文件里最小的）；
+  // 'print' = 图片原样嵌入不压缩；'web' = 宽度上限 = 页面宽（放映时整页缩到屏幕里，1 倍页面宽已够手机和普通屏幕），JPEG 质量 78。
+  const maxWidth = (purpose === 'web' ? 1 : 2) * Math.max(project.artboard?.width || 0, ...project.pages.map(page => pageSize(project, page).width));
   const fontFiles = new Set((project.fonts || []).map(font => font.file));
   const embedFile = key => { if (!sources[key]) sources[key] = { kind: 'file' }; return `__VWFILE[${key}]__`; };
   const inliner = createInliner({ projectDir, webRoot, embedFile, warn });
@@ -300,7 +302,7 @@ export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_R
       continue;
     }
     if (/^image\//.test(mime) || assetById.has(key)) {
-      const slim = await slimImage(buffer, { maxWidth });
+      const slim = purpose === 'print' ? { mime, data: buffer, note: '原样（印刷版不压缩）' } : await slimImage(buffer, purpose === 'web' ? { maxWidth, quality: 78 } : { maxWidth });
       files[key] = dataUrl(slim.mime === 'application/octet-stream' ? mime : slim.mime, slim.data);
       imageBytes += files[key].length;
       items.push({ kind: 'image', name: key, original: buffer.length, bytes: slim.data.length, note: slim.note });
