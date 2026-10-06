@@ -74,7 +74,9 @@ const cancelledError = () => Object.assign(new Error('已取消导出'), { cance
  * onProgress({ current, total, label })：每截完一页报一次（交接包每页有几种画面时，按「页 × 画面」计数）。
  * signal（AbortSignal）：取消时立刻关掉后台浏览器，抛出 error.cancelled = true 的错误。
  */
-export async function captureProject({ projectDir, type = 'png', quality, timeout = 5000, onShot, variants = [null], pageIds = null, onProgress, signal }) {
+// scale：截图的像素倍数（deviceScaleFactor，印刷版按 300 dpi 换算）；也可以是 (item, { width, height }) => 倍数，按页决定。
+// prepare(page, { item, width, height })：动效播完、视口定好之后、截图之前调用（例如 PPTX 可改字版取出文字再藏起来）；返回值交给 onShot 的 extra.prepared。
+export async function captureProject({ projectDir, type = 'png', quality, timeout = 5000, onShot, variants = [null], pageIds = null, onProgress, signal, scale = 1, prepare = null }) {
   if (signal?.aborted) throw cancelledError();
   projectDir = resolve(projectDir);
   const project = readProject(projectDir);
@@ -98,7 +100,8 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
       // 第 11 轮：每页按自己的尺寸设视口和截图范围（网页长页把视口设成整页高度，一次截完整页）
       const { width, height } = pageSize(project, item);
       const total = Math.max(20000, ((item.motion?.steps || 0) + 4) * timeout * 2);
-      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+      const factor = typeof scale === 'function' ? scale(item, { width, height }) : scale;
+      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: factor > 0 ? factor : 1 });
       let timer;
       try {
         const page = await context.newPage();
@@ -114,15 +117,16 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
           // 课件页 = 画板；网页页按运行时报回的整页高度（没有就用 size）
           const w = Math.round(result.width || width), h = Math.round(result.height || height);
           if (w !== width || h !== height) { await page.setViewportSize({ width: w, height: h }); await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); }
+          const prepared = prepare ? await prepare(page, { item, width: w, height: h }) : undefined;
           const options = { type, clip: { x: 0, y: 0, width: w, height: h }, animations: 'disabled', caret: 'hide' };
           if (type === 'jpeg') options.quality = quality;
-          return { buffer: await page.screenshot(options), width: w, height: h };
+          return { buffer: await page.screenshot(options), width: w, height: h, prepared };
         })();
         work.catch(() => {});
         const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`${label}导出超时：${Math.round(total / 1000)} 秒内没能播完动效（动效可能卡住或死循环），已停止导出`), { vwTimeout: true })), total); });
         const shot = await Promise.race([work, deadline]);
         if (signal?.aborted) throw cancelledError();
-        await onShot(index, item, shot.buffer, project.pages.length, { variant, width: shot.width, height: shot.height });
+        await onShot(index, item, shot.buffer, project.pages.length, { variant, width: shot.width, height: shot.height, prepared: shot.prepared });
         done++;
         try { onProgress?.({ current: done, total: shotTotal, label: `正在导出第 ${chosen.indexOf(item) + 1} / ${chosen.length} 页` }); } catch { /* 忽略 */ }
       } catch (error) {
@@ -144,12 +148,32 @@ export async function captureProject({ projectDir, type = 'png', quality, timeou
   return project;
 }
 
+// 用途：print 印刷版 = 300 dpi（页面 CSS 像素按 96 dpi 算物理尺寸）、单边不超过 16000 px（浏览器截图上限）；web 线上版 = 1 倍。
+export const PRINT_SCALE = 300 / 96;
+export const MAX_SIDE = 16000;
+/** 印刷版每页倍数：300/96，单边超过 16000 px 的页按比例降下来；notes 收集降级说明。 */
+export function printScale(notes) {
+  return (item, { width, height }) => {
+    const side = Math.max(width, height);
+    if (side * PRINT_SCALE <= MAX_SIDE) return PRINT_SCALE;
+    const factor = Math.floor((MAX_SIDE / side) * 1000) / 1000;
+    const note = `「${item.name || item.id}」太长，按 300 dpi 会超过 ${MAX_SIDE} 像素，已降到 ${Math.round(width * factor)}×${Math.round(height * factor)}（约 ${Math.round(96 * factor)} dpi）`;
+    if (!notes.includes(note)) notes.push(note);
+    return factor;
+  };
+}
+
 /**
  * 每页导出一张图片，尺寸 = 页面尺寸（课件页 = 画板；网页页 = 页面 size），文件名 `<两位序号>-<页面名>.png`。
  * format：'png'（默认）或 'jpeg'。返回 { files: [{ path, bytes }] }。
  */
-export async function exportImages({ projectDir, outDir, format = 'png', timeout, onProgress, signal } = {}) {
+// purpose：不给 = 原来的做法；'print' = PNG、300 dpi；'web' = JPEG 质量 82、1 倍。返回另带 notes（降级说明）。
+export async function exportImages({ projectDir, outDir, format, timeout, onProgress, signal, purpose } = {}) {
   if (!projectDir || !outDir) throw new Error('exportImages 需要 projectDir 和 outDir');
+  const notes = [];
+  format ??= purpose === 'web' ? 'jpeg' : 'png';
+  const quality = purpose === 'web' ? 82 : 90;
+  const scale = purpose === 'print' ? printScale(notes) : 1;
   const type = format === 'jpg' || format === 'jpeg' ? 'jpeg' : format === 'png' ? 'png' : null;
   if (!type) throw new Error(`不支持的图片格式：${format}（只能是 png 或 jpeg）`);
   outDir = resolve(outDir);
@@ -157,7 +181,7 @@ export async function exportImages({ projectDir, outDir, format = 'png', timeout
   const files = [];
   const ext = type === 'jpeg' ? 'jpg' : 'png';
   await captureProject({
-    projectDir, type, quality: 90, timeout, onProgress, signal,
+    projectDir, type, quality, scale, timeout, onProgress, signal,
     onShot(index, page, buffer, count) {
       // 序号至少两位；超过 99 页时按页数加宽，保证文件按名字排序就是页序
       const nn = String(index + 1).padStart(Math.max(2, String(count).length), '0');
@@ -166,19 +190,22 @@ export async function exportImages({ projectDir, outDir, format = 'png', timeout
       files.push({ path, bytes: buffer.length });
     },
   });
-  return { files };
+  return { files, notes };
 }
 
 /** 整个项目导出成一份 PDF：每页一个 PDF 页面，尺寸按该页尺寸换算（1 px = 0.75 pt；网页长页就是一张长 PDF 页），画面是动效播完后的最后一帧。返回 { file, bytes }。 */
-export async function exportPdf({ projectDir, outFile, timeout, onProgress, signal } = {}) {
+// purpose：不给 = 1 倍 JPEG 90；'print' = 300 dpi、JPEG 95；'web' = 1 倍、JPEG 80。页面物理尺寸都不变。返回另带 notes。
+export async function exportPdf({ projectDir, outFile, timeout, onProgress, signal, purpose } = {}) {
   if (!projectDir || !outFile) throw new Error('exportPdf 需要 projectDir 和 outFile');
   outFile = resolve(outFile);
-  const shots = [];
-  await captureProject({ projectDir, type: 'jpeg', quality: 90, timeout, onProgress, signal, onShot(index, page, jpeg, count, { width, height }) { shots[index] = { jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX }; } });
+  const shots = [], notes = [];
+  const quality = purpose === 'print' ? 95 : purpose === 'web' ? 80 : 90;
+  const scale = purpose === 'print' ? printScale(notes) : 1;
+  await captureProject({ projectDir, type: 'jpeg', quality, scale, timeout, onProgress, signal, onShot(index, page, jpeg, count, { width, height }) { shots[index] = { jpeg, width: width * PT_PER_PX, height: height * PT_PER_PX }; } });
   if (signal?.aborted) throw cancelledError();
   const pdf = buildPdf(shots);
   try { onProgress?.({ current: shots.length, total: shots.length, label: '正在写入文件' }); } catch { /* 忽略 */ }
   mkdirSync(dirname(outFile), { recursive: true });
   writeFileSync(outFile, pdf);
-  return { file: outFile, bytes: pdf.length };
+  return { file: outFile, bytes: pdf.length, notes };
 }

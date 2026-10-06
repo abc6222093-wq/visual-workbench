@@ -4,7 +4,7 @@
 
 ## 1. 设计原则
 - agent 是设计师，工作台是用户的审稿桌和资料柜。工作台不限制页面怎么写，也不对设计做任何判断或提示。
-- 用户只做四类修改：改文案 / 字号；已有元素的位置、大小、颜色、图片裁切；页面与项目整理；把剪贴板里的图片贴进页面。修改全部进修改单。
+- 用户只做四类修改：改文案 / 字号；已有元素的位置、大小、颜色、图片裁切，删掉已有元素；页面与项目整理；把剪贴板里的图片贴进页面。修改全部进修改单。
 - 修改单和页面源码分开存：源码只由 agent 写；修改单只由工作台写（agent 用命令列出 / 清除）。
 - 每页自带资源：图片、字体、脚本都登记在项目里，复制到别的项目一起带走。
 - 页面之间、页面和工作台界面之间互相隔离显示；页面里的脚本碰不到工作台和用户数据。
@@ -19,6 +19,7 @@
   fonts/                字体文件（登记在 fonts）
   versions/             存版（工作台管理，agent 不手动改）
   import/               从旧 HTML / 网页导入时的原文件与基准（只读参考）
+  annotations/          批注截图 <页面编号>.png（「复制给 agent」时工作台生成，可再生成，不进版本存档），见 §18
   series.json           从系列母版新建的项目才有
 ```
 
@@ -50,8 +51,9 @@
 | `format` / `formatVersion` | 固定 `"visual-workbench/project"` / `3` |
 | `id` | 项目编号 = 项目文件夹名。小写字母、数字、连字符，2–64 位 |
 | `kind` | `"deck"`（课件 / 海报，默认）或 `"web"`（网页） |
-| `folder` | 可选，项目所在的文件夹名（第 13 轮做界面；本轮只登记，空字符串或省略表示未分类） |
-| `designCard` | 可选，设计卡片（第 13 轮做显示）：`{ "direction": "方向名", "concept": "一句话概念", "colors": ["#rrggbb", …], "fonts": ["字体名", …], "traits": ["特征", …] }`；没有写 `null` 或省略 |
+| `folder` | 可选，项目所在的文件夹名（一层，不嵌套）。空字符串或省略表示未分类。文件夹列表记在数据目录 `workbench-state.json` 的 `folders`（空文件夹也在），见 §16 |
+| `marksRule` | 可选，页面标记按第几版规则标的整数（第 14 轮起为 `2`：文字、图片、色块都能移动缩放）。工作台打开项目时发现没有或小于 2，先存版再按新规则给页面补标记（只改 `data-vw` 属性，不动设计），然后写上；导入和 v2 转换直接写上。agent 不用写，也不要删 |
+| `designCard` | 可选，设计卡片：`{ "direction": "方向名", "concept": "一句话概念", "colors": ["#rrggbb", …], "fonts": ["字体与字号", …], "traits": ["特征", …], "at": "时间" }`；没有写 `null` 或省略。**agent 每次做完设计必须写 / 更新这张卡片**（总览的项目卡片角上有图标，用户点开能看、能「复制给 agent」当风格参考），见 §17 |
 | `artboard` | 画板：课件项目每页的尺寸；网页项目只是默认窗口。`width`、`height` 必填，`preset` 是标签（`slide-16x9` / `web-desktop` / `web-mobile` / `poster-a4` / `poster-a3` / `custom`） |
 | `assets` / `fonts` | 资源登记表，见 §5 |
 | `pages` | 页面列表，至少一页，见 §4 |
@@ -78,7 +80,9 @@
 | `motion` | 可选。`steps` 是点击推进次数（非负整数）。页面里的动效代码见 §6；没有动效省略 |
 | `edits` | 修改单，见 §7。没有修改时为 `[]` 或省略 |
 | `device` / `size` | 只在网页项目出现：`device` 为 `"desktop"`（窗口 1440×900）或 `"mobile"`（窗口 390×844）；`size: { width, height }`，宽 = 窗口宽，高 = 整页内容长度。工作台在窗口里用滚轮浏览整页 |
-| `origin` | 可选，导入来源 `{ "url"?, "file"?, "capturedAt"? }` |
+| `origin` | 可选，来源。导入的页 `{ "url"?, "file"?, "capturedAt"? }`；从别的项目拼进来的页 `{ "project": "来源项目编号", "page": "来源页面编号", "copiedAt": "时间" }`（工作台跨项目复制时写上，「请统一风格」靠它知道哪些页是拼进来的） |
+| `draft` | 可选，`true` 表示草稿页（工作台从文案生成、由工作台改写的页面文件，见 §15）。agent 把草稿设计成正式页面后去掉这个字段 |
+| `annotations` | 可选，批注列表（页面 CSS 像素）：画框 `{ "id": "an_…", "x", "y", "width", "height", "text", "at" }`，或划线 `{ "id": "an_…", "kind": "stroke", "points": [[x, y], …], "color": "#rrggbb", "width"?, "arrow"?, "text"?, "at" }`。用户在页面上画框写的一句话、用画笔画的线 / 箭头 / 圈，只在编辑画布显示，不进放映 / 导出 / 缩略图；agent 处理完用 `npm run annotations -- <项目> --clear` 清掉，见 §18 |
 
 页码 = 在 `pages` 里的位置（从 1 数），会随增删变化；工具间传递用 `id`。
 
@@ -93,7 +97,7 @@
 在元素上写两个属性：
 
 ```html
-<h1 data-vw-id="title" data-vw="text move color">把想法排成网页</h1>
+<h1 data-vw-id="title" data-vw="text move resize color">把想法排成网页</h1>
 <img data-vw-id="hero" data-vw="move resize crop" src="../assets/hero.png">
 <div data-vw-id="card1" data-vw="move resize background">…</div>
 ```
@@ -110,9 +114,10 @@
 - `data-vw-id`：稳定编号，字母开头，只含字母、数字、`-`、`_`，**一页内唯一**。agent 改版面时编号不变，修改单靠它对应。
 - `data-vw`：空格分隔的能力列表。没有这两个属性的元素用户动不了。
 - 用户贴进来的图片由工作台加到 `<body>` 末尾，编号 `u_…`（记在修改单的 `addImage` 条目里，不写进页面文件）。
-- 没有「删除」能力：用户只能删除自己贴进来的图片。形状、装饰、排版结构都由 agent 改。
+- 用户可以删除任何标了的元素：修改单记一条 `remove`（`before {removed:false}` → `after {removed:true}`），画面上隐藏，不改源码；agent 处理时把它从设计里去掉（或按用户的意思调整版面），再清掉这条。形状、装饰、排版结构都由 agent 改。
+- agent 做设计时文字、图片、色块都标上 move resize（文字 `text move resize color`）。
 - **纯色色块也要标**：有底色、没有自己的文字也不是图片的块（色条、卡片底、印章底、装饰圆点等）标 `move resize background`，用户可以挪、缩放、换色，但改不了形状（圆角、边框、旋转都由 agent 定）；**整页背景**（`<body>` 或铺满整页的最外层容器）只标 `background`。结构性容器（只为布局存在的 `<div>`）、线条、纹理不标。导入旧 HTML / 网页和 v2 转换会自动按同样规则标色块。
-- 用户在画布上看到的：可动的元素鼠标移上去有清楚的边框，选中后有 8 个把手；带 `text` 的元素点在字上改字、抓边框移动；图片、色块点哪都能拖。
+- 用户在画布上看到的：可动的元素鼠标移上去有清楚的边框，选中后有 8 个把手；第一下点击选中整块（按住就拖、方向键微调），已选中的文字再点一下或双击才出现光标改字；Shift / Cmd 点选、拖框、Cmd+A 多选，多选后一起拖、一起对齐；拖角等比缩放（文字字号一起变），拖边改宽或高；Delete 或右键「删除」记一条 `remove`。整页背景点不中，没选中东西时在工具条改「页面底色」。
 
 ## 5. 资源登记
 
@@ -173,7 +178,8 @@
   { "id": "ed_def456", "target": "card1", "kind": "background", "before": { "background": "#f1f5f9" }, "after": { "background": "#fde68a" } },
   { "id": "ed_777777", "target": "hero", "kind": "crop", "before": { "crop": null }, "after": { "crop": { "x": 0.1, "y": 0, "width": 0.8, "height": 1 } } },
   { "id": "ed_888888", "target": "u_3f9a1c2e", "kind": "addImage", "before": null,
-    "after": { "asset": "asset_paste_1", "x": 760, "y": 340, "width": 400, "height": 300 } }
+    "after": { "asset": "asset_paste_1", "x": 760, "y": 340, "width": 400, "height": 300 } },
+  { "id": "ed_999999", "target": "badge", "kind": "remove", "before": { "removed": false }, "after": { "removed": true } }
 ]
 ```
 
@@ -187,6 +193,7 @@
 | `background` | `{ background }` | 底色 |
 | `crop` | `{ crop }` | `crop` 为 `{ x, y, width, height }`（源图比例），`null` 表示不裁 |
 | `addImage` | before `null`；after `{ asset, x, y, width, height }` | 用户贴进来的图片；`asset` 是本项目素材编号；删除这张图 = 删掉这条和它的 `move` / `resize` / `crop` 条目 |
+| `remove` | before `{ removed: false }`；after `{ removed: true }` | 第 14 轮：用户删掉了这个元素（Delete 或右键「删除」，可撤销）。画面上隐藏（`visibility: hidden`），不改源码；agent 处理时把它从设计里去掉、调好周围，再清掉这条 |
 
 - 颜色一律 `#rrggbb` 或 `#rrggbbaa`。坐标、尺寸都是页面 CSS 像素。
 - `status` 不存文件，读的时候算：目标编号在页面里找不到、或页面已不允许这种修改时为「对不上」（stale）。工作台显示时跳过对不上的条目，不报错；agent 读修改单时会列出来。
@@ -207,14 +214,50 @@
 ## 11. 导出
 - 放映版 HTML：一个文件，每页一个隔离 iframe，资源内嵌，不依赖网络；点击推进、方向键翻页、往回翻停在上一页最后一步，和工作台里的放映一致；内嵌同一套运行时。
 - 导出时服务端报进度（`POST /api/projects/:id/export` 可带 `progressId`，`GET …/export/progress/:progressId` 是 SSE：`progress { current, total, label }`、`done`；`POST …/export/cancel/:progressId` 取消），界面显示「正在导出第 3 / 15 页」并可取消；命令行也打印进度。
-- 每页图片 / PDF：真浏览器按「页面 + 修改单」跑完全部步骤后截图；网页页面按整页高度截。
+- 每页图片 / PDF：真浏览器按「页面 + 修改单」跑完全部步骤后截图；网页页面按整页高度截。批注不进任何导出。
+- 用途（第 15 轮，放映版 / 图片 / PDF 都分；命令行 `--web` / `--print`，都给就各导一份，文件名带「（线上版）」「（印刷版）」）：**线上浏览版**——图片、PDF 用 1 倍 JPEG，放映版里的图片按画板宽压缩、字体只留用到的字；**印刷版**——按 300 dpi 换算（3.125 倍），图片 PNG，PDF 用 JPEG 质量 95，放映版素材不压缩。
+- PPTX（第 15 轮；第 16 轮起只用于演示、不分用途，固定 1.5 倍 JPEG）：`--pptx` 图片版，每页一张画面铺满；`--pptx-editable` 可改字版，标了 `text` 的文字变成 PowerPoint 文本框，其余挖掉文字后的画面做背景。幻灯片尺寸 = 画板像素 / 96 英寸。
 - 交接包（网页项目）：改动清单 = 修改单（按页、按目标，写明原网页定位 `data-vw-origin`、改前改后），加每页改前改后对比图和「复制给 agent」文字。
 
 ## 12. 旧项目转换（v2 → v3）
-v2 项目第一次被工作台打开时：先自动存版「转换为 v3 前自动存版」，再把每页元素转成绝对定位的 HTML（`pages/<页面编号>.html`），文字标 `text move color`（能改字、挪动、改色）、图片标 `move resize crop`、形状等纯色色块标 `move resize background`、整页底色标 `background`；v2 的 `motion.source` 包一层兼容层照搬（`ctx.element(id)` 仍可用，`transition` 换页效果搬不了，写进该页 `notes`）。转换后画面与原来一致。转换失败的项目保持原样，并给出中文说明。命令行：`npm run convert -- <项目>`。
+v2 项目第一次被工作台打开时：先自动存版「转换为 v3 前自动存版」，再把每页元素转成绝对定位的 HTML（`pages/<页面编号>.html`），文字标 `text move resize color`（能改字、挪动、缩放、改色）、图片标 `move resize crop`、形状等纯色色块标 `move resize background`、整页底色标 `background`；v2 的 `motion.source` 包一层兼容层照搬（`ctx.element(id)` 仍可用，`transition` 换页效果搬不了，写进该页 `notes`）。转换后画面与原来一致。转换失败的项目保持原样，并给出中文说明。命令行：`npm run convert -- <项目>`。
 
 ## 13. 旧 HTML 导入
-`总览 → 导入 HTML / 网页`：按页切开后**保留原来的 HTML、CSS 和动画**，自动把看得出的文字（标题、段落、列表项、按钮等）标成 `text move color`、图片标成 `move resize crop`、纯色色块标成 `move resize background`（整页背景只标 `background`），编号 `t1`、`t2`…、`i1`…；原文件原样放进 `import/`，绝不修改。细节见 `docs/import-html.md`。
+`总览 → 导入 HTML / 网页`：按页切开后**保留原来的 HTML、CSS 和动画**，自动把看得出的文字（标题、段落、列表项、按钮等）标成 `text move resize color`、图片标成 `move resize crop`、纯色色块标成 `move resize background`（整页背景只标 `background`），编号 `t1`、`t2`…、`i1`…；原文件原样放进 `import/`，绝不修改。细节见 `docs/import-html.md`。
 
 ## 14. 示例
 `examples/sample-deck/`：三页，有动效、局部加粗变色的文字、可裁切图片；`examples/sample-web/`：网页项目，电脑端、手机端各一页。
+
+## 15. 草稿分页（第 13 轮）
+用户拿到一份已经分好页的文案，想先看看放到页面上字多不多，再调整分段和大小标题，然后交给 agent 设计。工作台自己分页，不调用 agent；草稿页不做任何设计。
+
+**文案格式**（用户以后都用这种）：`#` 一级标题 = 项目名；`---` 或 `## Page N ｜ 页名` = 分页（页名照用；只有 `## Page N` 时叫「第 N 页」）；第一个分页之前的说明文字不上页面（存进项目 `description`）。每页里 `【核心信息】`的内容上页面，**原样保留**换行、空行、①②、全角空格缩进和对齐、`>` 引用行；`【辅助信息】`、`【动效】`（以及其他`【…】`段）不上页面，原文进这一页的 `notes`（给 agent 看）。行首的「大标题：」「副标题：」「小标题：」「页眉：」「页脚：」「说明：」（注释 / 备注）「引用：」是这一行的层级提示（显示时去掉前缀）；其他行是正文。没有这些记号的普通文字：按空行分段，按字数保底分页（默认每页约 240 字），并告诉用户是怎么分的。
+
+**草稿页文件**：`pages/<页面编号>.html`，`<head>` 里有 `<meta name="vw-draft" content="1">`，`<main data-vw-draft>` 里每个段落一个 `<p data-vw-level="…">`，层级有 `title`（大标题）`subtitle`（副标题）`heading`（小标题）`body`（正文）`note`（注释）`quote`（引用）`header`（页眉）`footer`（页脚）；白底、朴素的系统字体，字号只用来区分层次，按画板高度缩放；`white-space: pre-wrap`。`project.json` 里这一页 `draft: true`。草稿页不标 `data-vw`，不走修改单：用户在工作台里直接打字、删改、换行、选层级、`Ctrl/Cmd + Enter` 分页、和下一页合并、拖动排序，工作台**直接改写草稿页文件**（这是「工作台不碰页面文件」的唯一例外，因为草稿是工作台生成的）。
+
+**交给 agent**：「复制给 agent → 请设计」会列出每个草稿页的块（层级 + 文字）和 `notes`。agent 把草稿页改写成正式页面（同一个页面编号、同一个文件），层级只是提示，版式由 agent 定；设计完去掉 `draft: true`。纯逻辑在 `web/draft-model.js`（Node 和浏览器都能用）。
+
+## 16. 文件夹与整理（第 13 轮）
+- 项目的 `folder` 是所在文件夹名（一层）；文件夹列表（含空文件夹）在数据目录 `workbench-state.json` 的 `folders: ["名字", …]`。用户在总览新建、重命名文件夹，把项目拖进去或右键「移到…」。
+- agent 新建项目时用「日期 + 简短名」命名，例如「2026-10-05 水曜会话课表」。
+- 用户用「复制给 agent → 请整理文件夹」让 agent 整理：agent 先 `npm run organize -- begin`（把每个项目的名称和所在文件夹、文件夹列表记到数据目录 `organize-backup.json`），再用 `npm run organize -- list` / `folder <名>` / `move <项目编号> <文件夹名|/>` / `rename <项目编号> <新名>` 整理，**不删除任何项目**；用户可以在总览点「退回整理前」一键恢复（`npm run organize -- restore` 同效）。
+
+## 17. 设计卡片（第 13 轮）
+agent 每次做完设计，把设计卡片写进 `project.json` 的 `designCard`：方向名、一句话概念、配色色号、字体与字号、特征。例如：
+```json
+"designCard": { "direction": "方向 3｜稿纸与印章", "concept": "像一张日语作文稿纸：每门课一行，行首盖着当天的印章", "colors": ["#FFFFFF", "#88DAD1", "#161B1A", "#2E8B74"], "fonts": ["站酷小薇 84px 竖排标题 / 104px 印章字", "思源宋体 26px 名字", "思源黑体 Bold 40px 时间"], "traits": ["全页稿纸方格底纹", "左侧竖排标题", "月/水/金 三枚不同底色的方印", "一个名字占一格稿纸", "配图做成贴在角上的邮票"], "at": "2026-10-06T00:00:00.000Z" }
+```
+用户在总览点卡片图标能看，并「复制给 agent」当风格参考；「请统一风格」的开场白也带着它。
+
+## 18. 批注（第 13 轮画框，第 15 轮加划线和批注截图）
+两种批注，都记在这一页的 `annotations`（页面 CSS 像素），只在编辑画布上显示：
+- **画框**：用户在页面上拖一个框、写一句话（「这里加一个字」「这段太挤」），存位置和大小、文字、时间。
+- **划线**（第 15 轮，`kind: "stroke"`）：用户用画笔随手画线、箭头（`arrow: true`）、圈出地方，存点列 `points`、颜色、线宽，可以配一句话 `text`。
+
+放映、导出、缩略图里都没有批注。批注和修改单分开存：修改单是用户自己已经改了的，批注是用户改不了、要 agent 改的。agent 读「复制给 agent」里的批注（三种开场白每页末尾都列），改完用 `npm run annotations -- <项目> [--page <页面编号>] --clear [<编号>…]` 清掉；`npm run annotations -- <项目>` 列出。「复制给 agent」时，有批注的页工作台先生成一张**批注截图** `annotations/<页面编号>.png`（页面 + 修改单，叠上批注框 / 线和编号；编号 = 这一页 `annotations` 里的顺序，从 1 起），文字里写截图路径和每条的编号、那句话。agent 先打开看图，再按编号对照文字改。截图可再生成，不进版本存档。
+
+## 19. 本地常用字体库（第 13 轮）
+用户的常用字体固定 5 套：站酷小薇（ZCOOL XiaoWei）、思源宋体 SC / JP（Source Han Serif = Noto Serif CJK）、思源黑体 SC / JP（Source Han Sans = Noto Sans CJK）。完整字体文件（全部粗细）存在数据目录 `library/fonts/<key>/`，清单在 `library/fonts/fonts.json`（`npm run fonts -- install` 从官方开源发布处下载一次，两台电脑经 Google Drive 共用）。
+- agent 做设计用这 5 套时**直接从字体库取**（复制进项目 `fonts/`、登记、页面里 `@font-face` 声明），不要每次重新下载；页面里的 `font-family` 用规范名或常见别名（「ZCOOL XiaoWei」「站酷小薇」「Source Han Serif SC」「Noto Serif CJK SC」「思源宋体」等），工作台靠名字认出是哪一套。
+- 认出来的页面：编辑画布、放映、导出时工作台把字体库的完整字体以同名字族注入到页面自己的字体声明之前，用户改字打出子集里没有的字时由浏览器在同一字族里回退到完整字体，看起来和原来一样；导出时按最终文字（页面 + 修改单）重新只保留用到的字，文件依然小。
+- agent 自由选的大标题字体不预存：那种字体缺字时用户用批注交给 agent。认不出字族的页面不补字、不报错。

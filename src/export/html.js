@@ -4,12 +4,13 @@
 // 播放器：每页一个 sandbox iframe（srcdoc），点击 / 方向键推进，后退时快进到最后一步。不引用任何网络地址。
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import subsetFont from 'subset-font';
 import { checkForExport } from './check.js';
 import { pageSize } from '../../web/project-kinds.js';
-import { createInliner, dataUrl, mimeOf } from './inline-page.js';
+import { createInliner, dataUrl, mimeOf, token } from './inline-page.js';
+import { fontLibraryFor, readFontLibrary } from '../fonts/library.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const WEB_ROOT = resolve(HERE, '../../web');
@@ -26,7 +27,7 @@ const isSvg = buffer => /^\s*(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE[^
  * 图片瘦身：第 12 轮页面是自由 HTML，不知道显示尺寸，只把宽度超过 maxWidth（= 2 × 页面宽）的图按比例缩小；
  * 不透明的再试 JPEG，取最小的（原文件更小就用原文件）。SVG、动图原样。
  */
-export async function slimImage(buffer, { maxWidth } = {}) {
+export async function slimImage(buffer, { maxWidth, quality = 85 } = {}) {
   if (isSvg(buffer)) return { mime: 'image/svg+xml', data: buffer, note: '原样 svg' };
   let meta;
   try { meta = await sharp(buffer, { animated: true }).metadata(); } catch { return { mime: 'application/octet-stream', data: buffer, note: '原样（无法识别）' }; }
@@ -41,7 +42,7 @@ export async function slimImage(buffer, { maxWidth } = {}) {
   const base = () => { const image = sharp(buffer).rotate(); return resize ? image.resize(resize.width, resize.height, { fit: 'fill' }) : image; };
   const transparent = meta.hasAlpha && !(await sharp(buffer).stats()).isOpaque;
   const candidates = [{ mime: 'image/png', data: await base().png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer() }];
-  if (!transparent) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality: 85, mozjpeg: true }).toBuffer() });
+  if (!transparent) candidates.push({ mime: 'image/jpeg', data: await base().flatten({ background: '#ffffff' }).jpeg({ quality, mozjpeg: true }).toBuffer() });
   if (!rotated && !resize && (format === 'png' || format === 'jpeg' || format === 'webp')) candidates.push(original);
   const best = candidates.reduce((a, b) => (b.data.length < a.data.length ? b : a));
   const size = resize || { width, height };
@@ -163,11 +164,36 @@ function pageChars(html, page) {
   return text;
 }
 
+// 字体库注入（第 13 轮 §4.4）：fontLibraryStyle 由 web/page-frame.js 提供（A 组）；没有就不注入
+const fontLibraryStyleCache = new Map();
+async function loadFontLibraryStyle(webRoot) {
+  if (!fontLibraryStyleCache.has(webRoot)) {
+    let fn = null;
+    try { fn = (await import(pathToFileURL(join(webRoot, 'page-frame.js')).href)).fontLibraryStyle || null; } catch {}
+    fontLibraryStyleCache.set(webRoot, fn);
+  }
+  return fontLibraryStyleCache.get(webRoot);
+}
+/** 把 <style> 插到页面 <head> 开头（buildSrcdoc 之后在它前面放基础样式与运行时，页面自己的样式在它后面） */
+function injectHead(html, text) {
+  const head = /<head(\s[^>]*)?>/i.exec(html);
+  if (head) return html.slice(0, head.index + head[0].length) + text + html.slice(head.index + head[0].length);
+  const root = /<html(\s[^>]*)?>/i.exec(html);
+  if (root) return html.slice(0, root.index + root[0].length) + `<head>${text}</head>` + html.slice(root.index + root[0].length);
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  return doctype ? doctype[0] + `<head>${text}</head>` + html.slice(doctype[0].length) : `<head>${text}</head>` + html;
+}
+/** 数据目录：调用方传的 dataDir，否则 projectDir 在 <数据目录>/projects/<编号> 下时取上两级 */
+function inferDataDir(projectDir) {
+  const parent = dirname(projectDir);
+  return basename(parent) === 'projects' ? dirname(parent) : null;
+}
+
 /**
  * 导出放映版单文件。
  * @returns {Promise<{file:string, bytes:number, breakdown:object, items:object[], skipped:string[], warnings:string[]}>}
  */
-export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT, onProgress = () => {}, signal } = {}) {
+export async function exportHtml({ projectDir, outFile, dataDir, webRoot = WEB_ROOT, sizeLimit = SIZE_LIMIT, onProgress = () => {}, signal, purpose } = {}) {
   const cancelled = () => { if (signal?.aborted) throw Object.assign(new Error('已取消导出'), { cancelled: true }); };
   cancelled();
   projectDir = resolve(projectDir);
@@ -183,10 +209,17 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
   const items = [];
   const files = {};
   const sources = {}; // key → { kind, file }
-  const maxWidth = 2 * Math.max(project.artboard?.width || 0, ...project.pages.map(page => pageSize(project, page).width));
+  // purpose：不给 = 原来的做法（宽于 2 × 页面宽的图缩小，再取 PNG / JPEG 85 / 原文件里最小的）；
+  // 'print' = 图片原样嵌入不压缩；'web' = 宽度上限 = 页面宽（放映时整页缩到屏幕里，1 倍页面宽已够手机和普通屏幕），JPEG 质量 78。
+  const maxWidth = (purpose === 'web' ? 1 : 2) * Math.max(project.artboard?.width || 0, ...project.pages.map(page => pageSize(project, page).width));
   const fontFiles = new Set((project.fonts || []).map(font => font.file));
   const embedFile = key => { if (!sources[key]) sources[key] = { kind: 'file' }; return `__VWFILE[${key}]__`; };
   const inliner = createInliner({ projectDir, webRoot, embedFile, warn });
+  // 字体库：页面写到的常用字体（站酷小薇、思源宋体 / 黑体）按最终文字子集化嵌入；没有字体库时什么都不做
+  const libraryRoot = dataDir ? resolve(dataDir) : inferDataDir(projectDir);
+  const library = libraryRoot ? readFontLibrary(libraryRoot) : { families: [] };
+  const fontLibraryStyle = library.families.length ? await loadFontLibraryStyle(webRoot) : null;
+  const libraryFiles = new Map(); // 占位符 key → { file, family }
 
   // 每页 HTML → 自包含文本（资源先记成占位符）
   const pages = {};
@@ -200,6 +233,20 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
     let html;
     try { html = readFileSync(file, 'utf8'); } catch (error) { throw new Error(`读不到页面文件 ${page.file}：${error.message}`); }
     pages[page.id] = inliner.page(page.file, html);
+    if (fontLibraryStyle) {
+      const fontLibrary = fontLibraryFor(null, project, html, { library, urlFor: (key, name) => token(`libfont:${key}/${name}`) })
+        .map(family => ({ ...family, faces: family.faces.map(face => ({ ...face, format: 'woff2' })) }));
+      const style = fontLibrary.length ? fontLibraryStyle(html, fontLibrary) : '';
+      if (style) {
+        pages[page.id] = injectHead(pages[page.id], style);
+        for (const family of fontLibrary) for (const face of family.faces) {
+          const key = `libfont:${family.key}/${face.file}`;
+          if (!pages[page.id].includes(token(key))) continue;
+          sources[key] = { kind: 'libfont' };
+          libraryFiles.set(key, { file: join(library.dir, family.key, face.file), family: library.families.find(f => f.key === family.key) });
+        }
+      }
+    }
     pageBytes += Buffer.byteLength(pages[page.id]);
     charText += pageChars(html, page);
     onProgress({ current: index + 1, total, label: `正在导出第 ${index + 1} / ${project.pages.length} 页` });
@@ -220,6 +267,21 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
   onProgress({ current: project.pages.length, total, label: '正在打包资源（图片、字体、库）' });
   for (const key of Object.keys(sources).sort()) {
     cancelled();
+    if (key.startsWith('libfont:')) {
+      const { file, family } = libraryFiles.get(key);
+      const buffer = readFileSync(file);
+      let data = buffer, outMime = 'font/woff2', note = '字体库，已子集化';
+      try { data = await subsetFont(buffer, chars, { targetFormat: 'woff2' }); }
+      catch (error) { warn(`字体库 ${key.slice(8)} 子集化失败，按原文件打包：${error.message}`); outMime = mimeOf(file); note = '字体库，原样（子集化失败）'; }
+      files[key] = dataUrl(outMime, data);
+      fontBytes += files[key].length;
+      items.push({ kind: 'font', name: key, original: buffer.length, bytes: data.length, note });
+      const licenseName = `字体 ${family.family}（字体库 ${family.key}）`;
+      const licensePath = family.licenseFile && join(library.dir, family.key, family.licenseFile);
+      if (licensePath && existsSync(licensePath)) { if (!licenseNotes.some(n => n.name === licenseName)) licenseNotes.push({ name: licenseName, text: readFileSync(licensePath, 'utf8') }); }
+      else warn(`字体库 ${family.family} 的许可证文件找不到`);
+      continue;
+    }
     if (key.startsWith('vendor:')) {
       const path = key.slice('vendor:'.length);
       const buffer = readFileSync(inliner.vendorFile(path));
@@ -240,7 +302,7 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
       continue;
     }
     if (/^image\//.test(mime) || assetById.has(key)) {
-      const slim = await slimImage(buffer, { maxWidth });
+      const slim = purpose === 'print' ? { mime, data: buffer, note: '原样（印刷版不压缩）' } : await slimImage(buffer, purpose === 'web' ? { maxWidth, quality: 78 } : { maxWidth });
       files[key] = dataUrl(slim.mime === 'application/octet-stream' ? mime : slim.mime, slim.data);
       imageBytes += files[key].length;
       items.push({ kind: 'image', name: key, original: buffer.length, bytes: slim.data.length, note: slim.note });
@@ -277,7 +339,8 @@ export async function exportHtml({ projectDir, outFile, webRoot = WEB_ROOT, size
   for (const text of Object.values(pages)) for (const m of text.matchAll(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g)) inlineModuleBytes += m[0].length;
   libraryBytes += inlineModuleBytes;
 
-  const projectJson = jsonInHtml(project);
+  // 批注只给编辑画布看：放映文件里不带（文件可能发给别人）
+  const projectJson = jsonInHtml({ ...project, pages: project.pages.map(({ annotations, ...page }) => page) });
   const pagesJson = jsonInHtml(pages);
   const dataJson = `{"project":${projectJson},"pages":${pagesJson},"files":${jsonInHtml(files)},"runtimeText":${jsonInHtml(runtimeText)},"modules":${jsonInHtml(modules)}}`;
   const licenseComment = licenseNotes.length

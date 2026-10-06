@@ -1,5 +1,6 @@
 // 独立放映页（第 12 轮）：读项目 → createPlayback → 按窗口缩放。Esc 关闭（是弹出的窗口就关掉，否则回到上一页）；F 键切换全屏。
 import { createPlayback } from './playback.js';
+import { loadFontLibrary } from './font-library.js';
 
 const params = new URLSearchParams(location.search);
 const projectId = params.get('project');
@@ -57,8 +58,9 @@ async function start() {
   } catch (error) { message.textContent = `无法放映：${error.message}`; return; }
   document.title = `放映 · ${project.name || project.id}`;
   if (!Array.isArray(project.pages) || !project.pages.length) { message.textContent = '这个项目还没有页面。'; return; }
+  const fontLibrary = await loadFontLibrary();
   playback = createPlayback({
-    project, container: stage, pageId: startPage,
+    project, container: stage, pageId: startPage, frameOptions: { fontLibrary },
     onChange(state) {
       size = state.size; fit();
       showHint(`${state.index + 1} / ${state.count}${state.total ? ` · 第 ${Math.min(state.nextStep + 1, state.total + 1)} 屏` : ''}`);
@@ -79,6 +81,8 @@ window.addEventListener('keydown', event => {
   if (playback.handleKey(event.key)) event.preventDefault();
 });
 // 点在画面外（黑边）也推进；画面内的点击由页面运行时转过来
-viewport.addEventListener('click', event => { if (event.target === viewport || event.target === stage) playback?.next(); });
-viewport.addEventListener('contextmenu', event => { event.preventDefault(); if (event.target === viewport || event.target === stage) playback?.next(); });
+// 同一手势（右键、Ctrl+单击、触控板双指点按）只推进一次：去重在 playback.tap 里
+const outside = event => event.target === viewport || event.target === stage;
+viewport.addEventListener('click', event => { if (outside(event)) playback?.tap('click', event); });
+viewport.addEventListener('contextmenu', event => { event.preventDefault(); if (outside(event)) playback?.tap('context'); });
 start();

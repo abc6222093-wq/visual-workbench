@@ -1,0 +1,11 @@
+/* 画笔批注（web/annotations.js）：线条画在批注层的 SVG 里，页面坐标；--vw-inv 让高亮、点击范围保持屏幕像素 */
+.vw-annot-layer.is-pen {pointer-events:auto;cursor:crosshair;background:rgba(255,255,255,.01)}
+.vw-annot-svg {position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.vw-stroke__line {fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.vw-stroke polygon {pointer-events:none}
+.vw-stroke__hit {fill:none;stroke:transparent;stroke-width:calc(16px * var(--vw-inv,1));stroke-linecap:round;stroke-linejoin:round;pointer-events:stroke;cursor:move}
+.vw-stroke__halo {fill:none;stroke:rgba(79,143,247,.45);stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.vw-stroke.is-selected .vw-stroke__line {filter:drop-shadow(0 0 calc(1.5px * var(--vw-inv,1)) var(--g-blue,#4f8ff7))}
+.vw-stroke__text {display:inline-block;width:max-content;max-width:calc(260px * var(--vw-inv,1));margin:calc(4px * var(--vw-inv,1)) 0 0 calc(4px * var(--vw-inv,1));padding:calc(3px * var(--vw-inv,1)) calc(7px * var(--vw-inv,1));border-radius:calc(4px * var(--vw-inv,1));background:rgba(255,224,80,.95);color:#3a2f00;font:600 calc(13px * var(--vw-inv,1))/1.35 var(--g-font,system-ui);white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none}
+.vw-pen-color i {display:block;width:14px;height:14px;border-radius:50%;background:var(--pen);box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+.vw-pen-color.is-on i {box-shadow:0 0 0 2px #fff,0 0 0 4px var(--pen)}

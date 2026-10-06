@@ -17,10 +17,10 @@
 - `desktop/`：桌面应用壳（见 `docs/desktop.md`）
 - `test/`：测试（`npm test`）
 - 数据目录（以工作台的设置为准，复制给 agent 的文字里会写明，不要假设固定路径）：
-  - `projects/<项目编号>/`：`project.json`、`pages/`（每页一个 HTML）、`assets/`、`fonts/`、`versions/`，导入的还有 `import/`，从母版新建的还有 `series.json` 与 `series/`
-  - `library/assets/`、`library/fonts/`：公共素材库
-  - `exports/<项目编号>/`：导出的放映版 HTML、图片、PDF、交接包
-  - `workbench-state.json`：哪些项目是系列母版（用户在界面上标，agent 不改）
+  - `projects/<项目编号>/`：`project.json`、`pages/`（每页一个 HTML）、`assets/`、`fonts/`、`versions/`，导入的还有 `import/`，有批注截图的还有 `annotations/`，从母版新建的还有 `series.json` 与 `series/`
+  - `library/assets/`：公共素材库；`library/fonts/<key>/` + `fonts.json`：本地常用字体库（5 套完整字体，`npm run fonts -- install` 装一次，见 `docs/format.md` §19）
+  - `exports/<项目编号>/`：导出的放映版 HTML、图片、PDF、PPTX、交接包
+  - `workbench-state.json`：哪些项目是系列母版（`masters`，用户在界面上标，agent 不改）、文件夹列表（`folders`，agent 只通过 `npm run organize` 改）；`organize-backup.json`：整理前的原状（`npm run organize -- begin` 写，用户可一键退回）
 - 同级 `codex/`、`gemini/` 是给其他 agent 用的，不要碰
 
 ## 常用命令
@@ -33,10 +33,14 @@
 | 动效检查（真浏览器逐页跑） | `npm run check-motion -- <项目或导出的 .html>` |
 | 旧项目转换（v2 → v3） | `npm run convert -- <项目>` |
 | 复制页面到新项目 | `npm run copy-pages -- <源项目> <页码> --to <新编号>` |
-| 导出 | `npm run export -- <项目> [--html \| --images \| --pdf \| --all]` |
+| 看 / 清批注 | `npm run annotations -- <项目> [--page <页面编号>] [--clear [<编号>…]]` |
+| 整理文件夹（先记录原状） | `npm run organize -- begin`，然后 `list` / `folder <名>` / `move <项目> <文件夹或 />` / `rename <项目> <新名>`；退回 `restore` |
+| 安装 / 查看常用字体库 | `npm run fonts -- install` / `npm run fonts -- status` |
+| 导出（放映版 / 图片 / PDF） | `npm run export -- <项目> [--html \| --images \| --pdf \| --all] [--web \| --print]`（`--web` 线上浏览版、`--print` 印刷版，都给就各导一份） |
+| 导出 PPTX（只用于演示，不分用途） | `npm run export -- <项目> --pptx`（图片版）/ `--pptx-editable`（可改字版：标了 `text` 的文字变成文本框） |
 | 交接包（改动清单 + 对比图） | `npm run export-changes -- <项目> [--out <目录>]` |
 
-动效检查和导出图片 / PDF 要用浏览器：自动找当前系统安装的 Chrome、Edge，再找 Playwright 自带 Chromium；都没有时会给中文提示。
+动效检查和导出图片 / PDF / PPTX 要用浏览器：自动找当前系统安装的 Chrome、Edge，再找 Playwright 自带 Chromium；都没有时会给中文提示。
 
 ## 改项目前，必须依次做
 1. 读最新的 `docs/format.md` 和 `schema/project.schema.json`，不要凭记忆。
@@ -45,10 +49,15 @@
 
 ## 分工
 - **agent 写页面**：`pages/<页面编号>.html` 是完整的 HTML 文档，样式、脚本、库随意（库复制进 `assets/`，用 `../assets/x.js` 引用；不引用网络地址）。课件项目 `<body>` 就是画板（尺寸由工作台按 `artboard` 注入，不用自己设）；网页项目宽 = 设备窗口宽、高随内容。页面始终在隔离的 iframe 里显示，不要依赖 `window.parent`。
-- **agent 标出用户可以动的地方**：`data-vw-id="<稳定编号>" data-vw="<能力>"`，能力有 `text`（改文案和字号，行内加粗变色会保留）、`move`、`resize`、`color`（文字颜色）、`background`（底色）、`crop`（只对 `<img>`）。编号一页内唯一，改版面时不要改编号。**纯色色块**（有底色、没有文字也不是图片的块：色条、卡片底、印章底、装饰圆点等）标 `move resize background`；整页背景只标 `background`。结构性容器、线条、装饰纹理不标。导入旧 HTML / 网页和 v2 转换会自动按同样规则标色块。
-- **用户只做**：改文案 / 字号；已有元素的位置、大小、颜色；图片裁切；贴剪贴板图片（记为 `addImage`，编号 `u_` 开头）；页面排序、加页、复制页、跨项目复制页、项目整理。她不会改形状，形状、装饰、排版结构全由 agent 改。
+- **agent 标出用户可以动的地方**：`data-vw-id="<稳定编号>" data-vw="<能力>"`，能力有 `text`（改文案和字号，行内加粗变色会保留）、`move`、`resize`、`color`（文字颜色）、`background`（底色）、`crop`（只对 `<img>`）。编号一页内唯一，改版面时不要改编号。文字、图片、色块都要能移动和缩放：文字标 `text move resize color`，图片标 `move resize crop`，**纯色色块**（有底色、没有文字也不是图片的块：色条、卡片底、印章底、装饰圆点等）标 `move resize background`；整页背景只标 `background`。结构性容器、线条、装饰纹理不标。导入旧 HTML / 网页和 v2 转换会自动按同样规则标；旧项目打开时工作台先存版再按这套规则补标记（只改属性不动设计，`project.json` 记 `marksRule`，agent 不用写）。
+- **用户只做**：改文案 / 字号；已有元素的位置、大小、颜色（可多选一起挪、对齐）；删掉已有元素（记为 `remove`）；图片裁切；贴剪贴板图片（记为 `addImage`，编号 `u_` 开头）；页面排序、加页、复制页、跨项目复制页、项目整理；在页面上画框写一句话或用画笔划线（`kind:'stroke'`）作**批注**（`pages[].annotations`，改不了的地方交给 agent）；在**草稿页**上调文案和层级。她不会改形状，形状、装饰、排版结构全由 agent 改。
+- **agent 每次做完设计必须写设计卡片**：`project.json` 的 `designCard`（方向名、一句话概念、配色色号、字体与字号、特征，格式见 `docs/format.md` §17）。新建项目用「日期 + 简短名」命名（例如「2026-10-05 水曜会话课表」）。
+- **草稿页**（`draft: true`，`docs/format.md` §15）：工作台从用户的文案生成，块的层级（`data-vw-level`：大标题 / 副标题 / 小标题 / 正文 / 注释 / 引用 / 页眉 / 页脚）只是提示，版式由 agent 定。收到「请设计」时把草稿页改写成正式页面：同一个页面编号和文件名，去掉 `draft`，每页 `notes` 里的【辅助信息】【动效】按需要用上。
+- **拼进来的页**（`origin.project` 不是本项目）：收到「请统一风格」时，以本项目的设计卡片为参考把这些页改成一致，内容不变，保留页面编号；没有卡片就先按本项目其他页的风格判断并写一张。
+- **批注**：「复制给 agent」每页末尾都列出批注（编号、位置 + 一句话）。有批注的页工作台会生成批注截图（项目里的 `annotations/<页面编号>.png`，页面叠上批注和编号），先打开看图，再按编号对照文字改。按批注改完页面，用 `npm run annotations -- <项目> --clear` 清掉。
+- **常用字体**：站酷小薇、思源宋体 SC / JP、思源黑体 SC / JP 直接从数据目录 `library/fonts/<key>/` 复制进项目 `fonts/` 并登记，不要重新下载；页面里 `font-family` 用规范名或常见别名（「ZCOOL XiaoWei」「站酷小薇」「Source Han Serif SC」「Noto Serif CJK SC」等），工作台靠名字认出是哪一套，用户改字缺字时自动用完整字体补。其他字体自便，缺字由用户用批注告诉你。
 - **修改单**在 `project.json` 的 `pages[].edits`（见 `docs/format.md` §7）。工作台只写修改单不碰页面文件；agent 不手写修改单，只用 `npm run edits` 看和清。
-- **agent 处理修改单的做法**：读每条（含标「对不上」的：目标编号已不存在或能力已收回），把用户的意思正式写进页面（例如她把标题拖大了，就顺手调和周围；她贴了一张图，就把图正式排进版面并把素材留在 `assets/`），然后 `--clear` 清掉已处理的条目。清掉以后页面按源码显示，所以先改页面再清。
+- **agent 处理修改单的做法**：读每条（含标「对不上」的：目标编号已不存在或能力已收回），把用户的意思正式写进页面（例如她把标题拖大了，就顺手调和周围；她贴了一张图，就把图正式排进版面并把素材留在 `assets/`），`remove` 条目 = 用户删掉了这个元素（画面上先藏起来，源码没动），就从设计里去掉它、顺手调好周围；然后 `--clear` 清掉已处理的条目。清掉以后页面按源码显示，所以先改页面再清。
 - 局部加粗、变色由 agent 写在页面里（`<b>`、`<span style="color:…">` 等），用户只改字。
 - 素材、字体一律复制进项目自己的 `assets/`、`fonts/` 并登记，不跨项目引用。从素材库取用、或从别的项目复制页面，都是复制一份。
 
@@ -87,6 +96,9 @@
 - 用户把一个项目标为「系列母版」后，新建项目可以「从母版开始」。新项目里已经有：母版的画板尺寸、第 1 页的副本（作为起始页）、全部字体、来自公共素材库的素材，以及 `series.json`（`master`、`palette` 常用颜色、`pages` 母版各页清单）和 `series/pages/` 里母版各页 HTML 的只读副本。做新页面时照这些页面的写法改写，保持系列一致。
 - 母版和新项目互不影响；哪些项目是母版记在 `workbench-state.json` 的 `masters` 里，agent 不改。
 
+## 文件夹整理
+- 用户让你「整理文件夹」时：先 `npm run organize -- begin` 记录原状，再 `npm run organize -- list` 看全部项目，用 `folder` / `move` / `rename` 建文件夹、移动、改名（「日期 + 简短名」）。**不删除任何项目**；只改 `project.json` 的 `name` / `folder` 和 `workbench-state.json` 的 `folders`，不动页面和素材。整理完列出改了什么；用户可以在总览「退回整理前」一键恢复（= `npm run organize -- restore`）。
+
 ## 版本
 - 存版按内容去重（`versions/.objects/`）；用户可以在版本列表里删除版本。agent 不要手动删 `versions/` 里的东西。
 
@@ -102,7 +114,9 @@
 - 仓库已公开，GitHub Actions 在推送和 PR 时自动运行：macOS、Ubuntu 跑全部测试；Windows 通过 `node scripts/test-windows.js` 跑清单内的测试。公开仓库里不得出现密钥、令牌、真实项目内容。
 
 ## 改完必须做
-- `npm run validate -- <项目>` 和 `npm run check-motion -- <项目>` 都通过；处理过的修改单条目已清。
+- `npm run validate -- <项目>` 和 `npm run check-motion -- <项目>` 都通过；处理过的修改单条目已清；处理过的批注已清（`npm run annotations -- <项目> --clear`）。
+- 有动效的页面 `project.json` 里写了 `motion.steps`（工作台数不出来时会让用户来要）。
+- `designCard` 已写 / 已更新。
 - 改了仓库代码（`src/`、`schema/`、`web/`、`desktop/`、`test/` 等），`npm test` 也必须通过。
 
 ## 禁止

@@ -8,12 +8,17 @@ import { showContextMenu, closeContextMenu } from "./context-menu.js";
 import { createProjectManagement } from "./project-management.js";
 import { createWorkbenchClose } from "./workbench-close.js";
 import { mountRuntimeSettings, desktopShellStatus } from "./runtime-settings.js";
-import { openImportDialog } from "./import-html.js";
-import { mountHomeSelection } from "./home-selection.js";
-import { createThumbnails, fetchPageText, pageFileURL, loadFrameModule } from "./thumbnails.js";
+import { createHome } from "./home.js";
+import { loadFontLibrary } from "./font-library.js";
+import { createThumbnails, fetchPageText, pageFileURL, loadFrameModule, forgetPageTexts } from "./thumbnails.js";
 import { patchPageItems } from "./page-items.js";
 import { upsertEdit, removeUserImage, newUserImageId, isUserImage } from "./edits-model.js";
 import { isWebProject, pageSize, pageViewport, WEB_DEVICES } from "./project-kinds.js";
+// 第 13 轮：草稿页编辑、批注、从其他项目添加页面、拖进来导入成页面
+import { createDraftEditor } from "./drafts.js";
+import { createAnnotations } from "./annotations.js";
+import { openAddPagesDialog } from "./add-pages.js";
+import * as importHtml from "./import-html.js";
 // 实时连接（第 3 轮）：合并用户和 agent 的修改
 import { createSyncController, mergeProjects, summarizeConflicts } from "./sync.js";
 // 玻璃界面组件（第 2 轮视觉）
@@ -56,6 +61,8 @@ const S = {
   editingText: false, // 运行时正在改字
   scrollTop: 0, // 网页页面：窗口里往下浏览了多少（运行时回报）
   screen: 1, // 带动效的页面：画布停在第几屏（换页回到 1）
+  motionInfo: new Map(), // 页面文件 + 时间戳 → 运行时报的 { registered, hasStep, animations, scripts }
+  screenProbes: new Map(), // 页面文件 + 时间戳 → 隐藏探测 iframe 数出的屏数 { status, counted, hasStep, failed }
 };
 const web = () => isWebProject(S.project);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -189,68 +196,7 @@ async function home() {
   S.project = null;
   S.focus = false;
   disconnectEvents();
-  const list = await api("/api/projects");
-  S.homeProjects = list;
-  S.masters = list.filter((x) => x.master).map((x) => ({ id: x.id, name: x.name }));
-  // 缩略图框是 16:10，作品按自己的比例居中放进去（竖版海报不会被裁）
-  const fit = (item) => {
-    const first = item.project.pages?.[0];
-    const { width, height } = first ? pageViewport(item.project, first) : item.project.artboard;
-    const r = width / height / 1.6;
-    return r >= 1 ? `width:100%;height:${100 / r}%` : `width:${100 * r}%;height:100%`;
-  };
-  const card = (item, i) =>
-    `<div class="hm-cell" data-project-id="${esc(item.id)}"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small></div><span class="hm-card__tag">${item.master ? "系列母版" : item.legacy ? "旧格式 · 打开时转换" : esc(item.project.artboard?.preset || "")}</span></button><button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[["project-rename", "重命名"], ["project-duplicate", "复制项目"], ["project-delete", "删除项目"]].map(([action, label]) => `<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
-  shell(
-    "home",
-    `${head("项目总览", `${list.length} 个项目`, `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button><button class="g-btn" data-action="import-html">导入 HTML / 网页</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`)}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${list.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div></div></section>`,
-  );
-  list.forEach((x, i) => { const first = x.project.pages?.[0]; if (first && !x.legacy && first.file) $(`[data-thumb="${i}"]`)?.append(homeThumbs.make(x.project, first)); });
-  const scroll = app.querySelector(".hm-scroll");
-  if (scroll) S.homeSel = mountHomeSelection(scroll, { onOpen: (id) => open(id), onAction: (action, ids) => homeAction(action, ids) });
-  liven(app);
-  syncGlass(app);
-}
-function homeAction(action, ids) {
-  const items = ids.map((id) => S.homeProjects.find((p) => p.id === id)).filter(Boolean);
-  if (!items.length) return;
-  if (action === "rename") return projectManagement.rename(items[0]);
-  if (action === "duplicate") return projectManagement.duplicate(items[0]);
-  if (action === "delete") return items.length === 1 ? projectManagement.remove(items[0]) : projectManagement.removeMany(items);
-}
-const presets = [
-  ["slide-16x9", "演示文稿", 1920, 1080],
-  ["poster-a4", "A4 海报", 2480, 3508],
-  ["poster-a3", "A3 海报", 3508, 4961],
-  ["custom", "自定义", 1200, 800],
-];
-function newDialog() {
-  modal(
-    `<h2>新建项目</h2><form id="new-form"><label class="g-field g-field--stack"><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：秋季课程提案" autofocus></label>${(S.masters || []).length ? `<label class="g-field g-field--stack"><span>从母版开始</span><select name="master"><option value="">不用母版</option>${S.masters.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("")}</select></label>` : ""}<fieldset class="import-html__kind" data-new-kind><legend>项目类型</legend><label><input type="radio" name="kind" value="deck" checked> 课件 / 海报</label><label><input type="radio" name="kind" value="web"> 网页</label></fieldset><p class="g-sheet__note" data-web-note hidden>电脑端 1440×900 窗口、手机端 390×844 窗口，页面高度按内容自定</p><div data-deck-fields><label class="g-field g-field--stack"><span>画板类型</span><select name="preset">${presets.map((p) => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join("")}</select></label><div class="g-sheet__pair"><label class="g-field g-field--stack"><span>宽度</span><input name="width" type="number" min="1" value="1920" required></label><label class="g-field g-field--stack"><span>高度</span><input name="height" type="number" min="1" value="1080" required></label></div></div><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit">${icon("plus", 17)}创建项目</button></div></form>`,
-  );
-  const f = $("#new-form");
-  f.preset.onchange = () => { const p = presets.find((p) => p[0] === f.preset.value); f.width.value = p[2]; f.height.value = p[3]; };
-  const kind = () => f.querySelector('input[name="kind"]:checked')?.value || "deck";
-  const refreshKind = () => {
-    const isWeb = kind() === "web";
-    f.querySelector("[data-deck-fields]").hidden = isWeb;
-    f.querySelector("[data-web-note]").hidden = !isWeb;
-    for (const field of [f.preset, f.width, f.height]) field.disabled = isWeb || !!f.master?.value;
-    if (f.master) f.master.disabled = isWeb;
-  };
-  for (const r of f.querySelectorAll('input[name="kind"]')) r.onchange = refreshKind;
-  if (f.master) f.master.onchange = refreshKind;
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const name = f.name.value.trim();
-      const result = await api("/api/projects", "POST", kind() === "web" ? { name, kind: "web" } : f.master?.value ? { name, fromMaster: f.master.value } : { name, preset: f.preset.value, width: +f.width.value, height: +f.height.value });
-      closeModal();
-      open(result.project.id, result);
-    } catch (err) {
-      notice(err.message);
-    }
-  };
+  await homeUI.show();
 }
 // 打开项目：服务端转换旧项目失败等情况会带中文说明（409 / 4xx），在总览弹提示
 async function open(id, data) {
@@ -263,6 +209,7 @@ async function open(id, data) {
   }
   S.project = data.project;
   S.revision = data.revision;
+  forgetPageTexts(S.project.id);
   S.pageId = S.project.pages[0]?.id;
   S.mark = null;
   S.checked.clear();
@@ -275,6 +222,10 @@ async function open(id, data) {
   S.ownRevisions.clear();
   S.echoRevision = null;
   S.focus = false;
+  S.motionInfo.clear();
+  S.screenProbes.clear();
+  drafts.reset();
+  annotations.reset();
   S.view = "editor";
   renderEditor();
   connectEvents(S.project.id);
@@ -395,8 +346,10 @@ const inspectorToggleButton = () => ibtn("toggle-inspector", S.inspectorCollapse
 const headTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers");
 const toolGridButton = () => tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize");
 const toolTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers");
+const annotateButton = () => tbtn("annotate", "批注", "type", annotations.mode ? "is-on" : "", `aria-pressed="${annotations.mode ? "true" : "false"}"`) + tbtn("annotate-pen", "画笔", "pen", annotations.pen ? "is-on" : "", `aria-pressed="${annotations.pen ? "true" : "false"}" title="在页面上画线、画箭头、圈出地方（给 agent 看）"`);
 const focusButton = () => ibtn("focus", S.focus ? "minimize" : "maximize", S.focus ? "退出专注模式" : "专注模式", `aria-pressed="${S.focus ? "true" : "false"}"`);
 const focusExitBar = () => `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>`;
+const footHTML = () => `<div class="ed-screens" role="group" aria-label="画布显示第几屏" hidden></div><span class="ed-screens__note" data-screens-note hidden></span><span class="ed-spacer"></span><span class="ed-foot__size">${footText()}</span>`;
 const pageViewHost = (mode) => `<div class="ed-page-${mode} ed-scroll">${renderPageItems(pageViewContext(mode))}</div>`;
 const footText = () => {
   const p = page();
@@ -413,7 +366,7 @@ function renderEditor() {
   const saveState = S.conflict ? "warn" : S.dirty !== S.saved ? "busy" : "ok";
   shell(
     "editor",
-    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span>${screenBar()}<div class="ed-tools">${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footText()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
+    `<header class="ed-top"><div class="ed-titlebox"><h1 class="ed-title">${esc(S.project.name)}</h1>${agentChip()}</div><div class="ed-spacer"></div><div class="ed-bar" ${glassAttr("actions:panel")}>${ibtn("undo", "undo", "撤销", S.history.canUndo ? "" : "disabled")}${ibtn("redo", "redo", "重做", S.history.canRedo ? "" : "disabled")}<span class="ed-save" id="save-chip"><i class="${saveDotClass(saveState === "warn" ? SAVE_TEXT.warn : SAVE_TEXT.ok)}"></i><span class="ed-save__label" aria-hidden="true">${SAVE_TEXT[saveState === "warn" ? "warn" : "ok"]}</span><span id="save-status" class="vw-sr-only" role="status">${SAVE_TEXT[saveState]}</span></span><span class="ed-sep"></span>${tbtn("close-workbench", "关闭工作台", "close")}${tbtn("export", "导出", "upload")}<button class="ed-play" data-action="play">${icon("play", 15)}<span>放映</span></button></div></header><div class="${gridClass()}"><aside class="ed-col ed-pages" ${glassAttr("pages:panel")} data-glass-frost>${pagesToggleButton()}<div class="ed-col-head"><h2>页面</h2>${tbtn("page-grid", "网格", "maximize")}${headTimelineButton()}<span class="ed-count">${S.project.pages.length}</span><div class="ed-spacer"></div><button class="ed-add" data-action="add-page" title="添加页面" aria-label="添加页面">${icon("plus", 16)}</button></div><div class="page-list ed-scroll">${renderPageItems(pageViewContext("list"))}</div><div class="ed-pages__foot">${tbtn("copy", "复制到新项目", "copyPlus")}${tbtn("reference", "复制引用", "link")}</div></aside><section class="ed-work" ${glassAttr("work:panel")} data-glass-frost><div class="ed-toolbar"><span class="ed-crumb" title="${esc(p.name)}">${esc(p.name)}</span><div class="ed-tools">${annotateButton()}<span class="ed-sep"></span>${toolGridButton()}${toolTimelineButton()}<span class="ed-sep"></span><span class="ed-zoom" id="zoom-label"></span>${focusButton()}</div></div><div class="ed-bar ed-quickbar" ${glassAttr("quickbar:control")} role="toolbar" aria-label="修改选中的内容" hidden></div><div class="ed-well" id="canvas-well"><div id="artboard-holder"><div id="artboard" class="vw-artboard vw-stage"></div></div></div>${S.pageViewMode === "grid" ? pageViewHost("grid") : ""}${S.pageViewMode === "timeline" ? pageViewHost("timeline") : ""}<div class="ed-foot">${footHTML()}</div></section><aside class="ed-col inspector ed-inspector" ${glassAttr("inspector:panel")} data-glass-frost>${inspectorToggleButton()}<div class="ed-inspector__body ed-scroll"></div></aside></div>${S.focus ? focusExitBar() : ""}`,
   );
   if (saveState === "busy") saveStatus(SAVE_TEXT.busy);
   const well = $("#canvas-well");
@@ -424,15 +377,18 @@ function renderEditor() {
     e.preventDefault();
     (async () => { for (const file of files) await pasteImage(file); })().catch((err) => notice(err.message));
   };
-  well.onpointerdown = (e) => { if (e.target === well || e.target.id === "artboard-holder") clearMark(); };
+  well.onpointerdown = (e) => { if (e.button === 0 && (e.target === well || e.target.id === "artboard-holder")) startWellMarquee(e); };
   if (!S.resizeObserver) S.resizeObserver = new ResizeObserver(() => fitBoard());
   S.resizeObserver.disconnect();
   S.resizeObserver.observe(well);
   refreshBoard();
+  refreshLayers();
+  refreshScreenBar();
   refreshInspector();
   refreshQuickToolbar();
   refreshThumbnails();
   mountEditorPageViews();
+  mountPageDrops();
   liven(app);
   syncGlass(app);
 }
@@ -444,8 +400,15 @@ function updateEditor() {
   refreshToolbar();
   refreshPageViews();
   refreshBoard();
+  refreshLayers();
   refreshInspector();
   refreshQuickToolbar();
+}
+// 画布上盖的两层（草稿表单、批注）：跟着当前页，和 #artboard 同一个缩放
+function refreshLayers() {
+  drafts.sync();
+  annotations.sync();
+  fitBoard();
 }
 function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
 function setHTML(node, html) { if (node && node._html !== html) { node.innerHTML = html; node._html = html; } }
@@ -466,33 +429,102 @@ function refreshToolbar() {
   const p = page(), crumb = $(".ed-crumb");
   setText(crumb, p.name);
   if (crumb && crumb.title !== p.name) crumb.title = p.name;
-  setHTML($(".ed-foot"), footText());
+  setHTML($(".ed-foot__size"), footText());
   refreshScreenBar();
 }
 // ---------- 第 N 屏：带动效的页面，画布停在选定那一屏播完的样子，照常修改 ----------
-// 屏数 = motion.steps + 1；第 1 屏 = 初始化完成、还没执行第 1 步。
-const screenTotal = (p = page()) => { const n = Number(p?.motion?.steps); return Number.isInteger(n) && n > 0 ? n + 1 : 0; };
+// 屏数 = motion.steps + 1；第 1 屏 = 初始化完成、还没执行第 1 步。steps 没写但页面登记了 step：
+// 用隐藏的探测 iframe（play、快进、countSteps）数出步数 n → n + 1 屏，按页面文件 + 时间戳缓存。
+// 屏选择是画布下方一排标签按钮（像日常软件的分页标签）。
+const probeKey = (p) => `${p?.file || ""}|${stampOf(p?.file || "")}`;
+function screenInfo(p = page()) {
+  if (!p) return { total: 0, source: null };
+  const n = Number(p.motion?.steps);
+  if (Number.isInteger(n) && n > 0) return { total: n + 1, source: "steps" };
+  const key = probeKey(p), m = S.motionInfo.get(key), probe = S.screenProbes.get(key);
+  if (probe?.status === "done" && probe.counted > 0) return { total: probe.counted + 1, source: "counted" };
+  if (m?.hasStep || probe?.hasStep) return probe?.status === "done" ? { total: 1, source: "unknown" } : { total: 0, source: "pending" };
+  if (m && (Number(m.animations) > 0 || Number(m.scripts) > 0)) return { total: 0, source: "own" };
+  return { total: 0, source: null };
+}
+// 能切屏的屏数（只有写了 steps 或数出来的才切；数不出来时只显示「第 1 屏」，画布照原样显示）
+const screenTotal = (p = page()) => { const info = screenInfo(p); return info.source === "steps" || info.source === "counted" ? info.total : 0; };
+// 页面栏「N 屏」小字
+const screensOf = (p) => screenTotal(p);
+// 给画布 iframe 的页面：屏数是数出来的，就按数出来的步数给运行时（不然切屏会被 steps = 0 挡住）
+const framePage = (p) => (screenInfo(p).source === "counted" ? { ...p, motion: { ...(p.motion || {}), steps: screenTotal(p) - 1 } } : p);
 const clampScreen = (k, p = page()) => Math.min(Math.max(1, Math.round(Number(k)) || 1), Math.max(1, screenTotal(p)));
 // 给画布 iframe 的 screen 选项：没有动效的页面不给（照原样显示，不跑初始化）
 const screenOption = (p = page()) => (screenTotal(p) ? clampScreen(S.screen, p) : null);
+const SCREEN_NOTES = {
+  counted: "屏数由工作台数出，请 agent 在 project.json 写上 motion.steps",
+  unknown: "这页的屏数要请 agent 写上",
+  own: "这页有自己的动画，但没有分屏；要分屏请让 agent 用 vw.motion 写并填上 motion.steps",
+};
 function screenButtons(p = page()) {
-  const total = screenTotal(p);
+  const info = screenInfo(p), total = info.source === "unknown" ? 1 : screenTotal(p);
   let html = "";
-  for (let k = 1; k <= total; k++) html += `<button class="ed-tbtn ed-screen" data-action="screen" data-screen="${k}" aria-pressed="${k === S.screen}" title="画布停在第 ${k} 屏${k === 1 ? "（动效开始前）" : `（第 ${k - 1} 步播完）`}"><span>第 ${k} 屏</span></button>`;
+  for (let k = 1; k <= total; k++) html += `<button class="ed-screen" data-action="screen" data-screen="${k}" aria-pressed="${k === S.screen || total === 1}" title="画布停在第 ${k} 屏${k === 1 ? "（动效开始前）" : `（第 ${k - 1} 步播完）`}">第 ${k} 屏</button>`;
   return html;
 }
-const screenBar = () => { const html = screenButtons(); return `<div class="ed-screens" role="group" aria-label="画布显示第几屏" ${html ? "" : "hidden"}>${html}</div>`; };
 function refreshScreenBar() {
-  const bar = $(".ed-screens");
-  if (!bar) return;
-  const html = screenButtons();
+  const bar = $(".ed-screens"), note = $("[data-screens-note]");
+  if (!bar || !S.project) return;
+  const p = page(), html = p?.draft ? "" : screenButtons(p), text = p?.draft ? "" : SCREEN_NOTES[screenInfo(p).source] || "";
   if (bar.hidden !== !html) bar.hidden = !html;
   setHTML(bar, html);
+  if (note) { if (note.hidden !== !text) note.hidden = !text; setText(note, text); }
+}
+// 运行时报了这一页有没有动效（ready.motion，或晚到的 { vw: 'motion' }）：steps 没写、登记了 step → 数屏
+function noteMotion(p, motion) {
+  if (!p || !motion || typeof motion !== "object") return;
+  const key = probeKey(p);
+  S.motionInfo.set(key, { ...(S.motionInfo.get(key) || {}), ...motion });
+  const n = Number(p.motion?.steps);
+  if (!(Number.isInteger(n) && n > 0) && motion.hasStep) startProbe(p);
+  refreshScreenBar();
+}
+function probeHost() {
+  let box = document.querySelector("#vw-probe-host");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "vw-probe-host";
+    box.setAttribute("aria-hidden", "true");
+    // 不用 visibility:hidden：Chromium 不推进隐藏 iframe 里的动画；放在视口里 1px 大、全透明
+    box.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1";
+    document.body.append(box);
+  }
+  return box;
+}
+async function startProbe(p) {
+  const key = probeKey(p);
+  if (S.screenProbes.has(key)) return;
+  const entry = { status: "pending" }, projectId = S.project.id;
+  S.screenProbes.set(key, entry);
+  let frame = null;
+  try {
+    const [mod, html] = await Promise.all([loadFrameModule(), fetchPageText(pageFileURL(S.project, p, stampOf(p.file)))]);
+    frame = mod.createPageFrame({ project: S.project, page: p, mode: "play", fast: true, countSteps: true, container: probeHost(), baseHref: pageBase(p), html, edits: clone(p.edits || []), timeout: 8000 });
+    const msg = await Promise.race([frame.ready, new Promise((done) => setTimeout(() => done(null), 20000))]);
+    entry.counted = Number.isInteger(msg?.countedSteps) && msg.countedSteps > 0 ? Math.min(30, msg.countedSteps) : 0;
+    entry.hasStep = !!msg?.hasStep;
+    entry.failed = !msg || !!msg.failed;
+  } catch {
+    entry.counted = 0;
+    entry.failed = true;
+  } finally {
+    try { frame?.destroy(); } catch {}
+    entry.status = "done";
+  }
+  if (S.view !== "editor" || S.project?.id !== projectId) return;
+  refreshScreenBar();
+  refreshPageViews();
+  if (page()?.id === p.id) refreshBoard();
 }
 function refreshHistoryButtons() {
   const undo = $('[data-action="undo"]'), redo = $('[data-action="redo"]');
-  if (undo) undo.disabled = !S.history.canUndo;
-  if (redo) redo.disabled = !S.history.canRedo;
+  if (undo) undo.disabled = drafts.active ? !drafts.canUndo : !S.history.canUndo;
+  if (redo) redo.disabled = drafts.active ? !drafts.canRedo : !S.history.canRedo;
 }
 // 布局开关（专注模式、折叠面板、网格 / 时间轴）：只切 class、换对应按钮、挂 / 卸对应容器
 function refreshLayout() {
@@ -537,6 +569,8 @@ function pageBase(p) {
 }
 function destroyFrame() {
   frameToken++;
+  try { if (swapShown && swapShown !== F?.frame) swapShown.destroy(); } catch {}
+  swapShown = swapPending = null;
   try { F?.frame?.destroy(); } catch {}
   F = null;
   S.mark = null;
@@ -555,6 +589,13 @@ function fitBoard() {
   if (stage.style.transform !== t) stage.style.transform = t;
   holder.style.width = `${Math.round(view.width * scale)}px`;
   holder.style.height = `${Math.round(view.height * scale)}px`;
+  // 草稿表单层、批注层：和 #artboard 同尺寸、同缩放；--vw-inv 让层里的字、把手保持屏幕像素大小
+  for (const layer of holder.querySelectorAll(":scope > .vw-layer")) {
+    if (layer.style.width !== w) layer.style.width = w;
+    if (layer.style.height !== h) layer.style.height = h;
+    if (layer.style.transform !== t) layer.style.transform = t;
+    layer.style.setProperty("--vw-inv", String(1 / scale));
+  }
   setText($("#zoom-label"), `${Math.round(scale * 100)}%`);
   // 运行时的选中框、把手按缩放补偿粗细
   if (F?.frame && F.uiScale !== scale) { F.uiScale = scale; F.frame.setUiScale?.(scale); }
@@ -566,8 +607,10 @@ async function refreshBoard({ force = false } = {}) {
   fitBoard();
   const p = page();
   stage.dataset.pageId = p.id;
+  // 草稿页：画布上盖着草稿表单（web/drafts.js），下面的 iframe 藏起来；草稿文件自己存出来的新版本不重载 iframe
+  stage.classList.toggle("is-draft", !!p.draft);
   const stamp = stampOf(p.file);
-  if (F && F.stage === stage && F.pageId === p.id && F.file === p.file && F.stamp === stamp && !force) {
+  if (F && F.stage === stage && F.pageId === p.id && F.file === p.file && (F.stamp === stamp || p.draft) && !force) {
     const sig = editsSig(p);
     if (F.sig !== sig) { F.sig = sig; F.frame?.setEdits(clone(p.edits || [])); if (S.mark && !markAlive(p)) clearMark(); }
     // 动效步数被改了（agent 改了 motion.steps）：屏号夹到范围内，画布换到对应的屏
@@ -595,10 +638,16 @@ async function refreshBoard({ force = false } = {}) {
     F.html = html;
     const edits = clone(p.edits || []);
     if (reuse) {
+      // 换页 / 页面文件被换掉（第 16 轮）：双缓冲——新页先藏在旧页后面加载，新页报 ready 的那一刻再换上，切页不闪白。
+      // 等待期间旧页只是占位：不接鼠标，消息也不再处理（F.frame 已经是新页）
       F.pendingSelect = keep;
-      reuse.reload({ page: p, edits, html, project: S.project, screen });
+      const shown = swapShown || reuse;
+      if (swapPending && swapPending !== shown) swapPending.destroy();
+      shown.iframe.style.pointerEvents = "none";
+      const next = mountFrame({ mod, stage, p, html, edits, screen, token, pending: true });
+      swapShown = shown; swapPending = next;
+      F.frame = next;
       F.uiScale = null;
-      fitBoard();
     } else {
       stage.replaceChildren();
       F.pendingSelect = keep;
@@ -609,15 +658,28 @@ async function refreshBoard({ force = false } = {}) {
     if (token === frameToken) notice(`这一页显示不出来：${error.message}`);
   }
 }
+let swapShown = null, swapPending = null; // 换页双缓冲：正显示着的旧页、正在加载的新页
+function finishPageSwap(next) {
+  next.iframe.classList.remove("vw-frame-pending");
+  if (swapShown && swapShown !== next) swapShown.destroy();
+  swapShown = swapPending = null;
+  F.uiScale = null;
+  fitBoard();
+}
 // 在 #artboard 里放一个编辑用的 iframe。消息只认当前显示的那个（F.frame）：
 // 换屏时新 iframe 先藏在旧的后面加载，加载好之前它的消息不处理。
 function mountFrame({ mod, stage, p, html, edits, screen, token, pending = false }) {
   let frame = null;
   frame = mod.createPageFrame({
-    project: S.project, page: p, mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1,
+    project: S.project, page: framePage(p), mode: "edit", container: null, baseHref: pageBase(p), html, edits, uiScale: S.scale || 1, fontLibrary: S.fontLibrary || [],
     ...(screen ? { screen } : {}),
     onMessage: (msg) => { if (F?.frame === frame) onFrameMessage(token, msg); },
-    onReady: (msg) => { if (F?.frame === frame) onFrameReady(token, msg); },
+    onReady: (msg) => {
+      if (F?.frame !== frame) return;
+      if (frame !== swapPending) return onFrameReady(token, msg);
+      // 换页双缓冲：新页的字体、图片画出来再换上（最多等 1.5 秒），之前一直显示旧页
+      frame.painted(1500).then(() => { if (F?.frame === frame && frame === swapPending) { finishPageSwap(frame); onFrameReady(token, msg); } });
+    },
     onError: (err) => { if (F?.frame === frame && F?.token === token) console.warn("页面显示出错", err); },
   });
   if (pending) frame.iframe.classList.add("vw-frame-pending");
@@ -682,6 +744,7 @@ function onFrameReady(token, msg = {}) {
   const stage = $("#artboard");
   if (stage) stage.dataset.ready = "1";
   F.ready = msg;
+  if (msg.motion) noteMotion(S.project.pages.find((x) => x.id === F.pageId), msg.motion);
   const keep = F.pendingSelect;
   F.pendingSelect = null;
   if (keep && (msg.marks || []).some((m) => m.id === keep)) F.frame?.select(keep);
@@ -694,11 +757,14 @@ function onFrameMessage(token, msg = {}) {
   try {
     switch (type) {
       case "ready": return onFrameReady(token, msg);
-      case "edit": return recordEdit(msg);
-      case "select": return setMark(msg.id ? { id: msg.id, caps: msg.caps || [], values: msg.values || msg.style || null } : null);
+      case "edit": return recordEdits([msg]);
+      case "edit-batch": return recordEdits(msg.edits || []);
+      case "select": return setMark(msg.id ? { id: msg.id, ids: msg.ids?.length ? msg.ids : [msg.id], caps: msg.caps || [], values: msg.values || msg.style || null } : null);
       case "editing": S.editingText = !!msg.on; return;
+      case "drag": return frameDrag(!!msg.on);
+      case "motion": return noteMotion(S.project.pages.find((x) => x.id === F.pageId), msg);
       case "paste-image": return pasteImage(new File([msg.buffer], msg.name || "paste.png", { type: msg.type || msg.mime || "image/png" })).catch((e) => notice(e.message));
-      case "menu": return imageMenu(msg);
+      case "menu": return elementMenu(msg);
       case "delete": return deleteUserImage(msg.id || msg.target);
       case "scroll": S.scrollTop = Number(msg.top) || 0; return;
       case "height": if (F.ready) F.ready.height = msg.height; return;
@@ -709,14 +775,21 @@ function onFrameMessage(token, msg = {}) {
     notice(error.message);
   }
 }
-// 运行时已经把修改叠到页面上：这里只记进修改单（同一目标同一种修改只留一条）
-function recordEdit({ target, kind, before, after }) {
+// 运行时已经把修改叠到页面上：这里只记进修改单（同一目标同一种修改只留一条）。一次操作改的几处（多选一起拖、缩放、一起删除）记成一步撤销。
+// 删除用户贴的图：不记 remove，直接去掉它的 addImage 条目
+function recordEdits(list) {
   const p = S.project.pages.find((x) => x.id === F.pageId);
-  if (!p) return;
-  const next = upsertEdit(p.edits || [], { target, kind, before, after });
-  p.edits = next;
+  if (!p || !list.length) return;
+  let edits = p.edits || [];
+  const dropped = [];
+  for (const { target, kind, before, after } of list) {
+    if (kind === "remove" && isUserImage(target)) { edits = removeUserImage(edits, target); dropped.push(target); continue; }
+    edits = upsertEdit(edits, { target, kind, before, after });
+    if (S.mark?.id === target && S.mark.values) S.mark.values = { ...S.mark.values, ...(after || {}) };
+  }
+  p.edits = edits;
   F.sig = editsSig(p);
-  if (S.mark?.id === target && S.mark.values) S.mark.values = { ...S.mark.values, ...(after || {}) };
+  for (const id of dropped) F.frame?.removeImage(id);
   commit();
 }
 function commit() {
@@ -734,8 +807,64 @@ function frameKey({ key = "", metaKey, ctrlKey, shiftKey, id } = {}) {
     else if (k === "y") redo();
     return;
   }
-  if ((key === "Delete" || key === "Backspace") && isUserImage(id)) return deleteUserImage(id);
   if (key === "Escape" && !id) { if (S.mark) { S.mark = null; refreshQuickToolbar(); } }
+}
+// 页面里正在拖动（移动 / 缩放 / 框选）时，鼠标出了页面范围 iframe 就收不到事件：父页面把外面的移动、松开换成页面坐标转进去
+let dragForward = null;
+function frameDrag(on) {
+  dragForward?.abort();
+  dragForward = null;
+  const frame = F?.frame;
+  if (!on || !frame) return;
+  const ctl = new AbortController();
+  dragForward = ctl;
+  const send = (kind) => (ev) => {
+    const r = frame.iframe.getBoundingClientRect(), k = r.width / (frame.iframe.offsetWidth || 1) || 1;
+    // 在应用窗口外松开鼠标时收不到 pointerup：之后第一次移动时按键已经松开（buttons 为 0），也当作松开
+    const up = kind === "up" || !(ev.buttons & 1);
+    frame.send({ vw: "pointer", kind: up ? "up" : kind, x: (ev.clientX - r.left) / k, y: (ev.clientY - r.top) / k, shiftKey: ev.shiftKey });
+    if (up) { ctl.abort(); if (dragForward === ctl) dragForward = null; }
+  };
+  window.addEventListener("pointermove", send("move"), { capture: true, signal: ctl.signal });
+  window.addEventListener("pointerup", send("up"), { capture: true, signal: ctl.signal });
+  window.addEventListener("pointercancel", send("up"), { capture: true, signal: ctl.signal });
+}
+// 从画布四周的空白处拖出框选（第 11 轮 startMarquee）：父页面画框，框的位置换算成页面坐标交给运行时选中框住的元素
+function startWellMarquee(e) {
+  const well = $("#canvas-well"), frame = F?.frame;
+  const p = page();
+  if (!frame || !well || p.draft || drafts.active) { clearMark(); return; }
+  e.preventDefault();
+  const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+  const sx = e.clientX, sy = e.clientY;
+  let started = false, overlay = null;
+  // 透明挡板盖住整个画布区：鼠标经过页面（隔离的 iframe）上方时，移动和松开仍然到这里
+  const shield = document.createElement("div");
+  shield.className = "ed-marquee-shield";
+  well.append(shield);
+  try { well.setPointerCapture(e.pointerId); } catch {}
+  const toFrame = (x, y) => { const r = frame.iframe.getBoundingClientRect(), k = r.width / (frame.iframe.offsetWidth || 1) || 1; return { x: (x - r.left) / k, y: (y - r.top) / k }; };
+  const move = (ev) => {
+    if (!(ev.buttons & 1)) { up(); return; } // 在窗口外松开了鼠标（收不到 pointerup）：框选到此结束，框不留在画布上
+    if (!started && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 3) return;
+    if (!started) { started = true; overlay = document.createElement("div"); overlay.className = "ed-marquee"; well.append(overlay); frame.send({ vw: "marquee", phase: "start", additive }); }
+    const wr = well.getBoundingClientRect();
+    const l = Math.min(sx, ev.clientX), t = Math.min(sy, ev.clientY), w = Math.abs(ev.clientX - sx), h = Math.abs(ev.clientY - sy);
+    Object.assign(overlay.style, { left: `${l - wr.left + well.scrollLeft}px`, top: `${t - wr.top + well.scrollTop}px`, width: `${w}px`, height: `${h}px` });
+    const a = toFrame(l, t), b = toFrame(l + w, t + h);
+    frame.send({ vw: "marquee", phase: "move", rect: { left: a.x, top: a.y, right: b.x, bottom: b.y } });
+  };
+  let done = false;
+  const up = () => {
+    if (done) return;
+    done = true;
+    well.removeEventListener("pointermove", move); well.removeEventListener("pointerup", up); well.removeEventListener("pointercancel", up);
+    overlay?.remove();
+    shield.remove();
+    if (!started && !additive) clearMark();
+  };
+  well.addEventListener("pointermove", move); well.addEventListener("pointerup", up); well.addEventListener("pointercancel", up);
+  window.addEventListener("blur", up, { once: true });
 }
 function setMark(mark) {
   S.mark = mark;
@@ -767,8 +896,11 @@ function markValue(kind) {
   return S.mark?.values?.[kind] ?? null;
 }
 // 整页背景（页面文件里标在 <body> 上、只能改颜色的那条标记）：没选中东西时工具条给「页面底色」
-function pageBgMark() { return (F?.ready?.marks || []).find((m) => m.page && (m.caps || []).includes("background")) || null; }
+function pageBgMark() { const marks = (F?.ready?.marks || []).filter((m) => m.page && (m.caps || []).includes("background")); return marks.find((m) => m.main) || marks[0] || null; }
 function quickbarHTML() {
+  if (drafts.active) return drafts.toolbarHTML(esc);
+  const annot = annotations.toolbarHTML(esc); // 画笔模式 / 选中一条线：颜色、箭头
+  if (annot) return annot;
   const mark = S.mark;
   if (!mark) {
     const bg = pageBgMark();
@@ -780,17 +912,21 @@ function quickbarHTML() {
   if (caps.has("text")) { const size = markValue("fontSize"); parts.push(`<label class="g-field qt-field" title="字号（像素）"><span>字号</span><input type="number" min="1" max="2000" step="1" data-q="fontSize" value="${size == null ? "" : Math.round(Number(size) * 100) / 100}" aria-label="字号"></label>`); }
   if (caps.has("color")) parts.push(`<label class="g-field qt-field qt-color" title="文字颜色"><span>文字颜色</span><input type="color" data-q="color" value="${toHex(markValue("color"), "#000000")}" aria-label="文字颜色"></label>`);
   if (caps.has("background")) parts.push(`<label class="g-field qt-field qt-color" title="底色"><span>底色</span><input type="color" data-q="background" value="${toHex(markValue("background"), "#ffffff")}" aria-label="底色"></label>`);
-  if (isUserImage(mark.id)) parts.push(`<button class="ed-tbtn qt-btn ed-tbtn--danger" data-action="delete-user-image" title="删除这张图">${icon("trash", 16)}<span>删除图片</span></button>`);
+  // 多选：对齐按钮（按选中这几个的整体范围对齐）
+  if ((mark.ids || []).length >= 2) parts.unshift(`<div class="qt-align" role="group" aria-label="对齐">${ALIGN_BUTTONS.map(([mode, ic, label]) => `<button class="ed-tbtn qt-btn qt-icon" data-action="align" data-align="${mode}" title="${label}" aria-label="${label}">${icon(ic, 16)}</button>`).join("")}</div>`);
+  if (isUserImage(mark.id) && (mark.ids || []).length <= 1) parts.push(`<button class="ed-tbtn qt-btn ed-tbtn--danger" data-action="delete-user-image" title="删除这张图">${icon("trash", 16)}<span>删除图片</span></button>`);
   return parts.length ? `<div class="qt-inner" data-mark="${esc(mark.id)}">${parts.join("")}</div>` : "";
 }
+const ALIGN_BUTTONS = [["left", "alignLeft", "左对齐"], ["centerX", "alignCenterX", "水平居中"], ["right", "alignRight", "右对齐"], ["top", "alignTop", "顶端对齐"], ["centerY", "alignCenterY", "垂直居中"], ["bottom", "alignBottom", "底端对齐"]];
 function refreshQuickToolbar() {
   const bar = $(".ed-quickbar");
   if (!bar) return;
-  const html = quickbarHTML(), key = JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps]);
+  const html = quickbarHTML(), key = (annotations.pen || annotations.toolbarHTML(esc)) && !drafts.active ? JSON.stringify(["annot", html]) : drafts.active ? JSON.stringify(["draft", drafts.pageId, drafts.canMerge()]) : JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps, (S.mark?.ids || []).length >= 2]);
   const hide = !html;
   if (bar.hidden !== hide) { bar.hidden = hide; queueMicrotask(() => syncGlass(app)); }
   if (hide) { bar.replaceChildren(); bar._key = null; return; }
-  if (bar._key !== key) { bar.innerHTML = html; bar._key = key; return; }
+  if (bar._key !== key) { bar.innerHTML = html; bar._key = key; }
+  if (drafts.active) { const select = bar.querySelector("[data-draft-level]"); if (select && select !== document.activeElement && drafts.level && select.value !== drafts.level) select.value = drafts.level; return; }
   const box = document.createElement("div");
   box.innerHTML = html;
   for (const fresh of box.querySelectorAll("[data-q]")) {
@@ -806,7 +942,7 @@ function quickChange(input) {
   let after;
   if (kind === "fontSize") { const n = Number(input.value); if (!Number.isFinite(n) || n <= 0) return refreshQuickToolbar(); after = { fontSize: Math.min(2000, n) }; }
   else after = { [kind]: input.value.toLowerCase() };
-  F.frame.set(id, kind, after); // 运行时叠上后回 edit，由 recordEdit 记进修改单
+  F.frame.set(S.mark?.ids?.length > 1 ? S.mark.ids : id, kind, after); // 运行时叠上后回 edit，由 recordEdits 记进修改单（多选时一起改）
 }
 
 // ---------- 贴图：剪贴板 / 拖进来的图片存成素材，再放进页面可见区域中央 ----------
@@ -865,15 +1001,15 @@ async function pasteImage(file) {
   commit();
   notice("图片已贴进页面");
 }
-function imageMenu({ id, x = 0, y = 0 }) {
-  if (!isUserImage(id)) return;
+// 选中元素上点右键：「删除」（删选中的全部；运行时记进修改单，可以撤销）
+function elementMenu({ x = 0, y = 0 }) {
   const box = $("#artboard")?.getBoundingClientRect() || { left: 0, top: 0 };
   const s = S.scale || 1;
-  showContextMenu({ x: box.left + x * s, y: box.top + y * s, items: [{ action: "delete", label: "删除" }], onAction: () => deleteUserImage(id) });
+  showContextMenu({ x: box.left + x * s, y: box.top + y * s, items: [{ action: "delete", label: "删除" }], onAction: () => F?.frame?.send({ vw: "remove" }) });
 }
+// 工具条「删除图片」：和按 Delete 一样直接删，可以撤销（参照 PowerPoint，不弹确认）
 async function deleteUserImage(id) {
   if (!isUserImage(id)) return;
-  if (!(await confirmAction("删除这张图片？", "只删除你贴进来的这张图，可以撤销。"))) return;
   const p = page();
   p.edits = removeUserImage(p.edits || [], id);
   if (F) { F.sig = editsSig(p); F.frame?.removeImage(id); }
@@ -901,11 +1037,16 @@ function schedule() {
   saveStatus(SAVE_TEXT.busy);
   S.timer = setTimeout(() => flush().catch(() => {}), 600);
 }
+// 先存草稿页（drafts.js 自己的 draft-update），再存项目
 async function flush() {
+  await drafts.flush();
+  return flushProject();
+}
+async function flushProject() {
   clearTimeout(S.timer);
   if (!S.project) return;
   if (S.assetPromise) await S.assetPromise.catch(() => {});
-  if (S.saving) { await S.savePromise.catch(() => {}); if (S.saved < S.dirty) return flush(); return; }
+  if (S.saving) { await S.savePromise.catch(() => {}); if (S.saved < S.dirty) return flushProject(); return; }
   if (S.conflict) throw new Error("请先处理保存冲突");
   if (S.saved === S.dirty) return;
   S.saving = true;
@@ -934,13 +1075,14 @@ async function flush() {
     }
   })();
   await S.savePromise;
-  if (S.saved < S.dirty) return flush();
+  if (S.saved < S.dirty) return flushProject();
 }
 function conflictDialog() {
   const labels = S.lastConflict?.labels || [];
   modal(`<h2>你和 agent 改了同一处</h2><p class="g-sheet__note">已保留你的修改。agent 的其他修改已经并进来了。</p><div class="g-sheet__list">${labels.map((label) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon("alert", 15)}</span><span class="g-row__text">${esc(label)}</span></div>`).join("")}</div><div class="g-sheet__actions">${gbtn("export-local", "下载我的副本")}${gbtn("conflict-agent", "这几处改用 agent 的")}${gbtn("close", "保留我的", { cls: "g-btn--prism" })}</div>`);
 }
 function undo() {
+  if (S.view === "editor" && drafts.active) { drafts.undo(); return; }
   if (!S.history?.canUndo || S.view !== "editor") return;
   S.project = S.history.undo();
   keepSelection();
@@ -949,6 +1091,7 @@ function undo() {
   updateEditor();
 }
 function redo() {
+  if (S.view === "editor" && drafts.active) { drafts.redo(); return; }
   if (!S.history?.canRedo || S.view !== "editor") return;
   S.project = S.history.redo();
   keepSelection();
@@ -958,10 +1101,14 @@ function redo() {
 }
 
 // ---------- 页面整理：增删、复制走服务端（页面文件一起处理），排序、改名走整份保存 ----------
-async function pagesOp(op, body) {
-  if (S.pagesBusy) return null;
-  await flush();
+// draft: 草稿页自己的保存（draft-update）——前一个页面操作没做完就等它，只先存项目（草稿那边正在发的就是这一个）
+async function pagesOp(op, body, { draft = false } = {}) {
+  if (draft) { while (S.pagesBusy) await S.pagesPromise?.catch(() => {}); await flushProject(); }
+  else { if (S.pagesBusy) return null; await flush(); }
+  if (S.pagesBusy) return pagesOp(op, body, { draft });
   S.pagesBusy = true;
+  let release;
+  S.pagesPromise = new Promise((done) => { release = done; });
   const before = new Set(S.project.pages.map((p) => p.id));
   try {
     const result = await api(`${path()}/pages`, "POST", { revision: S.revision, op, ...body });
@@ -979,6 +1126,7 @@ async function pagesOp(op, body) {
     throw e;
   } finally {
     S.pagesBusy = false;
+    release();
     checkEcho();
   }
 }
@@ -992,6 +1140,9 @@ async function addPage({ after = S.pageId, device } = {}) {
 }
 async function pageAction(name, { ids = [...S.checked], targetId = S.pageId, position = "after" } = {}) {
   if (!ids.length) ids = [targetId];
+  if (name === "add-draft") return draftDialog(targetId);
+  if (name === "add-from-project") return addFromProject(targetId);
+  if (name === "import-pages") return importPages({ after: targetId });
   if (name === "select-pages") { S.checked = new Set(S.project.pages.map((p) => p.id)); refreshPageViews(); return; }
   if (name === "copy-pages") {
     S.pageClipboard = pageClipboard(S.project, ids);
@@ -1035,6 +1186,124 @@ async function pageAction(name, { ids = [...S.checked], targetId = S.pageId, pos
   if (!out) return;
   if (out.added.length) { S.checked = new Set(out.added); S.pageId = out.added[0]; }
   updateEditor();
+}
+
+// ---------- 第 13 轮：更多添加页面的方式 ----------
+// 「添加页面」菜单和页面栏右键共用：从文案添加草稿页、从其他项目添加、导入 HTML 成页面
+const MORE_ADD_ITEMS = [{ action: "add-draft", label: "从文案添加草稿页…" }, { action: "add-from-project", label: "从其他项目添加页面…" }, { action: "import-pages", label: "导入为页面…" }];
+function addPageMenu(x, y) {
+  const first = web() ? [{ action: "desktop", label: "电脑端页面" }, { action: "mobile", label: "手机端页面" }] : [{ action: "blank", label: "空白页面" }];
+  const items = [...first, { separator: true }, { action: "add-draft", label: "从文案添加草稿页…" }, { action: "add-from-project", label: "从其他项目…" }, { action: "import-pages", label: "导入为页面…" }];
+  showContextMenu({ x, y, items, onAction: (action) => {
+    const run = action === "blank" ? addPage() : action === "desktop" || action === "mobile" ? addPage({ device: action }) : pageAction(action, { targetId: S.pageId });
+    Promise.resolve(run).catch((error) => notice(error.message));
+  } });
+}
+// 页面栏空白处右键：粘贴 + 添加页面的几种方式
+function pageListMenu(e) {
+  if (S.view !== "editor" || !e.target.closest?.(".ed-pages .page-list, .ed-page-grid, .ed-page-timeline") || e.target.closest("[data-page-id]")) return;
+  e.preventDefault();
+  const last = S.project.pages.at(-1)?.id;
+  showContextMenu({ x: e.clientX, y: e.clientY, items: [{ action: "paste-pages", label: "粘贴", disabled: !S.pageClipboard?.pageIds?.length }, { action: "insert-page-after", label: "添加页面" }, { separator: true }, ...MORE_ADD_ITEMS], onAction: (action) => pageAction(action, { ids: [last], targetId: last }).catch((error) => notice(error.message)) });
+}
+function draftDialog(after = S.pageId) {
+  modal(`<h2>从文案添加草稿页</h2><p class="g-sheet__note">把分好页的文案贴进来，工作台按「---」或「## Page N ｜ 页名」分页：【核心信息】上页面，【辅助信息】【动效】进这一页的备注；没有记号的文字按空行和字数分页。草稿页之后可以直接改字、分页、合并，再「复制给 agent → 请设计」。</p><form id="draft-form"><label class="g-area"><span>文案</span><textarea name="text" rows="14" required data-draft-text placeholder="## Page 1 ｜ 封面&#10;大标题：……"></textarea></label><div class="g-sheet__actions">${gbtn("close", "取消")}<button class="g-btn g-btn--prism" type="submit" data-draft-submit>分页</button></div></form>`);
+  const form = $("#draft-form");
+  form.text.focus();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = form.text.value;
+    if (!text.trim()) return;
+    form.querySelector("[data-draft-submit]").disabled = true;
+    try { if (await addDraftText(text, after)) closeModal(); }
+    catch (err) { notice(err.message); }
+    finally { const b = form.querySelector("[data-draft-submit]"); if (b) b.disabled = false; }
+  };
+}
+async function addDraftText(text, after = S.pageId) {
+  const out = await pagesOp("draft", { text, after });
+  if (!out) return null;
+  if (out.added[0]) { S.pageId = out.added[0]; S.screen = 1; }
+  S.checked.clear();
+  updateEditor();
+  notice(out.draft?.note || `已添加 ${out.added.length} 页草稿`);
+  return out;
+}
+function addFromProject(after = S.pageId) {
+  return openAddPagesDialog({ api, modal, closeModal, notice, project: S.project, after, pagesOp, onDone: (out) => {
+    if (out.added.length) { S.checked = new Set(out.added); S.pageId = out.added[0]; S.screen = 1; }
+    updateEditor();
+  } });
+}
+// 导入 HTML / 文件夹 / .zip 成页面（插进当前项目）：files 是拖进来的，不给就在弹窗里选
+function importPages({ files = null, after = S.pageId } = {}) {
+  const projectId = S.project.id;
+  importHtml.openImportDialog({ api, modal, closeModal, notice, ...(files ? { files, autoStart: true } : {}), intoProject: projectId, after, onDone: async (_id, pageIds = []) => {
+    if (S.view !== "editor" || S.project?.id !== projectId) return;
+    await reloadProject(pageIds);
+  } });
+}
+// 服务端改了项目（导入成页面）：重新取项目，选中新页
+async function reloadProject(selectIds = []) {
+  await flush();
+  const data = await api(path());
+  S.project = data.project;
+  ownRevision(data.revision);
+  S.base = clone(data.project);
+  S.history.commit(S.project);
+  S.saved = S.dirty;
+  const fresh = selectIds.filter((id) => S.project.pages.some((p) => p.id === id));
+  if (fresh.length) { S.checked = new Set(fresh); S.pageId = fresh[0]; S.screen = 1; }
+  keepSelection();
+  updateEditor();
+}
+// 页面栏接受拖进来的文件：.md / .txt → 从文案添加草稿页；.html / 文件夹 / .zip → 导入成页面
+const isTextFile = (name) => /\.(md|markdown|txt)$/i.test(name || "");
+function mountPageDrops() {
+  for (const col of app.querySelectorAll(".ed-pages, .ed-page-grid, .ed-page-timeline")) {
+    if (col._vwDrops) continue;
+    col._vwDrops = true;
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+    col.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; col.classList.add("is-file-over"); });
+    col.addEventListener("dragleave", (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove("is-file-over"); });
+    col.addEventListener("drop", (e) => {
+      col.classList.remove("is-file-over");
+      if (!hasFiles(e) || S.view !== "editor") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const dt = e.dataTransfer, plain = [...(dt.files || [])];
+      const folders = [...(dt.items || [])].some((i) => i.webkitGetAsEntry?.()?.isDirectory);
+      if (plain.length && !folders && plain.every((f) => isTextFile(f.name))) {
+        Promise.all(plain.map((f) => f.text())).then((texts) => addDraftText(texts.join("\n\n---\n\n"))).catch((err) => notice(err.message));
+        return;
+      }
+      // 必须在 drop 事件里同步取（之后 DataTransfer 就读不到了）
+      const pending = typeof importHtml.filesFromDataTransfer === "function" ? importHtml.filesFromDataTransfer(dt) : Promise.resolve(plain.map((file) => ({ path: file.name, file })));
+      pending.then((files) => {
+        if (!files.length) return notice("拖进来的文件里没有 .html、.zip 或 .md / .txt");
+        importPages({ files });
+      }).catch((err) => notice(err.message));
+    });
+  }
+}
+// 「复制给 agent」分裂菜单：请处理修改单 / 请设计 / 请统一风格 / 请整理文件夹
+function briefMenu(button) {
+  const box = button.getBoundingClientRect();
+  const hasDraft = S.project.pages.some((p) => p.draft);
+  const hasForeign = S.project.pages.some((p) => p.origin?.project && p.origin.project !== S.project.id);
+  showContextMenu({ x: box.left, y: box.bottom + 6, items: [
+    { action: "edits", label: "请处理修改单" },
+    { action: "design", label: "请设计", disabled: !hasDraft },
+    { action: "unify", label: "请统一风格", disabled: !hasForeign },
+    { separator: true },
+    { action: "organize", label: "请整理文件夹" },
+  ], onAction: (intent) => copyBrief(intent).catch((err) => notice(err.message)) });
+}
+async function copyBrief(intent) {
+  await flush();
+  const { text } = intent === "organize" ? await api("/api/brief/organize") : await api(`${path()}/brief${intent && intent !== "edits" ? `?intent=${encodeURIComponent(intent)}` : ""}`);
+  await navigator.clipboard.writeText(text);
+  notice("已复制，开新的 agent 对话时直接粘贴");
 }
 
 // ---------- 素材库、版本、背景、复制、导出 ----------
@@ -1146,8 +1415,18 @@ const EXPORT_KINDS = [
   ["html", "放映版 HTML", "一个网页文件，双击就能在浏览器里放映（带动效）", "play"],
   ["images", "每页图片", "每一页存成一张 PNG 图片", "image"],
   ["pdf", "PDF", "所有页面合成一个 PDF 文件", "copy"],
+  ["pptx-image", "PPTX 图片版", "演示用：每页一张清晰的图铺满幻灯片，和原稿一模一样，不能改字", "images"],
+  ["pptx-editable", "PPTX 可改字版", "背景和装饰是图片，文字是 PowerPoint 里能改的文本框（动画不搬）", "type"],
   ["handoff", "交接包（改动清单 + 对比图）", "改前 = agent 写的样子，改后 = 加上你的修改；给写前端的 agent", "link"],
 ];
+// 用途（参考 Canva 的「打印 PDF / 标准 PDF」）：放映版、图片、PDF、PPTX 都分两种
+const EXPORT_PURPOSES = [
+  ["web", "线上浏览版", "文件小，手机也能流畅打开（图片按显示尺寸压缩，字体只留用到的字）"],
+  ["print", "印刷版", "高清（按 300 dpi 换算的尺寸，图片不压缩），文件比较大"],
+];
+// PPTX 只用于演示（第 16 轮）：不分用途；交接包也不分
+const hasPurpose = (kind) => kind !== "handoff" && !kind.startsWith("pptx-");
+const exportRequest = (kind, purpose) => (kind.startsWith("pptx-") ? { kind: "pptx", pptxMode: kind.slice(5) } : { kind, purpose });
 function formatBytes(n) {
   if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n || 0))} B`;
   const units = ["KB", "MB", "GB"];
@@ -1156,12 +1435,22 @@ function formatBytes(n) {
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 function exportDialog() {
-  const kind = S.exportKind;
-  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
+  const kind = S.exportKind, purpose = S.exportPurpose || "web";
+  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><h3 class="ed-heading ex-purpose__head" ${hasPurpose(kind) ? "" : "hidden"}>用途</h3><div class="g-sheet__list ex-purpose" role="radiogroup" aria-label="用途" id="export-purposes" ${hasPurpose(kind) ? "" : "hidden"}>${EXPORT_PURPOSES.map(([k, label, desc]) => `<button class="g-row ${k === purpose ? "selected" : ""}" data-action="export-purpose" data-purpose="${k}" role="radio" aria-checked="${k === purpose}"><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
+}
+function chooseExportPurpose(purpose) {
+  if (!EXPORT_PURPOSES.some(([k]) => k === purpose)) return;
+  S.exportPurpose = purpose;
+  document.querySelectorAll('[data-action="export-purpose"]').forEach((row) => {
+    const on = row.dataset.purpose === purpose;
+    row.classList.toggle("selected", on);
+    row.setAttribute("aria-checked", on ? "true" : "false");
+  });
 }
 function chooseExportKind(kind) {
   if (!EXPORT_KINDS.some(([k]) => k === kind)) return;
   S.exportKind = kind;
+  for (const node of document.querySelectorAll("#export-purposes, .ex-purpose__head")) node.hidden = !hasPurpose(kind); // 交接包、PPTX 不分用途
   document.querySelectorAll('[data-action="export-kind"]').forEach((row) => {
     const on = row.dataset.kind === kind;
     row.classList.toggle("selected", on);
@@ -1182,7 +1471,8 @@ function showExportProgress(sheet, { current, total, label } = {}) {
 }
 async function startExport(button) {
   if (S.exporting) return;
-  const kind = S.exportKind, label = EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind, sheet = button.closest(".g-sheet");
+  const kind = S.exportKind, sheet = button.closest(".g-sheet");
+  const label = `${EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind}${hasPurpose(kind) ? `（${EXPORT_PURPOSES.find(([k]) => k === (S.exportPurpose || "web"))?.[1]}）` : ""}`;
   S.exporting = true;
   const controls = [...sheet.querySelectorAll("button")];
   controls.forEach((c) => (c.disabled = true));
@@ -1217,7 +1507,8 @@ async function startExport(button) {
       // 等进度流连上（最多 1 秒）再发导出，开头几页的进度不会漏
       await new Promise((done) => { const t = setTimeout(done, 1000); stream.addEventListener("open", () => { clearTimeout(t); done(); }, { once: true }); stream.addEventListener("error", () => { clearTimeout(t); done(); }, { once: true }); });
     }
-    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(base, "POST", progressId ? { kind, progressId } : { kind });
+    const body = exportRequest(kind, S.exportPurpose || "web");
+    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(base, "POST", progressId ? { ...body, progressId } : body);
     if (!sheet.isConnected) notice(`${label}已导出到：${result.outDir}`);
     else if (kind === "handoff") handoffResult(result);
     else exportResult(result, label);
@@ -1245,10 +1536,10 @@ async function cancelExport(button) {
   try { await api(`${path()}/export/cancel/${id}`, "POST", {}); }
   catch (err) { button.disabled = false; notice(err.message); }
 }
-function exportResult({ outDir, files }, label) {
+function exportResult({ outDir, files, notes = [] }, label) {
   const target = files.length === 1 ? files[0].path : outDir;
   const total = files.reduce((n, f) => n + (f.bytes || 0), 0);
-  modal(`<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", runtimeSettings.revealLabel, { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`);
+  modal(`<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p>${notes.map((n) => `<p class="g-sheet__note" data-export-note>${esc(n)}</p>`).join("")}<div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", runtimeSettings.revealLabel, { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`);
 }
 function handoffResult({ outDir, files = [], agentText = "" }) {
   S.handoffText = agentText;
@@ -1257,10 +1548,59 @@ function handoffResult({ outDir, files = [], agentText = "" }) {
 }
 // 放映：打开放映页（新标签），从当前页开始
 function playURL() { return `/player.html?project=${encodeURIComponent(S.project.id)}&page=${encodeURIComponent(S.pageId)}`; }
+// 桌面应用里不开新窗口（系统会把它交给浏览器，应用自己又跳到放映页，两边一起放映）：在应用窗口里全屏放映一次，Esc 或放完回到编辑器原来的页面
 async function play() {
+  const desktop = desktopShellStatus(navigator.userAgent).desktop;
+  if (desktop) document.documentElement.requestFullscreen?.().catch(() => {}); // 要在点击的同一刻请求全屏
   await flush();
+  if (desktop) return playInApp();
   const win = window.open(playURL(), "_blank");
   if (!win) location.href = playURL();
+}
+async function playInApp() {
+  if ($("#vw-show") || !S.project) return;
+  const { createPlayback } = await import("./playback.js");
+  const host = document.createElement("div");
+  host.id = "vw-show";
+  host.className = "vw-show";
+  host.innerHTML = '<div class="vw-show__stage"></div><div class="vw-show__hint" aria-live="polite"></div>';
+  document.body.append(host);
+  const stage = host.firstElementChild, hint = host.lastElementChild;
+  let size = null, playback = null, closed = false, ended = false, hintTimer = 0, wasFull = !!document.fullscreenElement;
+  const fit = () => { if (!size) return; const k = Math.min(innerWidth / size.width, innerHeight / size.height); stage.style.transform = `translate(${(innerWidth - size.width * k) / 2}px, ${(innerHeight - size.height * k) / 2}px) scale(${k})`; };
+  const say = (text) => { hint.textContent = text; hint.classList.add("show"); clearTimeout(hintTimer); hintTimer = setTimeout(() => hint.classList.remove("show"), 1600); };
+  const outside = (ev) => ev.target === host || ev.target === stage;
+  const onKey = (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Escape") { ev.preventDefault(); close(); return; }
+    if (playback?.handleKey(ev.key)) ev.preventDefault();
+  };
+  const onFull = () => { if (document.fullscreenElement) wasFull = true; else if (wasFull) close(); };
+  function close() {
+    if (closed) return;
+    closed = true;
+    clearTimeout(hintTimer);
+    window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", fit);
+    document.removeEventListener("fullscreenchange", onFull);
+    try { playback?.destroy(); } catch {}
+    host.remove();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    fitBoard();
+  }
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("resize", fit);
+  document.addEventListener("fullscreenchange", onFull);
+  host.addEventListener("click", (ev) => { if (outside(ev)) playback?.tap("click", ev); });
+  host.addEventListener("contextmenu", (ev) => { ev.preventDefault(); if (outside(ev)) playback?.tap("context"); });
+  playback = createPlayback({
+    project: clone(S.project), container: stage, pageId: S.pageId, frameOptions: { fontLibrary: S.fontLibrary || [] },
+    onChange(state) { size = state.size; fit(); say(`${state.index + 1} / ${state.count}${state.total ? ` · 第 ${Math.min(state.nextStep + 1, state.total + 1)} 屏` : ""}`); },
+    onError(error) { console.warn("放映出错", error); },
+    onEnd() { if (ended) close(); else { ended = true; say("放映结束，再点一下回到编辑器"); } },
+    onExit: close,
+  });
+  try { await playback.ready; } catch (error) { notice(`放映不了：${error.message}`); close(); }
 }
 
 // ---------- 右侧栏：页面名、备注、网页设备 / 高度、版本、复制给 agent ----------
@@ -1276,7 +1616,7 @@ function inspectorHTML() {
 function refreshInspector() {
   const body = $(".ed-inspector__body");
   if (!body || !S.project) return;
-  const p = page(), key = JSON.stringify([p.id, web(), p.device]);
+  const p = page(), key = JSON.stringify([p.id, web(), p.device, !!p.draft]);
   if (body._key !== key) { body.innerHTML = inspectorHTML(); body._key = key; syncGlass(app); return; }
   const name = body.querySelector("[data-page-name]");
   if (name && name !== document.activeElement && name.value !== p.name) { name.value = p.name; name.defaultValue = p.name; }
@@ -1313,7 +1653,7 @@ function switchPage(id, { clearChecked = false } = {}) {
 }
 function clearCheckedPages() { S.checked.clear(); S.pageAnchor = null; refreshPageViews(); }
 function pageViewContext(mode = S.pageViewMode) {
-  return { project: S.project, currentPageId: S.pageId, selectedPageIds: [...S.checked], anchorId: S.pageAnchor, mode, returnMode: readPageViewPreference(), canPaste: !!S.pageClipboard?.pageIds?.length };
+  return { project: S.project, currentPageId: S.pageId, selectedPageIds: [...S.checked], anchorId: S.pageAnchor, mode, returnMode: readPageViewPreference(), canPaste: !!S.pageClipboard?.pageIds?.length, screensOf, extraMenuItems: MORE_ADD_ITEMS };
 }
 function setPageView(mode) { S.pageViewMode = mode; writePageViewPreference(mode); refreshLayout(); }
 function mountEditorPageViews() {
@@ -1336,16 +1676,21 @@ function unmountPageView(root) { root._vwDispose?.(); root._vwDispose = null; S.
 function refreshPageViews() {
   for (const root of app.querySelectorAll("[data-page-view]")) patchPageItems(root, pageViewContext(root.dataset.pageView));
   mountEditorPageViews();
+  mountPageDrops();
   setText($(".ed-col-head .ed-count"), String(S.project.pages.length));
   refreshThumbnails();
 }
 
 // ---------- 点击 ----------
 app.addEventListener("click", async (e) => {
+  // 画笔工具条（web/annotations.js 的 toolbarHTML）：颜色、箭头、写一句话、删除
+  const pen = e.target.closest?.(".ed-quickbar [data-annot-color], .ed-quickbar [data-action^='annot-']");
+  if (pen) { annotations.toolbarAction(pen); return; }
   const b = e.target.closest("[data-action]");
   if (!b) return;
   const a = b.dataset.action, id = b.dataset.id;
   try {
+    if (await homeUI.action(a, b)) return; // 总览相关（新建、导入、项目菜单、母版）在 web/home.js
     switch (a) {
       case "screen": goScreen(Number(b.dataset.screen)); break;
       case "page-grid": setPageView(S.pageViewMode === "grid" ? readPageViewPreference() : "grid"); break;
@@ -1354,28 +1699,17 @@ app.addEventListener("click", async (e) => {
         setPageView(S.pageViewMode === "timeline" ? "list" : "timeline");
         break;
       case "close-workbench": await workbenchClose.close(); break;
-      case "project-trash": await projectManagement.openTrash(); break;
-      case "project-delete": await projectManagement.remove(S.homeProjects.find((p) => p.id === id)); break;
-      case "project-duplicate": await projectManagement.duplicate(S.homeProjects.find((p) => p.id === id)); break;
-      case "project-rename": await projectManagement.rename(S.homeProjects.find((p) => p.id === id)); break;
       case "home": await home(); break;
       case "library": await library(); break;
-      case "new": newDialog(); break;
-      case "import-html":
-        openImportDialog({ api, modal, closeModal, notice, onCreated: () => { if (S.view === "home") home().catch(() => {}); }, onDone: (projectId) => open(projectId) });
-        break;
       case "open": await open(id); break;
       case "close": closeModal(); break;
       case "undo": undo(); break;
       case "redo": redo(); break;
-      case "add-page":
-        if (web()) {
-          const box = b.getBoundingClientRect();
-          showContextMenu({ x: box.left, y: box.bottom + 6, items: [{ action: "desktop", label: "电脑端页面" }, { action: "mobile", label: "手机端页面" }], onAction: (device) => addPage({ device }).catch((error) => notice(error.message)) });
-          break;
-        }
-        await addPage();
-        break;
+      case "add-page": { const box = b.getBoundingClientRect(); addPageMenu(box.left, box.bottom + 6); break; }
+      case "annotate": annotations.toggle(); break;
+      case "annotate-pen": annotations.togglePen(); break;
+      case "draft-split": await drafts.split(); break;
+      case "draft-merge": await drafts.mergeNext(); break;
       case "delete-user-image": if (S.mark) await deleteUserImage(S.mark.id); break;
       case "upload-library": $("#file-picker").click(); break;
       case "version": versionDialog(); break;
@@ -1388,20 +1722,7 @@ app.addEventListener("click", async (e) => {
         await navigator.clipboard.writeText(referenceText(S.project, { checkedPageIds: [...S.checked], currentPageId: S.pageId, markId: S.mark?.id }));
         notice("引用已复制");
         break;
-      case "brief": {
-        await flush();
-        const { text } = await api(`${path()}/brief`);
-        await navigator.clipboard.writeText(text);
-        notice("已复制，开新的 agent 对话时直接粘贴");
-        break;
-      }
-      case "master": {
-        const on = b.dataset.on !== "1";
-        await api(`/api/projects/${encodeURIComponent(id)}/master`, "PUT", { master: on });
-        await home();
-        notice(on ? "已设为系列母版，新建项目时可以选「从母版开始」" : "已取消系列母版");
-        break;
-      }
+      case "brief": briefMenu(b); break;
       case "restore": restoreDialog(id, b.dataset.note || ""); break;
       case "restore-confirm": await restore(id); break;
       case "version-delete": deleteVersionDialog(id, b.dataset.note || ""); break;
@@ -1418,8 +1739,10 @@ app.addEventListener("click", async (e) => {
         refreshLayout();
         break;
       case "focus": setFocus(!S.focus); break;
+      case "align": F?.frame?.send({ vw: "align", mode: b.dataset.align }); break;
       case "export": exportDialog(); break;
       case "export-kind": chooseExportKind(b.dataset.kind); break;
+      case "export-purpose": chooseExportPurpose(b.dataset.purpose); break;
       case "copy-handoff": await navigator.clipboard.writeText(S.handoffText || ""); notice("已复制，开新的 agent 对话时直接粘贴"); break;
       case "export-start": await startExport(b); break;
       case "export-cancel": await cancelExport(b); break;
@@ -1453,9 +1776,13 @@ app.addEventListener("click", async (e) => {
     notice(err.message);
   }
 });
+app.addEventListener("contextmenu", pageListMenu);
+// 草稿工具条的按钮：按下时不把焦点从草稿表单拿走（光标、选区留着）
+app.addEventListener("pointerdown", (e) => { if (e.target.closest?.(".qt-draft button")) e.preventDefault(); });
 app.addEventListener("change", (e) => {
   const t = e.target;
   if (t.matches("input[data-q]")) return quickChange(t);
+  if (t.matches("select[data-draft-level]")) return drafts.setLevel(t.value);
   if (t.matches("input[data-page-name]")) return renamePage(t.value);
   if (t.matches("input[data-page-height]")) return setPageHeight(t.value);
 });
@@ -1467,10 +1794,12 @@ $("#file-picker").onchange = (e) => {
   e.target.value = "";
 };
 const isTyping = (el) => !!el && (el.isContentEditable || /^(TEXTAREA|SELECT)$/.test(el.tagName) || (el.tagName === "INPUT" && !/^(checkbox|radio|button|submit|reset)$/i.test(el.type)));
-// 点到 iframe 外面（iframe 自己看不到这次点击）：取消画布里的选中、结束改字。工具条、弹窗、右键菜单里的点击不算
+// 点到 iframe 外面（iframe 自己看不到这次点击）：取消画布里的选中、结束改字。工具条、弹窗、右键菜单里的点击不算；
+// 画布四周的空白交给框选（startWellMarquee，Shift 按着时是加选）
 document.addEventListener("pointerdown", (e) => {
   if (S.view !== "editor" || !S.mark) return;
   if (e.target.closest?.("#artboard, .ed-quickbar, #modal-root, .g-context-menu")) return;
+  if (e.target.id === "canvas-well" || e.target.id === "artboard-holder") return;
   clearMark();
 }, true);
 // 父页面里的粘贴（焦点不在 iframe 里时）：剪贴板里有图片就贴进当前页
@@ -1488,6 +1817,7 @@ window.addEventListener("keydown", (e) => {
     if ($("#modal-root")?.childElementCount) { e.preventDefault(); closeModal(); return; }
     if (S.view !== "editor") return;
     if (typing) { e.target.blur(); return; }
+    if (annotations.handleKey(e)) return;
     e.preventDefault();
     if (clearMark()) return;
     if (S.pageViewMode === "grid") { if (S.checked.size) { clearCheckedPages(); return; } setPageView(readPageViewPreference()); return; }
@@ -1508,10 +1838,15 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (["Backspace", "Delete"].includes(e.key)) {
-      if (S.mark && isUserImage(S.mark.id)) { e.preventDefault(); deleteUserImage(S.mark.id); return; }
+      if (annotations.handleKey(e)) return;
+      if (S.mark && F?.frame) { e.preventDefault(); F.frame.send({ vw: "remove" }); return; }
       if (S.checked.size) { e.preventDefault(); pageAction("delete-pages").catch((err) => notice(err.message)); }
       return;
     }
+    // 选中了画布里的元素、焦点在父页面（比如刚用过工具条）：Cmd+A 全选这一页的元素，方向键微调
+    if (mod && key === "a" && F?.frame && !drafts.active && !page().draft) { e.preventDefault(); F.frame.send({ vw: "selectAll" }); return; }
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (arrow && S.mark && F?.frame && !mod) { e.preventDefault(); const k = e.shiftKey ? 10 : 1; F.frame.send({ vw: "nudge", dx: arrow[0] * k, dy: arrow[1] * k }); return; }
     const direction = ["PageUp", "ArrowUp"].includes(e.key) ? -1 : ["PageDown", "ArrowDown"].includes(e.key) ? 1 : 0;
     if (direction && !mod) {
       e.preventDefault();
@@ -1524,7 +1859,43 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("resize", () => { if (S.view === "editor") fitBoard(); });
 
+// 草稿页编辑（web/drafts.js）：表单层挂在 #artboard-holder 里，fitBoard 让它和画布同缩放
+const drafts = createDraftEditor({
+  getProject: () => S.project,
+  getPageId: () => (S.view === "editor" && S.project ? page()?.id : null),
+  holder: () => (S.view === "editor" ? $("#artboard-holder") : null),
+  viewOf: (p) => (p ? viewOf(p) : null),
+  fetchText: (p) => fetchPageText(pageFileURL(S.project, p, stampOf(p.file))),
+  stampOf,
+  request: (op, body) => pagesOp(op, body, { draft: true }),
+  pagesOp,
+  notice,
+  status: (state) => saveStatus(state === "busy" ? SAVE_TEXT.busy : SAVE_TEXT.ok),
+  touch: (file) => { const stamp = Date.now(); S.stale.set(file, stamp); refreshThumbnails(); return stamp; },
+  selectPage: (id) => switchPage(id, { clearChecked: true }),
+  refresh: () => updateEditor(),
+  onState: () => { refreshHistoryButtons(); refreshQuickToolbar(); },
+});
+// 批注（web/annotations.js）：只在编辑画布上，改动走 changed()（撤销 / 自动保存）
+const annotations = createAnnotations({
+  holder: () => (S.view === "editor" ? $("#artboard-holder") : null),
+  getProject: () => S.project,
+  getPage: () => (S.project ? page() : null),
+  scale: () => S.scale || 1,
+  changed,
+  notice,
+  onMode: (on) => {
+    const b = $('.ed-tools [data-action="annotate"]'); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); }
+    const pen = $('.ed-tools [data-action="annotate-pen"]'); if (pen) { pen.setAttribute("aria-pressed", String(annotations.pen)); pen.classList.toggle("is-on", annotations.pen); }
+    if (on || annotations.pen) clearMark();
+    refreshQuickToolbar();
+  },
+});
 const projectManagement = createProjectManagement({ api, confirm: confirmAction, modal, closeModal, notice, refresh: home, onOpen: open, onDeleted: async () => {} });
+const homeUI = createHome({ api, S, app, $, esc, shell, head, modal, closeModal, confirm: confirmAction, notice, open, home, glassAttr, homeThumbs, liven, syncGlass, projectManagement: () => projectManagement });
+// 常用字体库（第 13 轮）：装好的五套字体，编辑画布注入给页面；取不到就当没有
+S.fontLibrary = [];
+loadFontLibrary().then((list) => { S.fontLibrary = list; });
 const workbenchClose = createWorkbenchClose({
   api, flush, confirm: confirmAction, notice,
   renderClosed() { S.pageViewsDispose?.(); disconnectEvents(); S.project = null; S.view = "closed"; shell("home", '<section class="hm-panel"><h1>工作台已关闭，可以关掉这个窗口了</h1></section>'); },

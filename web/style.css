@@ -216,12 +216,67 @@ html .ed-work > .ed-quickbar[hidden] { display: none; }
 .ed-quickbar .qt-field input {width:var(--qt-w,56px);flex:none}
 .ed-quickbar .qt-color input {width:26px;height:20px;padding:0;cursor:pointer}
 .ed-quickbar .qt-btn {flex:none;height:30px}
-/* 第 12 轮修正：第 N 屏。画布上方工具条左侧一排「第 k 屏」按钮；换屏时新 iframe 先藏在旧的后面加载 */
-.ed-screens {display:flex;gap:4px;flex:0 1 auto;min-width:0;overflow-x:auto;margin-left:10px;scrollbar-width:none}
+/* 第 13 轮：第 N 屏挪到画布下方，一排标签式按钮（像日常软件的分页标签），比工具条按钮大一号；当前屏高亮 */
+.ed-foot {min-height:30px;flex-wrap:nowrap}
+.ed-foot__size {flex:none}
+.ed-screens {display:flex;gap:6px;flex:0 1 auto;min-width:0;overflow-x:auto;padding:6px 2px;scrollbar-width:none}
 .ed-screens[hidden] {display:none}
 .ed-screens::-webkit-scrollbar {display:none}
-.ed-screen {flex:none}
-.ed-screen[aria-pressed="true"] {background:var(--g-raised);color:var(--g-ink)}
+.ed-screen {flex:none;height:38px;padding:0 18px;border:0;border-radius:12px;background:var(--g-input,rgba(255,255,255,.4));box-shadow:var(--g-input-edge,none);color:var(--g-ink-2);font:600 15px/1 var(--g-font);white-space:nowrap;cursor:pointer;transition:background .15s ease,color .15s ease,box-shadow .15s ease}
+.ed-screen:hover {background:var(--g-hover);color:var(--g-ink)}
+.ed-screen[aria-pressed="true"] {background:var(--g-raised);box-shadow:var(--g-raised-edge),0 0 0 2px var(--g-blue,#4f8ff7);color:var(--g-ink)}
+.ed-screen:focus-visible {outline:2px solid var(--g-focus,#4f8ff7);outline-offset:2px}
+.ed-screens__note {flex:0 1 auto;min-width:0;font-size:12.5px;color:var(--g-ink-2);white-space:normal;line-height:1.35}
+.ed-screens__note[hidden] {display:none}
+/* 页面栏页面项标签旁的小字 chip：「草稿」「N 屏」 */
+.ed-page__chips {display:inline-flex;gap:4px;margin-left:6px;vertical-align:1px}
+.ed-page__chips:empty {display:none}
+.ed-page__chip {display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:6px;background:var(--g-raised);box-shadow:var(--g-raised-edge);color:var(--g-ink-2);font:600 10.5px/1 var(--g-font);white-space:nowrap}
+.ed-page__chip[data-chip="draft"] {color:var(--g-pink-ink,#b0457f)}
+/* 工具条里按下状态的按钮（批注模式） */
+.ed-tbtn[aria-pressed="true"] {background:var(--g-raised);color:var(--g-ink);box-shadow:var(--g-raised-edge)}
+/* 画布上盖的层（草稿表单、批注）：和 #artboard 同尺寸、同缩放（fitBoard 写 width / height / transform） */
+#artboard-holder > .vw-layer {position:absolute;left:0;top:0;transform-origin:0 0}
+/* 草稿表单：样式来自 draftCss（页面文件同一段），这一层给白底和字色；超出页面的文字照常显示，虚线是页面下边 */
+#artboard.vw-stage.is-draft > iframe {visibility:hidden}
+.vw-draft-layer {z-index:2;background:#fff;color:#222}
+.vw-draft-layer > main[data-vw-draft] {outline:none;cursor:text;caret-color:#222;user-select:text;-webkit-user-select:text}
+.vw-draft-layer > main[data-vw-draft] ::selection {background:rgba(79,143,247,.3)}
+.vw-draft-layer::after {content:"";position:absolute;left:0;right:0;top:100%;border-top:calc(2px * var(--vw-inv,1)) dashed rgba(60,60,80,.35);pointer-events:none}
+.vw-draft-layer[data-loading] > main {opacity:.5}
+.ed-quickbar .qt-select select {width:auto;min-width:64px;flex:none;text-align:left;padding-right:4px}
+/* 批注：半透明黄底框 + 文字标签。不在批注模式时这一层不接鼠标，只有批注框能点 */
+.vw-annot-layer {z-index:3;pointer-events:none}
+/* 批注模式：这一层要画出一点东西（几乎透明），Chromium 才不把鼠标直接送进下面的隔离 iframe */
+.vw-annot-layer.is-dragging {pointer-events:auto}
+.vw-annot-layer.is-mode {pointer-events:auto;cursor:crosshair;background:rgba(255,255,255,.01)}
+.vw-annot {position:absolute;box-sizing:border-box;pointer-events:auto;cursor:move;background:rgba(255,214,10,.28);border:calc(2px * var(--vw-inv,1)) solid rgba(230,170,0,.9);border-radius:calc(4px * var(--vw-inv,1))}
+.vw-annot.is-selected {border-color:var(--g-blue,#4f8ff7);box-shadow:0 0 0 calc(2px * var(--vw-inv,1)) rgba(79,143,247,.35)}
+.vw-annot--draft {pointer-events:none;border-style:dashed}
+.vw-annot__text {position:absolute;left:0;top:0;max-width:max(100%, calc(260px * var(--vw-inv,1)));padding:calc(3px * var(--vw-inv,1)) calc(7px * var(--vw-inv,1));border-radius:calc(4px * var(--vw-inv,1));background:rgba(255,224,80,.95);color:#3a2f00;font:600 calc(13px * var(--vw-inv,1))/1.35 var(--g-font,system-ui);white-space:pre-wrap;overflow-wrap:anywhere;transform:translateY(-100%);pointer-events:none}
+.vw-annot__text:empty {display:none}
+.vw-annot__grip {position:absolute;right:0;bottom:0;width:calc(12px * var(--vw-inv,1));height:calc(12px * var(--vw-inv,1));border-radius:50%;background:#fff;border:calc(2px * var(--vw-inv,1)) solid var(--g-blue,#4f8ff7);cursor:nwse-resize;display:none}
+.vw-annot.is-selected .vw-annot__grip {display:block}
+.vw-annot-input {position:absolute;z-index:30;width:300px;max-width:80vw;background:rgba(255,255,255,.92);box-shadow:0 8px 24px -8px rgba(30,30,60,.35),var(--g-input-edge,none)}
+.vw-annot-input input {text-align:left}
+/* 页面栏：拖进文件时的提示 */
+.ed-pages.is-file-over,.ed-page-grid.is-file-over,.ed-page-timeline.is-file-over {box-shadow:inset 0 0 0 2px var(--g-blue,#4f8ff7)}
+/* 从其他项目添加页面 */
+.g-sheet.ap-sheet {width:min(980px,96vw);max-width:none}
+.ap-body {display:grid;grid-template-columns:240px 1fr;gap:14px;height:min(56vh,520px);min-height:260px}
+.ap-projects {overflow:auto;max-height:none;margin:0}
+.ap-folder {padding:8px 6px 4px;font-size:11px;font-weight:700;color:var(--g-ink-3)}
+.ap-pages {overflow:auto;border-radius:12px}
+.ap-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;padding:4px}
+.ap-page {display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:12px;cursor:pointer}
+.ap-page.is-selected {outline:2px solid var(--g-blue,#4f8ff7);background:rgba(110,150,230,.12)}
+.ap-thumb {position:relative;display:block;width:100%;aspect-ratio:16/10;border-radius:8px;overflow:hidden;background:#fff;box-shadow:var(--g-raised-edge)}
+.ap-thumb .miniature {position:absolute;inset:0;overflow:hidden}
+.ap-label {display:flex;align-items:center;gap:6px;font-size:12px;color:var(--g-ink-2);min-width:0}
+.ap-label i {font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ap-foot {display:flex;align-items:center;gap:12px;margin-top:12px}
+.ap-foot select {text-align:left}
+.ap-count {font-size:12px;color:var(--g-ink-3)}
 #artboard.vw-stage > iframe.vw-frame-pending {position:absolute;left:0;top:0;visibility:hidden;pointer-events:none}
 /* 第 12 轮修正：导出进度条（弹窗里，沿用玻璃弹窗的配色） */
 .ex-progress {margin:12px 0 0}
@@ -230,3 +285,16 @@ html .ed-work > .ed-quickbar[hidden] { display: none; }
 .ex-progress progress::-webkit-progress-value {background:var(--g-accent);border-radius:999px;transition:width .2s ease}
 .ex-progress progress::-moz-progress-bar {background:var(--g-accent);border-radius:999px}
 .ex-progress__label {margin:6px 0 0}
+
+/* 第 14 轮：从画布四周的空白处拖出的框选（第 11 轮的样子） */
+.ed-marquee { position: absolute; z-index: 30; pointer-events: none; border: 1px solid #4f7cff; background: rgba(79, 124, 255, 0.12); border-radius: 2px; }
+/* 第 14 轮：桌面应用里在应用窗口内放映（黑底全屏，和 player.html 一样） */
+.vw-show { position: fixed; inset: 0; z-index: 100000; background: #000; overflow: hidden; }
+.vw-show__stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #000; }
+.vw-show__hint { position: fixed; right: 16px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font: 13px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; opacity: 0; transition: opacity .4s; pointer-events: none; }
+.vw-show__hint.show { opacity: 1; }
+.ed-marquee-shield { position: absolute; inset: 0; z-index: 29; cursor: default; }
+/* 第 15 轮：多选对齐按钮（工具条里一组图标按钮） */
+.ed-quickbar .qt-align { display: flex; gap: 2px; flex: none; }
+.ed-quickbar .qt-icon { width: 30px; padding: 0; justify-content: center; }
+.ex-purpose__head {margin:14px 0 6px}

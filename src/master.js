@@ -231,7 +231,7 @@ export function createFromMaster({ masterDir, destProjectDir, newId, newName, no
     const copiedExtra = copyExtras(masterDir, destProjectDir);
 
     // 起始页 = 母版第 1 页的副本（页面文件 + 引用的资源 + 修改单）
-    const first = copyPagesInto({ srcDir: masterDir, src: master, pageIds: [masterPages[0].id], destDir: destProjectDir, dest: base, keepIds: true });
+    const first = copyPagesInto({ srcDir: masterDir, src: master, pageIds: [masterPages[0].id], destDir: destProjectDir, dest: base, keepIds: true, markOrigin: false });
     const project = first.project;
     for (const id of first.copiedAssets) if (!copiedAssets.includes(id)) copiedAssets.push(id);
     for (const id of first.copiedFonts) if (!copiedFonts.includes(id)) copiedFonts.push(id);

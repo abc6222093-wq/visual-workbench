@@ -15,7 +15,7 @@ import { clearEdits } from '../../web/edits-model.js';
 import { LEGACY_MESSAGE, isLegacyProject } from '../validate.js';
 
 const USAGE = '用法：npm run edits -- <项目编号或路径> [--page <页面编号>] [--json]\n      npm run edits -- <项目编号或路径> --clear [--page <页面编号>] [<条目编号>…]';
-const KIND_LABEL = { text: '文字', fontSize: '字号', move: '位置', resize: '大小', color: '文字颜色', background: '底色', crop: '裁切', addImage: '贴图' };
+const KIND_LABEL = { text: '文字', fontSize: '字号', move: '位置', resize: '大小', color: '文字颜色', background: '底色', crop: '裁切', addImage: '贴图', remove: '删除' };
 
 export function parseArgs(argv) {
   const out = { positional: [], page: null, json: false, clear: false };

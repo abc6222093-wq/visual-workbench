@@ -5,7 +5,8 @@ import {startWorkbench,openProject,v3Project,pageHTML,clickInFrame,painted} from
 const disk=file=>JSON.parse(readFileSync(file,'utf8'));
 const settle=page=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const saved=page=>page.waitForFunction(()=>document.querySelector('#save-status')?.textContent==='已保存');
-const frame=page=>page.frameLocator('#artboard > iframe');
+// 第 16 轮换页双缓冲：新页加载期间有两个 iframe，新的带 vw-frame-pending（藏着），只看正显示的那个
+const frame=page=>page.frameLocator('#artboard > iframe:not(.vw-frame-pending)');
 async function ready(page){await page.waitForSelector('#artboard[data-ready="1"]',{timeout:15000});await painted(page);}
 
 test('round12 画布：课件页按画板尺寸缩放进画布区居中，iframe 隔离（只允许脚本），已删功能的界面不出现',async t=>{
@@ -64,7 +65,7 @@ test('round12 修改单：选中文字出窄工具条，改字号写进 edits �
  assert.deepEqual(errors,[]);
 });
 
-test('round12 贴图：父页面粘贴图片 → 存成素材、记 addImage、出现在页面里；删除要确认并能撤销',async t=>{
+test('round12 贴图：父页面粘贴图片 → 存成素材、记 addImage、出现在页面里；右键删除不弹确认（参照 PowerPoint）、能撤销',async t=>{
  const {page,errors,files}=await startWorkbench(t);await openProject(page);await ready(page);
  await page.evaluate(async()=>{
   const c=document.createElement('canvas');c.width=400;c.height=300;const g=c.getContext('2d');g.fillStyle='#e11d48';g.fillRect(0,0,400,300);
@@ -77,12 +78,17 @@ test('round12 贴图：父页面粘贴图片 → 存成素材、记 addImage、�
  assert.ok(add.after.width<=1920*0.6+1&&add.after.height<=1080*0.6+1);
  assert.ok(Math.abs(add.after.x+add.after.width/2-960)<=1&&Math.abs(add.after.y+add.after.height/2-540)<=1,'放在可见区域中央');
  await frame(page).locator(`[data-vw-id="${add.target}"]`).waitFor({timeout:10000});
+ await page.waitForFunction(()=>document.querySelectorAll('#artboard > iframe').length===1);await painted(page);
  await clickInFrame(page,`[data-vw-id="${add.target}"]`,{button:'right'});
  await page.locator('.g-context-menu button',{hasText:'删除'}).waitFor();await painted(page);
- await page.locator('.g-context-menu button',{hasText:'删除'}).click();await page.locator('[data-confirm-yes]').waitFor();await painted(page);await page.locator('[data-confirm-yes]').click();await saved(page);
- assert.equal(disk(files.demo).pages[0].edits.length,0);
+ await page.locator('.g-context-menu button',{hasText:'删除'}).click();
+ await page.waitForFunction(()=>document.querySelector('[data-edit-count]')?.textContent==='这一页还没有修改');await saved(page);
+ assert.equal(await page.locator('[data-confirm-yes]').count(),0,'不弹确认');
+ assert.equal(disk(files.demo).pages[0].edits.length,0,'贴的图直接去掉 addImage，不记 remove');
+ await frame(page).locator(`[data-vw-id="${add.target}"]`).waitFor({state:'detached',timeout:10000});
  await page.locator('[data-action="undo"]').click();await saved(page);
  assert.equal(disk(files.demo).pages[0].edits.length,1);
+ await frame(page).locator(`[data-vw-id="${add.target}"]`).waitFor({timeout:10000});
  assert.deepEqual(errors,[]);
 });
 

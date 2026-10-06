@@ -1,4 +1,4 @@
-import { renderPageItems } from './page-views.js';
+import { renderPageItems, pageChips } from './page-views.js';
 // 页面列表 / 网格 / 时间轴的原地更新（第 9 轮）：在已有的 [data-page-view] 根里按 data-page-id 协调页面项。
 // 已有的项复用（里面 [data-preview] 缩略图宿主的内容原样保留），新页用 renderPageItems 生成同结构的节点，
 // 删掉的移除，顺序变了才挪动。根里不是页面项的子节点（插入线、框选框等覆盖层）不碰。返回新增页的 id 列表。
@@ -35,6 +35,8 @@ export function patchPageItems(viewRoot, context) {
     setAttr(item.querySelector('.ed-page__open'), 'title', p.name);
     setText(item.querySelector('.ed-page__label b'), String(i + 1).padStart(2, '0'));
     setText(item.querySelector('.ed-page__label i'), p.name);
+    const chips = item.querySelector('.ed-page__chips'), html = pageChips(p, context.screensOf);
+    if (chips && chips._html !== html && chips.innerHTML !== html) { chips.innerHTML = html; chips._html = html; }
     return item;
   });
   for (const node of existing.values()) node.remove();

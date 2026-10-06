@@ -25,8 +25,15 @@
 | type | 字段 | 说明 |
 |---|---|---|
 | `edits` | `edits` | 整份修改单重放（撤销 / 重做 / 同步后）。运行时记有每个目标每种修改的原样，先恢复再叠 |
-| `select` | `id` 或 `null` | 父页面要求选中 / 取消选中（例如 Esc、点页面栏） |
-| `set` | `target, kind, after` | 父页面的控件（颜色、字号）改了值：运行时叠上并回 `edit` |
+| `select` | `id` 或 `null`；或 `ids: [...]` | 父页面要求选中 / 取消选中（例如 Esc、点页面栏）。第 14–16 轮：给 `ids` 时一次选中多个（撤销 / 重做后恢复多选） |
+| `set` | `target, kind, after`；或 `targets: [...]` | 父页面的控件（颜色、字号）改了值：运行时叠上并回 `edit`。第 14–16 轮：多选时给 `targets`，只改有这种能力的，回一条 `edit-batch` |
+| `remove` | — | 第 14–16 轮：删除当前选中的（父页面的 Delete / 右键「删除」）。标了的元素记 `remove` 条目，用户贴的图删掉它的 addImage 等条目；一次 = 一条 `edit-batch` |
+| `align` | `mode`（`left` / `centerX` / `right` / `top` / `centerY` / `bottom`） | 第 15 轮：按选中范围对齐，只挪带 `move` 的；一次 = 一条 `edit-batch`（全是 move） |
+| `nudge` | `dx, dy` | 第 14 轮：焦点在父页面时方向键微调选中的（Shift 一次 10px） |
+| `selectAll` | — | 第 14 轮：Cmd/Ctrl+A 选中这一页所有能选的（跳过整页背景和看不见的） |
+| `marquee` | `phase`（`start` / `move`）、`additive`（start 时）、`rect: { left, top, right, bottom }`（页面视口坐标） | 第 14 轮：从画布四周（页面外）开始的框选由父页面画框，把范围转给运行时选中；`additive` 为 Shift/Cmd 加选 |
+| `pointer` | `kind`（`move` / `up`）、`x, y`（换算成页面视口坐标）、`shiftKey` | 第 14 轮：页面里开始的拖动（移动、缩放、框选）拖出 iframe 后，父页面把窗口上的移动 / 松开转发进来；第 16 轮：在窗口外松开（按键已松开）也按 `up` 结束，框不会留在页面上 |
+| `painted` | `timeout` | 第 16 轮：等字体、图片都画出来（最多 timeout 毫秒，不动动画），回 `painted { ok }`。编辑画布换页双缓冲用：新页画好再换上，不闪白 |
 | `addImage` | `entry`（addImage 条目） | 贴图：运行时把 `<img>` 加进 body 并选中它 |
 | `removeImage` | `target` | 删除用户贴的图 |
 | `step` | — | 推进一步；完成后回 `step-done` |
@@ -36,43 +43,49 @@
 | `scroll` | `top` | 网页页面滚到某个位置 |
 | `settle` | `timeout` | 等字体、图片、有限动画结束，无限动画暂停（截图前用） |
 | `uiScale` | `scale` | 画布缩放时发，让把手、框线保持屏幕像素大小 |
+| `start` | — | 第 13 轮：`hold: true` 启动的页面收到后才跑 `init`（放映壳在显示新页之后发） |
 | `screen` | `screen` | 编辑时切到第 k 屏：k ≥ 当前屏在原地快进，回 `screen-done { screen, applied: true }`；k 小于当前屏不能回退，回 `applied: false`，父页面另建 iframe（双缓冲）重载 |
 
 页面 → 父：
 | type | 字段 | 说明 |
 |---|---|---|
-| `loaded` | `pageId, height` | 只在 play 模式：文档加载完、修改单叠完、`init` 还没跑（或刚开始跑）。放映壳收到就把 iframe 显示出来（`frame.loaded`） |
-| `ready` | `pageId, height, marks: [{ id, caps, page?, values? }], steps, screen` | 文档加载完、修改单叠完。`height` 是整页内容高度（网页页面）；`marks[].page: true` 表示标在 `<html>` / `<body>` 上的整页背景（画布上点不中、不悬停，父页面在没选中东西时给「页面底色」控件，`values.background` 是当前底色）；`screen` 是当前停在第几屏（没给时 null） |
+| `loaded` | `pageId, height, held` | 只在 play 模式：文档加载完、修改单叠完、`init` 还没跑（或刚开始跑）。放映壳收到就把 iframe 显示出来（`frame.loaded`）。`held` 为真表示 boot 带了 `hold: true`，要等父页面发 `start` 才跑 `init`（第 13 轮，预加载的下一页用） |
+| `motion` | `registered, hasStep` | 第 13 轮：edit 模式 ready 之后页面才调用 `vw.motion` 时补发 |
+| `ready` | `pageId, height, marks: [{ id, caps, page?, values? }], steps, screen, motion?, countedSteps?, hasStep?` | 文档加载完、修改单叠完。`height` 是整页内容高度（网页页面）；`marks[].page: true` 表示标在 `<html>` / `<body>` 上的整页背景（画布上点不中、不悬停，父页面在没选中东西时给「页面底色」控件，`values.background` 是当前底色）；`screen` 是当前停在第几屏（没给时 null） |
 | `screen-done` | `screen, applied` | 对 `screen` 的回复 |
 | `edit` | `target, kind, before, after` | 用户做了一个修改（运行时已经叠上）。父页面用 `upsertEdit` 记进 `project.pages[].edits`，走撤销 / 自动保存 |
-| `select` | `id|null, caps, rect:{x,y,width,height}` | 选中状态变化（rect 是页面坐标，父页面放浮动小控件用） |
+| `select` | `id|null, ids, caps, rect:{x,y,width,height}, values?` | 选中状态变化（rect 是页面坐标，父页面放浮动小控件用）。第 14–16 轮：`ids` 是全部选中的编号（多选时 `id` 是最后一个、`caps` 是并集、`rect` 是整体范围），两个以上时工具条显示对齐按钮 |
+| `edit-batch` | `edits: [{ target, kind, before, after }, …]` | 第 14 轮：一次操作改了多处（多选拖动 / 缩放、删除、对齐、多选改色）。父页面一起记进修改单，**一步撤销** |
+| `drag` | `on` | 第 14 轮：页面里开始 / 结束拖动；`on: true` 期间父页面在窗口上监听指针，用 `pointer` 转发拖出 iframe 的部分 |
 | `editing` | `on` | 进入 / 退出改字 |
 | `paste-image` | `name, type, buffer`（ArrayBuffer，transfer） | 用户在页面里粘贴了图片 |
-| `menu` | `id, x, y` | 右键一张用户贴的图（父页面弹玻璃菜单：删除） |
+| `menu` | `id, ids, x, y` | 右键选中的元素（第 14 轮起任何标了的元素都可以，不只是用户贴的图；`ids` 是全部选中的）。父页面弹玻璃菜单：删除 |
 | `step-done` | `nextStep, total` | |
 | `left` | — | `leave` 跑完 |
 | `height` | `height` | 内容高度变化（网页页面） |
 | `error` | `message, stack?, phase` | 动效 / 运行时错误（动效检查用） |
-| `key` | `key, code, metaKey, ctrlKey, shiftKey, altKey, id` | iframe 有焦点时键盘事件进不了父页面：非改字状态下的按键转发给父页面（撤销 / 重做、Delete 删贴图、Esc 取消选中） |
+| `key` | `key, code, metaKey, ctrlKey, shiftKey, altKey, id` | iframe 有焦点时键盘事件进不了父页面：非改字状态下的按键转发给父页面（撤销 / 重做、Delete 删除选中的、Esc 取消选中） |
 | `nav` | `dir` | play 模式里的点击 / 右键（父页面据此推进） |
 | `scroll` | `top, left` | 页面滚动了 |
 | `settled` | `ok, height, error?` | 对 `settle` 的回复 |
 
 ## 3. 运行时在 edit 模式里的交互（Word / PowerPoint 习惯）
+- 第 14–16 轮补充：点选跳过整页背景层和看不见的元素（`pointer-events: none` 的标记按几何补上）；Shift / Cmd 点选加选减选，页内空白或画布四周拖框多选，Cmd/Ctrl+A 全选；多选一起拖、方向键一起挪；一次操作（拖动、缩放、删除、对齐、多选改色）回一条 `edit-batch`，父页面记成一步撤销。
 - 只有带 `data-vw-id` 且能力非空的元素（和用户贴的图）能被碰；标在 `<html>` / `<body>` 上的整页背景例外（点空白永远是取消选中）。鼠标移上去：2px 实线蓝框（屏幕像素，按 uiScale 换算）；有 `text` 能力时指针是 I 形。
-- **单击**带 `text` 的元素：直接在点的位置出现光标进入改字（`contenteditable=plaintext-only` 不行——要保留行内格式，用 `contenteditable=true` 并在 `beforeinput` 里只允许插入文字、删除、换行 `<br>`；粘贴只取纯文字；拖选、双击选词、三击选段、Shift+方向键、Home/End、Ctrl/Cmd+A（只选本元素）、Ctrl/Cmd+Z/Y（改字期间由浏览器处理；退出后整条进父页面撤销）都由浏览器原生完成；选区底色用 `::selection` 明显一点；输入法组合期间不写 `edit`，`compositionend` 后才写）。
+- **第 13 轮起选中优先**（0b）：带 `text` 的元素第一下按下是选中整个文字框（框 + 把手；有 `move` 时按住即拖，方向键微调），**已选中时再点一下（按下松开没拖动）或双击未选中的文字**才在点的位置出现光标进入改字；Enter 进入改字并全选；点元素外面或 Esc 退出改字回到选中状态。下面这段是进入改字之后的手感（不变）：
+- 单击带 `text` 的元素（第 13 轮：指已选中后的那一下）：直接在点的位置出现光标进入改字（`contenteditable=plaintext-only` 不行——要保留行内格式，用 `contenteditable=true` 并在 `beforeinput` 里只允许插入文字、删除、换行 `<br>`；粘贴只取纯文字；拖选、双击选词、三击选段、Shift+方向键、Home/End、Ctrl/Cmd+A（只选本元素）、Ctrl/Cmd+Z/Y（改字期间由浏览器处理；退出后整条进父页面撤销）都由浏览器原生完成；选区底色用 `::selection` 明显一点；输入法组合期间不写 `edit`，`compositionend` 后才写）。
 - 改字期间元素固定不动。改字时按 **Esc 或点元素外面**退出：只移除 `contenteditable` 和选区，不重建任何节点、不重载 iframe（测试会核对 iframe 和里面图片节点的身份）。退出时回一条 `text` 修改（before = 第一次改前的 innerHTML/textContent）。
-- **移动**：带 `move` 的元素，选中后出现 2px 实线框和 8 个 12px 的把手（改字时虚线框）；带 `text` 的元素从**框线附近**（框内 10px、框外 6px，按屏幕像素）拖动，光标是 move，点在字上是改字；不带 `text` 的元素点哪都能拖。拖动叠加 `transform: translate(dx,dy)`（在元素原 transform 之外再包一层：用 CSS 变量 `--vw-dx/--vw-dy` + `translate` 属性，不覆盖原 `transform`）。网页页面拖到窗口上下边缘自动滚动。
-- **缩放**：带 `resize` 的元素，角上 4 个把手（Shift 不锁比例，图片默认锁比例）和左右 / 上下边把手，写 `style.width/height`。
+- **移动**：带 `move` 的元素，选中后出现 2px 实线框和 8 个 12px 的把手（改字时虚线框）；第 13 轮起带 `text` 的元素未在改字时点哪都能拖（和图片、色块一样），改字期间只有框外那一圈（6px）能拖；不带 `text` 的元素点哪都能拖。拖动叠加 `transform: translate(dx,dy)`（在元素原 transform 之外再包一层：用 CSS 变量 `--vw-dx/--vw-dy` + `translate` 属性，不覆盖原 `transform`）。网页页面拖到窗口上下边缘自动滚动。
+- **缩放**：带 `resize` 的元素，角上 4 个把手和左右 / 上下边把手，写 `style.width/height`。第 14 轮起：拖角一律等比，带 `text` 的元素字号按同一比例一起变（同时记 `fontSize`）；拖边只改宽或高；多选时整体等比缩放。
 - **颜色**：父页面控件（选中时在 iframe 上方浮一条小工具条：字号输入框、文字颜色、底色，按能力显示）发 `set`。
 - **裁切**：带 `crop` 的 `<img>` 双击进入裁切，沿用第 10 轮 `web/crop-tool.js` 的交互（拖框、框内拖图、滚轮缩放、Esc / 点外面 / 完成），实现搬进运行时；显示用 `object-view-box: inset(...)` + `object-fit: cover`（Chromium），叠在 `<img>` 自身上，不包裹节点；浏览器不支持 `object-view-box`（Safari、Firefox）或 boot 给了 `cropFallback` 时，`src` 不变，用 `object-position` 把图片自己的画面挪到框外，再把同一张图作为背景按同样的 cover 算法摆好（ResizeObserver 跟着尺寸重算），画面一致、元素框不变。缩略图的 `applyEditsToDocument(doc, edits, { cropFallback })` 同样支持。
-- **贴图**：`paste` 事件里有图片 → 回 `paste-image`；父页面存进项目 `assets/`，再发 `addImage`（放在当前可见区域中央，大图按页面缩到不超过页面的 60%）。用户贴的图默认能力 move / resize / crop，右键 → `menu`，Delete 键 → 父页面确认后 `removeImage`。
+- **贴图**：`paste` 事件里有图片 → 回 `paste-image`；父页面存进项目 `assets/`，再发 `addImage`（放在当前可见区域中央，大图按页面缩到不超过页面的 60%）。用户贴的图默认能力 move / resize / crop，右键 → `menu`；第 14 轮起 Delete / 右键「删除」不弹确认，直接删（可撤销，见 §2 的 `remove`）。
 - 右键菜单：改字期间不拦截（浏览器 / 桌面应用的原生菜单：剪切、复制、粘贴、全选；桌面应用在 `desktop/main.cjs` 里补 `context-menu` 和编辑菜单的 roles）。
 
 ## 4. play 模式
 - `vw.motion(handlers)` 登记；`__boot` 后在 `load` 时若 `steps > 0` 却没登记 `step` → `error`。
 - `ctx`：`root`、`signal`、`step`、`fast`、`animate`、`timer`、`importModule`（`/vendor/…` 走父页面同源 URL 或导出表；`../assets/…` 相对 base）。快进时 `animate` 立即 finish、`timer` 立即 resolve、`document.getAnimations()` 的有限动画 finish；anime.js 的 wrapper 照第 11 轮 `web/motion-runtime.js` 搬。
-- 放映壳（`web/playback.js`、放映页面、导出放映版的播放器）：当前页 iframe + 预加载下一页 iframe（隐藏）；点击 / 右键 / 方向键推进；上一页用 `fast: true` 重建。换页顺序是 **新页 `loaded` → 显示新页、销毁旧页 → 等 `ready` → 等父页面画两帧（刚显示的跨源 iframe 画出一帧后 Chromium 才把鼠标事件路由进去）**：Chromium 不推进 `visibility:hidden` 的 iframe 里的动画，`init` 里 `await ctx.animate(...)` 的页面若先等 `ready` 再显示会永远停在「正在准备放映…」（第 12 轮收尾在桌面应用里实测到）。已知限制：预加载的下一页在隐藏状态下已开始跑 `init`，用计时器而非动画的入场在显示前就走完了。
+- 放映壳（`web/playback.js`、放映页面、导出放映版的播放器）：当前页 iframe + 预加载下一页 iframe（隐藏）；点击 / 右键 / 方向键推进；上一页用 `fast: true` 重建。换页顺序是 **新页 `loaded` → 显示新页、销毁旧页 → `start`（第 13 轮：预加载的页用 `hold: true` 启动，init 要等这条消息才跑，所以入场动画是翻过去才开始）→ 等 `ready` → 等父页面画两帧（刚显示的跨源 iframe 画出一帧后 Chromium 才把鼠标事件路由进去）**：Chromium 不推进 `visibility:hidden` 的 iframe 里的动画，`init` 里 `await ctx.animate(...)` 的页面若先等 `ready` 再显示会永远停在「正在准备放映…」（第 12 轮收尾在桌面应用里实测到）。（第 12 轮的已知限制「预加载页提前跑 init」已在第 13 轮用 `hold` 解决，见 `docs/round13-contract.md` §4.2。）
 
 ## 4a. 导出进度（第 12 轮修正）
 - `exportProject({ …, onProgress({ current, total, label }), signal })`：三种导出都报进度；`signal` 取消时抛 `error.cancelled = true`。

@@ -14,3 +14,28 @@
 .hm-selbar {position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border:1px solid rgba(255,255,255,.4);border-radius:16px;background:var(--panel-bg,rgba(244,245,249,.95));backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 12px 44px #0003;color:var(--g-ink);font:600 13px/1 var(--g-font);white-space:nowrap}
 .hm-selbar[hidden] {display:none}
 .hm-selbar__count b {font-variant-numeric:tabular-nums}
+/* 第 13 轮：文件夹卡片（像访达的文件夹：大图标 + 名字 + 项目数），尺寸沿用 .hm-card */
+.hm-cell--folder > .hm-card {flex:none}
+.hm-folder__thumb {background:rgba(255,255,255,.35);color:#7a9fd8}
+.hm-folder__thumb .g-icon {width:38%;height:auto;max-height:70%;fill:rgba(140,175,230,.28)}
+.hm-cell--folder > .hm-card.is-drop-target,.hm-crumb.is-drop-target {outline:2px solid var(--accent,#6294ef);outline-offset:2px;background:rgba(110,150,230,.16)}
+.hm-folder-empty {margin:28px 6px;color:var(--g-ink-3);font-size:12.5px}
+/* 面包屑「项目总览 › 文件夹名」：第一级是可点的文字按钮 */
+.hm-crumbs {display:flex;align-items:center;gap:8px}
+.hm-crumb {border:0;background:none;padding:2px 6px;margin:-2px -6px;border-radius:8px;font:inherit;color:var(--g-ink-3);cursor:pointer}
+.hm-crumb:hover {color:var(--g-ink);background:rgba(255,255,255,.45)}
+.hm-crumb:focus-visible {outline:2px solid var(--g-focus);outline-offset:2px}
+.hm-crumbs__sep {color:var(--g-ink-3);font-weight:500}
+.hm-crumbs__here {min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* 卡片上的小标签：草稿页数、所在文件夹 */
+.hm-card__chips {display:flex;flex-wrap:wrap;gap:4px;max-width:55%}
+.hm-chip {display:inline-flex;align-items:center;gap:3px;height:19px;padding:0 6px;border-radius:6px;font-size:10.5px;font-weight:600;color:var(--g-ink-2);background:rgba(255,255,255,.6)}
+.hm-chip--draft {color:var(--g-pink-ink,#8a2f62);background:rgba(var(--g-pink-rgb,236,120,182),.22)}
+/* 设计卡片图标：母版开关左边，有卡片就常显 */
+.hm-cell > .hm-design {position:absolute;top:16px;right:56px}
+/* 拖文件进来：整块面板出现「松开导入」 */
+.hm-panel {position:relative}
+.hm-drop-hint {position:absolute;inset:6px;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:2px dashed var(--accent,#6294ef);border-radius:22px;background:rgba(235,242,255,.82);color:var(--g-ink);pointer-events:none}
+.hm-drop-hint span {display:inline-flex;align-items:center;gap:8px;font-size:18px;font-weight:700}
+.hm-drop-hint small {color:var(--g-ink-3);font-size:12px}
+.hm-panel.is-drop-import > .hm-drop-hint {display:flex}

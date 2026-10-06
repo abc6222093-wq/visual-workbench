@@ -10,7 +10,8 @@ const EDGE_SPEED = 24; // 贴到边缘（或拖出去）时每帧最多滚动的
 // 焦点在可输入的控件里时不接管 Delete / Backspace（勾选框、按钮不算输入）
 const typing = (el) => !!el && (el.isContentEditable || /^(TEXTAREA|SELECT)$/.test(el.tagName) || (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset)$/i.test(el.type)));
 
-export function mountHomeSelection(root, { onOpen = () => {}, onAction = () => {}, onChange } = {}) {
+// canMove：右键菜单多一项「移到…」（第 13 轮文件夹），选了调用 onAction('move', ids, { x, y })
+export function mountHomeSelection(root, { onOpen = () => {}, onAction = () => {}, onChange, canMove = false } = {}) {
   const doc = root.ownerDocument, win = doc.defaultView;
   const host = root.parentElement || root; // 选择条放在 .hm-panel 里
   const selected = new Set();
@@ -142,12 +143,15 @@ export function mountHomeSelection(root, { onOpen = () => {}, onAction = () => {
     const cell = cellOf(e.target); if (!cell) return;
     e.preventDefault();
     const id = cell.dataset.projectId, many = selected.has(id) && selected.size > 1, list = ids();
+    const move = canMove ? [{ label: many ? `把 ${list.length} 个项目移到…` : '移到…', action: 'move' }] : [];
     const items = many
-      ? [{ label: `删除 ${list.length} 个项目`, action: 'delete-selected' }, { separator: true }, { label: '取消选择', action: 'clear' }]
-      : [{ label: '打开', action: 'open' }, { separator: true }, { label: '重命名', action: 'rename' }, { label: '复制项目', action: 'duplicate' }, { label: '删除项目', action: 'delete' }];
+      ? [...move, { label: `删除 ${list.length} 个项目`, action: 'delete-selected' }, { separator: true }, { label: '取消选择', action: 'clear' }]
+      : [{ label: '打开', action: 'open' }, { separator: true }, { label: '重命名', action: 'rename' }, { label: '复制项目', action: 'duplicate' }, ...move, { label: '删除项目', action: 'delete' }];
+    const at = { x: e.clientX, y: e.clientY };
     closeMenu = showContextMenu({ x: e.clientX, y: e.clientY, items, document: doc, onAction: (a) => {
       closeMenu = null;
       if (a === 'open') onOpen(id);
+      else if (a === 'move') onAction('move', many ? list : [id], at);
       else if (a === 'delete-selected') onAction('delete', list);
       else if (a === 'clear') clear();
       else onAction(a, [id]);

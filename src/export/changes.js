@@ -10,8 +10,8 @@ import { annotateEdits, describeEdit, isUserImage } from '../../web/edits-model.
 import { captureProject } from './images.js';
 
 const DEVICE_LABEL = { desktop: '电脑端', mobile: '手机端' };
-const KIND_LABEL = { text: '文字', fontSize: '字号', move: '位置', resize: '尺寸', color: '文字颜色', background: '底色', crop: '裁切', addImage: '新增图片' };
-const KIND_ORDER = ['addImage', 'text', 'fontSize', 'color', 'background', 'move', 'resize', 'crop'];
+const KIND_LABEL = { text: '文字', fontSize: '字号', move: '位置', resize: '尺寸', color: '文字颜色', background: '底色', crop: '裁切', addImage: '新增图片', remove: '删除' };
+const KIND_ORDER = ['addImage', 'text', 'fontSize', 'color', 'background', 'move', 'resize', 'crop', 'remove'];
 const r2 = v => Math.round((Number(v) || 0) * 100) / 100;
 const pad2 = n => String(n).padStart(2, '0');
 
@@ -46,6 +46,7 @@ export function editRows(edit) {
       { label: '位置 x, y', before: '—', after: `${r2(after?.x)}, ${r2(after?.y)}` },
       { label: '尺寸', before: '—', after: `${r2(after?.width)}×${r2(after?.height)}` },
     ];
+    case 'remove': return [{ label: '删除', before: '在', after: '删掉了' }];
     default: return [{ label: kind, before: JSON.stringify(before ?? null), after: JSON.stringify(after ?? null) }];
   }
 }

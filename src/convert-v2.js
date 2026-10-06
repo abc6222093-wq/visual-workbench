@@ -1,7 +1,7 @@
 // 旧项目转换（第 12 轮）：格式 v2（元素列表 + motion.source）→ 格式 v3（每页一个 HTML 文件 + 修改单）。
 // 画法照第 11 轮 web/render.js（c9da515）逐项搬：位置、旋转、透明度、层级、混合 / 滤镜 / 遮罩 / 裁切路径、
 // 文字字体与描边投影、图片 fit / crop / tint、形状（rect / ellipse 用 CSS，line / polygon 用 SVG）、渐变、翻转、分组。
-// 标记：文字 text move color（用户可以改字、挪动、改色，和 v2 里一样能拖）；图片 move resize crop；有填充的矩形 / 椭圆和分组 move resize background（色块）；页面底色在 body 上，只标 background。
+// 标记：文字 text move resize color（用户可以改字、挪动、缩放、改色，和 v2 里一样能拖）；图片 move resize crop；有填充的矩形 / 椭圆和分组 move resize background（色块）；页面底色在 body 上，只标 background。
 // 动效：v2 的 motion.source 原样内嵌，包一层兼容层登记到 vw.motion（ctx.element(id) 仍可用）；transition 搬不了，写进 notes。
 // 流程：读 → 不是 v2 返回 { converted:false } → 自动存版 → 在内存里生成全部页面 → 写 pages/ → 最后写 project.json。
 // 任何一步失败都把已写的页面文件删掉、不写 project.json，抛中文错误。
@@ -113,7 +113,7 @@ function renderText(element, ctx, indent) {
   const style = styleAttr([...outerDecls(element), ...textDecls(element, ctx), ...lockedDecls(element)]);
   const body = escapeText(element.text ?? '');
   const inner = flipped(element) ? `<div style="${styleAttr(flipDecls(element))}">${body}</div>` : body;
-  return `${indent}<div ${marks(element, ['text', 'move', 'color'])} style="${style}">${inner}</div>`;
+  return `${indent}<div ${marks(element, ['text', 'move', 'resize', 'color'])} style="${style}">${inner}</div>`;
 }
 
 function renderImage(element, ctx, indent) {
@@ -375,6 +375,7 @@ export function convertV2Data(project, { now = new Date() } = {}) {
   out.assets = (project.assets || []).map(convertAsset);
   out.fonts = fonts.map(font => ({ ...font }));
   out.pages = pages;
+  out.marksRule = 2; // 标记已按第 2 版规则，打开时不再升级
   return { project: out, pages: outPages };
 }
 

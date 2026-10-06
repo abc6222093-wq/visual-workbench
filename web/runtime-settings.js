@@ -1,6 +1,13 @@
 // Runtime settings and cross-device gate use the existing glass dialog components.
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const SOURCE_LABELS = {cli:'命令行 --data-dir',env:'环境变量 VW_DATA_DIR',local:'本机设置',config:'仓库 workbench.config.json',explicit:'启动时指定'};
+/** 「常用字体库」一段：文件夹位置、每套装没装（GET /api/fonts 的响应体） */
+export function fontLibraryHtml(fonts) {
+  const families=Array.isArray(fonts?.families)?fonts.families:[];
+  const rows=families.map(f=>`<li data-font-key="${esc(f.key)}">${esc(f.family)}：${f.installed?'已安装':'没装'}</li>`).join('');
+  const missing=families.some(f=>!f.installed);
+  return `文件夹：<span style="overflow-wrap:anywhere">${esc(fonts?.dir||'')}</span>${rows?`<ul style="margin:6px 0;padding-left:1.2em">${rows}</ul>`:'<br>'}${missing?'没装的字体：让 agent 运行 npm run fonts -- install':''}`;
+}
 export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass, closeGlass}) {
   let settings, gate, pending, timer;
   async function check() {
@@ -24,8 +31,10 @@ export function mountRuntimeSettings({api, app, modal, closeModal, notice, glass
   }
   async function showSettings() {
     settings=await api('/api/settings');
-    modal(`<h2>数据文件夹</h2><p class="g-sheet__note">当前使用：<br><span style="overflow-wrap:anywhere">${esc(settings.dataDir)}</span><br>来自：${esc(SOURCE_LABELS[settings.source]||settings.source)}</p><form data-folder-form><label class="g-field g-field--stack"><span>粘贴这台电脑上的数据文件夹完整路径</span><input name="dataDir" required value="${esc(settings.dataDir)}"></label><p class="g-sheet__note">文件夹必须已有 projects、library/assets、library/fonts。这里只保存位置，不搬动文件。保存后需关闭工作台，再双击启动。<br>本机配置：${esc(settings.localConfigPath)}</p><p data-folder-result role="status"></p><div class="g-sheet__actions"><button type="button" class="g-btn" data-folder-close>关闭</button><button class="g-btn g-btn--prism">保存本机设置</button></div></form>`);
+    modal(`<h2>数据文件夹</h2><p class="g-sheet__note">当前使用：<br><span style="overflow-wrap:anywhere">${esc(settings.dataDir)}</span><br>来自：${esc(SOURCE_LABELS[settings.source]||settings.source)}</p><form data-folder-form><label class="g-field g-field--stack"><span>粘贴这台电脑上的数据文件夹完整路径</span><input name="dataDir" required value="${esc(settings.dataDir)}"></label><p class="g-sheet__note">文件夹必须已有 projects、library/assets、library/fonts。这里只保存位置，不搬动文件。保存后需关闭工作台，再双击启动。<br>本机配置：${esc(settings.localConfigPath)}</p><p data-folder-result role="status"></p><div class="g-sheet__actions"><button type="button" class="g-btn" data-folder-close>关闭</button><button class="g-btn g-btn--prism">保存本机设置</button></div></form><section data-font-library aria-label="常用字体库"><h3>常用字体库</h3><p class="g-sheet__note" data-font-library-body>正在读取…</p></section>`);
     document.querySelector('[data-folder-close]').onclick=closeModal;
+    const fontBody=document.querySelector('[data-font-library-body]');
+    api('/api/fonts').then(fonts=>{if(fontBody.isConnected)fontBody.innerHTML=fontLibraryHtml(fonts);}).catch(()=>{if(fontBody.isConnected)fontBody.textContent='读不到字体库信息。';});
     document.querySelector('[data-folder-form]').onsubmit=async e=>{e.preventDefault();const output=e.currentTarget.querySelector('[data-folder-result]');try{const result=await api('/api/settings','PUT',{dataDir:new FormData(e.currentTarget).get('dataDir')});output.textContent=result.message;}catch(error){output.textContent=error.message;}};
   }
   window.addEventListener('vw-session-blocked',()=>check().catch(()=>{}));

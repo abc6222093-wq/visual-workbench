@@ -18,10 +18,14 @@
     "export": "node src/cli/export.js",
     "export-changes": "node src/cli/export-changes.js",
     "edits": "node src/cli/edits.js",
-    "convert": "node src/cli/convert.js"
+    "convert": "node src/cli/convert.js",
+    "organize": "node src/cli/organize.js",
+    "annotations": "node src/cli/annotations.js",
+    "fonts": "node src/cli/fonts.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",
+    "pptxgenjs": "^4.0.1",
     "sharp": "^0.35.5",
     "subset-font": "^2.9.0"
   },

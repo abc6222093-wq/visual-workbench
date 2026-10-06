@@ -72,8 +72,11 @@ for (const [screen, expected, log] of [[1, ['0', '0'], ['init:true']], [2, ['1',
     await page.mouse.up();
     const move = await until(async () => (await msgs(page, 'edit')).find(e => e.kind === 'move' && e.target === 's1'), { label: '拖动修改' });
     assert.deepEqual(move.after, { dx: 40, dy: 20 });
-    // 改字 s0
+    // 改字 s0（第 13 轮选中优先：第一下选中，再点一下出光标）
     const s0 = await box(frame, 's0');
+    await page.mouse.click(s0.x + 60, s0.y + s0.height / 2);
+    await until(async () => (await msgs(page, 'select')).at(-1)?.id === 's0', { label: '第一下选中' });
+    await new Promise(r => setTimeout(r, 600));
     await page.mouse.click(s0.x + 60, s0.y + s0.height / 2);
     await until(() => frame.evaluate(() => document.activeElement?.dataset.vwId === 's0'), { label: '进入改字' });
     await page.keyboard.type('X');

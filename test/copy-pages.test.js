@@ -127,6 +127,31 @@ test('复制进已有项目：文件名冲突时改名并改写页面里的引�
   });
 });
 
+test('跨项目复制（第 13 轮拼页）：新页写 origin { project, page, copiedAt }，原有 url / file 保留；同项目复制、复制成新项目不写', () => {
+  withTmp((tmp) => {
+    const srcDir = join(tmp, 'src');
+    cpSync(SAMPLE, srcDir, { recursive: true });
+    const src = readJson(join(srcDir, 'project.json'));
+    src.id = 'other-deck';
+    src.pages[0].origin = { file: 'old/index.html', capturedAt: '2026-01-01T00:00:00.000Z' };
+    const destDir = join(tmp, 'dest');
+    cpSync(SAMPLE, destDir, { recursive: true });
+    const dest = readJson(join(destDir, 'project.json'));
+    const now = new Date('2026-10-06T01:02:03.000Z');
+    const out = copyPagesInto({ srcDir, src, pageIds: ['page_cover', 'page_two'], destDir, dest, now });
+    const [cover, two] = out.project.pages.slice(2);
+    assert.deepEqual(cover.origin, { file: 'old/index.html', capturedAt: '2026-01-01T00:00:00.000Z', project: 'other-deck', page: 'page_cover', copiedAt: now.toISOString() });
+    assert.deepEqual(two.origin, { project: 'other-deck', page: 'page_two', copiedAt: now.toISOString() });
+    writeFileSync(join(destDir, 'project.json'), JSON.stringify(out.project, null, 2));
+    const check = validateProject(destDir);
+    assert.equal(check.ok, true, JSON.stringify(check.errors));
+    const same = copyPagesInto({ srcDir: destDir, src: dest, pageIds: ['page_two'], destDir, dest });
+    assert.equal(same.project.pages.at(-1).origin, undefined);
+    const whole = copyPages({ srcProjectDir: SAMPLE, pages: [1], destProjectDir: join(tmp, 'projects', 'fresh'), newId: 'fresh' });
+    assert.equal(whole.project.pages[0].origin, undefined);
+  });
+});
+
 test('目标已存在、页码越界或重复、新编号不合法、源是旧格式时抛错，不留下目标目录', () => {
   withTmp((tmp) => {
     const dest = join(tmp, 'projects', 'x1');

@@ -1,5 +1,7 @@
 // 放映控制（第 12 轮）：当前页一个 play 模式的 iframe + 预加载下一页（隐藏）；点击 / 右键 / 方向键推进，上一页用 fast:true 重建（停在最后一步）。
-// 换页顺序：新页 loaded（文档加载完、修改单叠完）→ 显示新页、销毁旧页 → 等 ready（init 跑完）。
+// 换页顺序：新页 loaded（文档加载完、修改单叠完）→ 显示新页、销毁旧页 → start()（预加载的页这时才跑 init）→ 等 ready（init 跑完）→ 等两帧。
+// 预加载的下一页用 hold:true（第 13 轮 §4.2）：隐藏时只解析文档、加载资源，不跑 init，用计时器写的入场也是翻过去才开始。
+// 第一页和往回翻（fast）不用 hold。
 // 不能先等 ready 再显示：init 里 await 的入场动画在 visibility:hidden 的 iframe 里不会走（Chromium 不推进隐藏 iframe 的动画），会一直停在「正在准备放映…」。
 // 每页的步数来自 project.json 的 motion.steps。放映页 player.html、导出放映版都可以用它。
 //
@@ -27,12 +29,12 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
   const hideFrame = iframe => { iframe.style.position = 'absolute'; iframe.style.left = '0'; iframe.style.top = '0'; iframe.style.visibility = 'hidden'; iframe.setAttribute('aria-hidden', 'true'); iframe.tabIndex = -1; };
   const showFrame = iframe => { iframe.style.visibility = ''; iframe.removeAttribute('aria-hidden'); iframe.tabIndex = 0; };
 
-  async function makeFrame(i, { fast = false } = {}) {
+  async function makeFrame(i, { fast = false, hold = false } = {}) {
     const page = pages[i];
     const html = loadHtml ? await loadHtml(page) : undefined;
     let frame;
     frame = createPageFrame({
-      ...frameOptions, project, page, mode: 'play', container, html, edits: page.edits || [], fast, assetBase,
+      ...frameOptions, project, page, mode: 'play', container, html, edits: page.edits || [], fast, assetBase, hold: hold && !fast,
       onMessage: msg => onFrameMessage(frame, msg),
       onError: msg => onError?.({ pageId: page.id, phase: msg.phase, message: msg.message, stack: msg.stack })
     });
@@ -41,7 +43,7 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
   }
   function onFrameMessage(frame, msg) {
     if (!current || frame !== current.frame || destroyed) return;
-    if (msg.vw === 'nav') { if (msg.dir < 0) prev(); else next(); }
+    if (msg.vw === 'nav') { if (msg.dir < 0) prev(); else tap(msg.button === 'right' ? 'context' : 'click', { iframe: true }); }
     else if (msg.vw === 'key') handleKey(msg.key);
   }
   function state() {
@@ -68,13 +70,14 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
     showFrame(frame.iframe);
     try { frame.iframe.focus({ preventScroll: true }); } catch { /* 忽略 */ }
     old?.frame.destroy();
+    frame.start();
     const ready = await frame.ready;
     if (destroyed) { frame.destroy(); return; }
     await painted();
     if (destroyed) { frame.destroy(); return; }
     current = { frame, index: i, nextStep: ready?.nextStep ?? 0, total: ready?.steps ?? (pages[i].motion?.steps || 0) };
     if (preload && preload.index !== i + 1) { preload.frame.destroy(); preload = null; }
-    if (!preload && i + 1 < pages.length) preload = { index: i + 1, frame: await makeFrame(i + 1) };
+    if (!preload && i + 1 < pages.length) preload = { index: i + 1, frame: await makeFrame(i + 1, { hold: true }) };
     changed();
   }
   async function guard(fn) {
@@ -109,6 +112,23 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
     if (i < 0 || i >= pages.length) return Promise.resolve(false);
     return guard(() => leaveTo(i, i < index ? -1 : 1, atEnd));
   }
+  // 鼠标手势推进：同一手势只推进一次。WebKit 里右键 / Ctrl+单击 / 触控板双指点按会同时出 contextmenu 和 click，
+  // 页面 iframe 内外还可能各报一次（运行时转来的 nav + 父页面自己的事件）。contextmenu 之后 400ms 内的 click 都算同一手势；
+  // 带 Ctrl 或非左键的 click 不推进；同一次 click 在 iframe 内外各报一次时（80ms 内）只算一次。两次独立左键照常翻两页
+  let lastContext = -1e9, lastClick = null;
+  function tap(kind, { ctrlKey = false, button = 0, iframe = false } = {}) {
+    const now = performance.now();
+    if (kind === 'context') {
+      const dup = now - lastContext < 400;
+      lastContext = now;
+      return dup ? false : (next(), true);
+    }
+    if (ctrlKey || button !== 0 || now - lastContext < 400) return false;
+    if (lastClick && lastClick.iframe !== iframe && now - lastClick.t < 80) { lastClick = null; return false; }
+    lastClick = { t: now, iframe };
+    next();
+    return true;
+  }
   // 方向键 / 空格 / 回车翻页；网页页面的上下键、空格、翻页键留给页面滚动
   function handleKey(key) {
     const web = frameSize(project, pages[index]).kind === 'web';
@@ -126,5 +146,5 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
   }
   busy = true;
   const ready = show(index, { atEnd: startAtEnd }).finally(() => { busy = false; });
-  return { ready, next, prev, goTo, handleKey, getState: state, destroy, isBusy: () => busy, get current() { return current?.frame || null; } };
+  return { ready, next, prev, goTo, tap, handleKey, getState: state, destroy, isBusy: () => busy, get current() { return current?.frame || null; } };
 }

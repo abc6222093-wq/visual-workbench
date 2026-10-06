@@ -28,7 +28,7 @@ function pageNotes({ res, index, analysis, web, entry, now, skipped }) {
   }
   if (res.error) lines.push(`- 这一页导入失败：${res.error}；请参照原文件重做这一页`);
   const st = res.stats || { text: 0, image: 0 };
-  lines.push(`- 自动标记：可改的文字 ${st.text} 处（data-vw-id t1、t2…，能力 text move color），可裁切的图片 ${st.image} 张（i1、i2…，能力 move resize crop），纯色色块 ${st.block || 0} 个（b1、b2…，能力 move resize background），整页背景 ${st.background || 0} 处（bg1、bg2…，能力 background，只改颜色）；data-vw-origin 是原网页里的定位`);
+  lines.push(`- 自动标记：可改的文字 ${st.text} 处（data-vw-id t1、t2…，能力 text move resize color），可裁切的图片 ${st.image} 张（i1、i2…，能力 move resize crop），纯色色块 ${st.block || 0} 个（b1、b2…，能力 move resize background），整页背景 ${st.background || 0} 处（bg1、bg2…，能力 background，只改颜色）；data-vw-origin 是原网页里的定位`);
   const n = res.notes;
   if (n) {
     const kept = [];
@@ -82,7 +82,7 @@ export async function buildProject({ analysis, srcDir, projectDir, id, name, pre
     ...(skipped.length ? { description: `网页导入时跳过的网址：\n${skippedLines(skipped).join('\n')}` } : {}),
     kind: web ? 'web' : 'deck', createdAt: now, updatedAt: now,
     artboard: web ? { ...WEB_DEFAULT_ARTBOARD } : { preset, width, height },
-    assets: store.assets, fonts: store.fonts, pages,
+    assets: store.assets, fonts: store.fonts, pages, marksRule: 2,
   };
   writeFileSync(join(projectDir, 'project.json'), JSON.stringify(project, null, 2) + '\n');
 

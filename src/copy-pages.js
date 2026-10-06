@@ -98,9 +98,12 @@ function pickDestRel(srcAbs, destDir, rel, reserved) {
  * @param {boolean} [o.keepIds] 页面编号尽量不变（复制成新项目时）；否则总是新编号
  * @param {(rel: string, bytes: Buffer|null) => void} [o.onWrite] 写文件前回调（服务器记「自己写的」）
  * @param {(page: object) => string} [o.rename] 新页名
+ * @param {Date} [o.now] 跨项目复制时写进 origin.copiedAt 的时间
+ * @param {boolean} [o.markOrigin] 跨项目时写 origin { project, page, copiedAt }（默认写；整个新项目都由源项目复制而来时传 false）
  * @returns {{project: object, written: string[], pageIds: string[], copiedAssets: string[], copiedFonts: string[]}}
  */
-export function copyPagesInto({ srcDir, src, pageIds, destDir, dest, after = null, keepIds = false, onWrite, rename }) {
+export function copyPagesInto({ srcDir, src, pageIds, destDir, dest, after = null, keepIds = false, onWrite, rename, now = new Date(), markOrigin = true }) {
+  const copiedAt = now.toISOString();
   if (!Array.isArray(pageIds) || !pageIds.length) throw new Error('至少要选一页');
   if (new Set(pageIds).size !== pageIds.length) throw new Error('页面重复');
   const srcPages = pageIds.map(id => {
@@ -211,6 +214,8 @@ export function copyPagesInto({ srcDir, src, pageIds, destDir, dest, after = nul
       page.id = id;
       page.file = file;
       if (rename) page.name = rename(srcPage);
+      // 跨项目复制（拼页）：记下来源，「请统一风格」靠它知道哪些页是拼进来的；同项目复制不写
+      if (markOrigin && src.id && dest.id && src.id !== dest.id) page.origin = { ...(srcPage.origin && typeof srcPage.origin === 'object' ? srcPage.origin : {}), project: src.id, page: srcPage.id, copiedAt };
       page.edits = (srcPage.edits || []).map(e => {
         const copy = structuredClone(e);
         if (takenEdits.has(copy.id)) copy.id = newEditId();
@@ -274,7 +279,7 @@ export function copyPages({ srcProjectDir, pages, destProjectDir, newId, newName
   mkdirSync(destProjectDir);
   try {
     initProjectDir(destProjectDir);
-    const out = copyPagesInto({ srcDir: srcProjectDir, src, pageIds, destDir: destProjectDir, dest: empty, keepIds: true });
+    const out = copyPagesInto({ srcDir: srcProjectDir, src, pageIds, destDir: destProjectDir, dest: empty, keepIds: true, markOrigin: false });
     writeFileSync(join(destProjectDir, PROJECT_LAYOUT.file), JSON.stringify(out.project, null, 2) + '\n');
     const result = validateProject(destProjectDir, { structural: true });
     if (!result.ok) throw new Error(`新项目校验未通过：\n${formatResult(result)}`);

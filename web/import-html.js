@@ -1,6 +1,8 @@
 // 总览「导入 HTML / 网页」弹窗（第 12 轮：保留原网页，标出可改的文字和图片）：选项目类型（课件 / 网页）→ 选单个 .html / 文件夹 / .zip，或（网页）输入网址 →
 // 项目名称、画板（课件尽量从 HTML 自动识别；网页固定电脑端 1440×900 / 手机端 390×844 窗口）→ 分块读文件、上传建任务 →
 // 轮询进度（可取消）→ 完成摘要与「打开项目」。按页切开在服务端后台浏览器里做，这里只负责选文件和显示进度，工作台不会卡住。
+// 第 13 轮：filesFromDataTransfer 把拖进来的文件 / 文件夹 / .zip 变成 [{ path, file }]；openImportDialog 可以带预选文件（files）、
+// 直接开始（autoStart），或「导入为页面」（intoProject + after：插进已有项目，画板跟目标项目）。
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // 与新建项目的画板类型同一顺序
 export const IMPORT_PRESETS = [
@@ -37,6 +39,40 @@ export function guessArtboard(text) {
   return null;
 }
 
+const JUNK = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|desktop\.ini|\._[^/]*)(\/|$)/i;
+const fileOf = entry => new Promise((resolve, reject) => entry.file(resolve, reject));
+async function walkEntry(entry, prefix, out) {
+  const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+  if (JUNK.test(path)) return;
+  if (entry.isFile) { try { out.push({ path, file: await fileOf(entry) }); } catch {} return; }
+  if (!entry.isDirectory) return;
+  const reader = entry.createReader();
+  // readEntries 每次最多给一批（Chromium 100 个），读到空为止
+  for (;;) {
+    const batch = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
+    if (!batch.length) break;
+    for (const child of batch) await walkEntry(child, path, out);
+  }
+}
+/**
+ * 拖放进来的东西 → [{ path, file }]：单个 / 多个文件、文件夹（递归，path 带文件夹层级）、.zip。
+ * 去掉 .DS_Store、__MACOSX 等；没有 .html 也没有 .zip 时返回空数组（没有可导入的东西）。
+ * 注意：要在 drop 事件里同步调用（dataTransfer 过了事件就读不到了），这里第一步就同步取出全部条目。
+ */
+export async function filesFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return [];
+  const items = [...(dataTransfer.items || [])].filter(i => i.kind === 'file');
+  const entries = items.map(i => (typeof i.webkitGetAsEntry === 'function' ? i.webkitGetAsEntry() : null));
+  const loose = items.map(i => (entries[items.indexOf(i)] ? null : i.getAsFile?.())).filter(Boolean);
+  if (!items.length) loose.push(...(dataTransfer.files || []));
+  const out = [];
+  for (const entry of entries) if (entry) await walkEntry(entry, '', out);
+  for (const file of loose) if (!JUNK.test(file.name)) out.push({ path: file.webkitRelativePath || file.name, file });
+  if (out.some(e => /\.html?$/i.test(e.path))) return out;
+  const zip = out.find(e => /\.zip$/i.test(e.path));
+  return zip ? [{ path: zip.file.name || zip.path.split('/').pop(), file: zip.file }] : [];
+}
+
 function ensureStyle() {
   if (document.querySelector('link[data-import-html-css]')) return;
   const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/import-html.css'; link.dataset.importHtmlCss = ''; document.head.append(link);
@@ -46,13 +82,18 @@ function readChunk(blob) { return new Promise((resolve, reject) => { const fr = 
 /**
  * 打开导入弹窗。api(path, method, body)：工作台的 JSON 请求；modal(html) / closeModal()：工作台弹窗；
  * onDone(projectId)：用户点「打开项目」（弹窗已关闭）；onCreated(projectId)：项目建好时（可用来刷新总览）。
+ * files：预先选好的 [{ path, file }]（拖进来的，见 filesFromDataTransfer）；autoStart：直接开始导入；
+ * intoProject + after：「导入为页面」，插进这个项目的 after 页后面（null 放最后）；完成时立刻调 onCreated(projectId) 和 onDone(projectId, pageIds)，
+ * 弹窗留着显示「已导入 n 页」，用户点「关闭」。
  */
-export function openImportDialog({ api, modal, closeModal = () => {}, notice = () => {}, onDone = () => {}, onCreated = () => {}, pollMs = 500, fetchImpl = (...args) => fetch(...args) }) {
+export function openImportDialog({ api, modal, closeModal = () => {}, notice = () => {}, onDone = () => {}, onCreated = () => {}, pollMs = 500, fetchImpl = (...args) => fetch(...args), files = null, autoStart = false, intoProject = null, after = null }) {
   ensureStyle();
+  const into = typeof intoProject === 'string' && intoProject ? intoProject : null;
   const presetOptions = IMPORT_PRESETS.map(p => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join('');
-  const host = modal(`<h2>导入 HTML / 网页</h2><div class="import-html">
+  const host = modal(`<h2>${into ? '导入为页面' : '导入 HTML / 网页'}</h2><div class="import-html${into ? ' import-html--into' : ''}">
     <form class="import-html__form">
-      <fieldset class="import-html__kind"><legend>项目类型</legend>
+      <p class="g-sheet__note" data-note-into hidden>把 HTML 文件、文件夹或 .zip 按页切开，插到当前页后面：保留原网页，标出可改的文字和图片，画板和这个项目一样。原文件原样复制一份，不会被修改。</p>
+      <fieldset class="import-html__kind" data-kind-field><legend>项目类型</legend>
         <label><input type="radio" name="kind" value="deck" checked> 课件 / 海报</label>
         <label><input type="radio" name="kind" value="web"> 网页</label>
       </fieldset>
@@ -73,7 +114,7 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
         <label><input type="checkbox" name="desktop" checked> 电脑端（1440 × 900）</label>
         <label><input type="checkbox" name="mobile" checked> 手机端（390 × 844）</label>
       </fieldset>
-      <label class="g-field g-field--stack"><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：旧版课件"></label>
+      <label class="g-field g-field--stack" data-name-field><span>项目名称</span><input name="name" required maxlength="200" placeholder="例如：旧版课件"></label>
       <label class="g-field g-field--stack" data-deck-only><span>画板类型</span><select name="preset">${presetOptions}</select></label>
       <div class="g-sheet__pair" data-deck-only><label class="g-field g-field--stack"><span>宽度</span><input name="width" type="number" min="1" max="8000" value="1920" required></label><label class="g-field g-field--stack"><span>高度</span><input name="height" type="number" min="1" max="8000" value="1080" required></label></div>
       <p class="import-html__hint" data-hint></p>
@@ -92,7 +133,7 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
   const root = host?.querySelector?.('.import-html') || document.querySelector('.import-html');
   if (!root) return null;
   const $ = s => root.querySelector(s), form = $('.import-html__form'), f = form.elements;
-  const state = { files: [], phase: 'pick', jobId: null, cancelled: false, abort: null, projectId: null };
+  const state = { files: [], phase: 'pick', jobId: null, cancelled: false, abort: null, projectId: null, pageIds: null, into };
   for (const b of root.querySelectorAll('[data-close]')) b.onclick = () => closeModal();
   f.preset.onchange = () => { const p = IMPORT_PRESETS.find(p => p[0] === f.preset.value); f.width.value = p[2]; f.height.value = p[3]; };
   // 项目类型 / 来源切换：网页不用选画板；网址来源不用选文件
@@ -100,6 +141,14 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
   const urlList = () => f.urls.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const devices = () => ['desktop', 'mobile'].filter(d => f[d].checked);
   const refresh = () => {
+    if (into) {
+      // 导入为页面：不选项目类型、画板、名称（都跟目标项目），只选文件
+      for (const el of root.querySelectorAll('[data-web-only], [data-deck-only], [data-kind-field], [data-name-field], [data-note-web], [data-note-deck], [data-urls]')) el.hidden = true;
+      $('[data-note-into]').hidden = false; $('[data-files]').hidden = false; $('[data-chosen]').hidden = false; $('[data-hint]').textContent = '';
+      f.name.required = f.width.required = f.height.required = false;
+      form.querySelector('[data-start]').disabled = !state.files.length;
+      return;
+    }
     const { kind, source } = mode(), web = kind === 'web', urls = web && source === 'urls';
     for (const el of root.querySelectorAll('[data-web-only]')) el.hidden = !web;
     for (const el of root.querySelectorAll('[data-deck-only]')) el.hidden = web;
@@ -118,40 +167,58 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
     if (host && (!f.name.value.trim() || f.name.value === state.autoName)) f.name.value = state.autoName = host.slice(0, 200);
   };
   const setPreset = guess => {
-    if (mode().kind === 'web') { $('[data-hint]').textContent = ''; return; }
+    if (into || mode().kind === 'web') { $('[data-hint]').textContent = ''; return; }
     if (!guess) { $('[data-hint]').textContent = ''; return; } f.preset.value = guess.preset; f.width.value = guess.width; f.height.value = guess.height; $('[data-hint]').textContent = `已按 HTML 自动识别画板：${guess.reason}。可以改。`; };
   async function choose(kind, list) {
     const files = [...list]; if (!files.length) return;
     let entries, label, base;
     if (kind === 'folder') { entries = files.map(file => ({ path: file.webkitRelativePath || file.name, file })); base = (entries[0].path.split('/')[0]) || '文件夹'; label = `文件夹「${base}」，${files.length} 个文件`; }
     else { entries = [{ path: files[0].name, file: files[0] }]; base = files[0].name.replace(/\.(html?|zip)$/i, ''); label = `${kind === 'zip' ? '压缩包' : 'HTML 文件'}「${files[0].name}」`; }
+    return useEntries(kind, entries, label, base);
+  }
+  /** 预先选好的 [{ path, file }]（拖进来的）：按同样的规则定名称、猜画板。 */
+  function chooseEntries(list) {
+    const entries = (list || []).filter(e => e && e.file && typeof e.path === 'string' && e.path);
+    if (!entries.length) return null;
+    const name = entries[0].path.split('/').pop();
+    if (entries.length === 1 && /\.zip$/i.test(entries[0].path)) return useEntries('zip', entries, `压缩包「${name}」`, name.replace(/\.zip$/i, ''));
+    if (entries.length === 1 && !entries[0].path.includes('/')) return useEntries('file', entries, `HTML 文件「${name}」`, name.replace(/\.html?$/i, ''));
+    const tops = new Set(entries.map(e => e.path.split('/')[0]));
+    if (tops.size === 1 && entries.every(e => e.path.includes('/'))) { const top = [...tops][0]; return useEntries('folder', entries, `文件夹「${top}」，${entries.length} 个文件`, top); }
+    const first = entries.filter(e => /\.html?$/i.test(e.path)).sort((a, b) => a.path.split('/').length - b.path.split('/').length)[0];
+    return useEntries('folder', entries, `${entries.length} 个文件`, (first?.path.split('/').pop() || name).replace(/\.(html?|zip)$/i, ''));
+  }
+  async function useEntries(kind, entries, label, base) {
     const html = entries.filter(e => /\.html?$/i.test(e.path)).sort((a, b) => a.path.split('/').length - b.path.split('/').length || (/(^|\/)index\.html?$/i.test(b.path) ? 1 : 0) - (/(^|\/)index\.html?$/i.test(a.path) ? 1 : 0))[0];
-    if (kind !== 'zip' && !html) { notice('没有找到 .html 文件'); return; }
+    if (kind !== 'zip' && !html) { notice('没有找到 .html 文件'); return false; }
     const total = entries.reduce((n, e) => n + e.file.size, 0);
     state.files = entries;
     $('[data-chosen]').textContent = `已选择：${label}（${MB(total)} MB）`;
     if (!f.name.value.trim() || f.name.value === state.autoName) f.name.value = state.autoName = base.slice(0, 200);
     refresh();
-    setPreset(html ? guessArtboard(await html.file.slice(0, 2_000_000).text().catch(() => '')) : null);
+    setPreset(html && !into ? guessArtboard(await html.file.slice(0, 2_000_000).text().catch(() => '')) : null);
+    return true;
   }
   for (const kind of ['file', 'folder', 'zip']) f[kind].onchange = () => { choose(kind, f[kind].files); f[kind].value = ''; };
   const show = phase => { state.phase = phase; form.hidden = phase !== 'pick'; $('.import-html__run').hidden = phase !== 'run'; $('.import-html__done').hidden = phase !== 'done'; };
   const progress = (value, text) => { $('[data-fill]').style.width = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`; $('.import-html__bar').setAttribute('aria-valuenow', String(Math.round(value * 100))); if (text) $('[data-step]').textContent = text; };
   $('.import-html__bar').setAttribute('role', 'progressbar'); $('.import-html__bar').setAttribute('aria-valuemin', '0'); $('.import-html__bar').setAttribute('aria-valuemax', '100');
-  const finish = (html, projectId) => { show('done'); $('[data-summary]').innerHTML = html; const open = $('[data-open]'); open.hidden = !projectId; open.onclick = () => { closeModal(); onDone(projectId); }; };
+  const finish = (html, projectId) => { show('done'); $('[data-summary]').innerHTML = html; const open = $('[data-open]'); open.hidden = !projectId || !!into; open.onclick = () => { closeModal(); onDone(projectId); }; };
+  const cancelledText = into ? '已取消导入，项目没有改动。' : '已取消导入，没有创建项目。';
   const alive = () => root.isConnected;
   $('[data-abort]').onclick = async () => {
     state.cancelled = true; state.abort?.abort(); $('[data-abort]').disabled = true; progress(0, '正在取消…');
     if (state.jobId) { try { await api(`/api/import-html/jobs/${encodeURIComponent(state.jobId)}/cancel`, 'POST', {}); } catch {} }
-    finish('<p class="import-html__msg">已取消导入，没有创建项目。</p>', null);
+    finish(`<p class="import-html__msg">${cancelledText}</p>`, null);
   };
-  form.onsubmit = async event => {
-    event.preventDefault();
-    const { kind, source } = mode(), web = kind === 'web', byUrl = web && source === 'urls';
+  form.onsubmit = event => { event.preventDefault(); start(); };
+  async function start() {
+    if (state.phase !== 'pick') return;
+    const { kind, source } = into ? { kind: 'deck', source: 'files' } : mode(), web = kind === 'web', byUrl = web && source === 'urls';
     if (byUrl ? !urlList().length : !state.files.length) { notice(byUrl ? '请输入至少一个网址（每行一个）' : '请先选择 HTML 文件、文件夹或 .zip'); return; }
     if (web && !devices().length) { notice('请至少勾选电脑端或手机端中的一个'); return; }
     const name = f.name.value.trim(), width = Number(f.width.value), height = Number(f.height.value);
-    if (!name || (!web && (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1))) { notice(web ? '请填写项目名称' : '请填写项目名称和画板尺寸'); return; }
+    if (!into && (!name || (!web && (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1)))) { notice(web ? '请填写项目名称' : '请填写项目名称和画板尺寸'); return; }
     show('run'); state.cancelled = false;
     try {
       if (byUrl) {
@@ -165,7 +232,7 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
       }
       // 分块读文件、转 base64，每块之间让出主线程
       const total = state.files.reduce((n, e) => n + e.file.size, 0) || 1; let done = 0;
-      const parts = [web ? `{"name":${JSON.stringify(name)},"kind":"web","devices":${JSON.stringify(devices())},"files":[` : `{"name":${JSON.stringify(name)},"preset":${JSON.stringify(f.preset.value)},"width":${width},"height":${height},"files":[`];
+      const parts = [into ? `{"intoProject":${JSON.stringify(into)},"after":${JSON.stringify(after ?? null)},"files":[` : web ? `{"name":${JSON.stringify(name)},"kind":"web","devices":${JSON.stringify(devices())},"files":[` : `{"name":${JSON.stringify(name)},"preset":${JSON.stringify(f.preset.value)},"width":${width},"height":${height},"files":[`];
       for (const [i, entry] of state.files.entries()) {
         parts.push(`${i ? ',' : ''}{"path":${JSON.stringify(entry.path)},"data":"`);
         for (let at = 0; at < entry.file.size; at += CHUNK) {
@@ -189,7 +256,7 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
       if (state.cancelled || error.name === 'AbortError') return;
       finish(`<p class="import-html__msg import-html__msg--error">导入失败：${esc(error.message)}</p>`, null);
     }
-  };
+  }
   async function poll() {
     if (state.cancelled) { await api(`/api/import-html/jobs/${encodeURIComponent(state.jobId)}/cancel`, 'POST', {}).catch(() => {}); return; }
     // 轮询进度；弹窗被关掉时取消任务
@@ -199,13 +266,24 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
       const job = await api(`/api/import-html/jobs/${encodeURIComponent(state.jobId)}`);
       if (state.cancelled) return;
       progress(0.1 + 0.9 * (job.progress || 0), job.step);
+      if (job.state === 'done' && into) {
+        // 导入为页面：页面已经插进项目，马上告诉编辑器（刷新、选中新页）；弹窗留着显示结果
+        Object.assign(state, { projectId: job.projectId, pageIds: job.pageIds || [] });
+        finish(`<p class="import-html__msg" data-into-done>已导入 ${state.pageIds.length} 页</p>${job.summary?.message ? `<p class="import-html__msg import-html__msg--warn">${esc(job.summary.message)}</p>` : ''}<p class="g-sheet__note">原文件原样复制在项目的 import/ 文件夹里；每页备注是给 agent 的迁移说明。</p>`, job.projectId);
+        onCreated(job.projectId); onDone(job.projectId, state.pageIds); return;
+      }
       if (job.state === 'done') { state.projectId = job.projectId; onCreated(job.projectId); finish(summaryHtml(job.summary), job.projectId); return; }
       if (job.state === 'failed') throw new Error(job.error || '导入失败');
-      if (job.state === 'cancelled') { finish('<p class="import-html__msg">已取消导入，没有创建项目。</p>', null); return; }
+      if (job.state === 'cancelled') { finish(`<p class="import-html__msg">${cancelledText}</p>`, null); return; }
       await new Promise(r => setTimeout(r, pollMs));
     }
   }
   refresh();
+  // 预先选好的文件（拖进来的）；autoStart 时选好就开始
+  if (Array.isArray(files) && files.length) {
+    const ready = chooseEntries(files);
+    if (autoStart) Promise.resolve(ready).then(ok => { if (ok && alive()) start(); });
+  }
   return { root, state };
 }
 

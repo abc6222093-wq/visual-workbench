@@ -5,40 +5,124 @@
   "description": "一个项目 = 画板尺寸 + 资源登记 + 若干页面；每页是 agent 自由写的 HTML 文件（pages/<页面编号>.html），用户的修改记在该页的修改单 edits 里。人类可读说明见 docs/format.md。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "formatVersion", "id", "name", "createdAt", "updatedAt", "artboard", "assets", "fonts", "pages"],
+  "required": [
+    "format",
+    "formatVersion",
+    "id",
+    "name",
+    "createdAt",
+    "updatedAt",
+    "artboard",
+    "assets",
+    "fonts",
+    "pages"
+  ],
   "properties": {
-    "format": { "const": "visual-workbench/project" },
-    "formatVersion": { "const": 3 },
-    "id": { "$ref": "#/$defs/projectId" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "description": { "type": "string" },
-    "kind": { "description": "deck 课件 / 海报（默认）；web 网页（每页有自己的设备与尺寸）", "enum": ["deck", "web"] },
-    "folder": { "type": "string", "maxLength": 200, "description": "项目所在的文件夹名；空字符串或省略表示未分类" },
+    "format": {
+      "const": "visual-workbench/project"
+    },
+    "formatVersion": {
+      "const": 3
+    },
+    "id": {
+      "$ref": "#/$defs/projectId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string"
+    },
+    "kind": {
+      "description": "deck 课件 / 海报（默认）；web 网页（每页有自己的设备与尺寸）",
+      "enum": [
+        "deck",
+        "web"
+      ]
+    },
+    "folder": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "项目所在的文件夹名（一层，不嵌套；文件夹列表在数据目录 workbench-state.json 的 folders）；空字符串或省略表示未分类"
+    },
+    "marksRule": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "页面标记按第几版规则标的（工作台打开项目时按最新规则补标记后写上；agent 不用写）"
+    },
     "designCard": {
       "description": "设计卡片；没有写 null 或省略",
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "direction": { "type": "string" },
-            "concept": { "type": "string" },
-            "colors": { "type": "array", "items": { "$ref": "#/$defs/color" } },
-            "fonts": { "type": "array", "items": { "type": "string" } },
-            "traits": { "type": "array", "items": { "type": "string" } }
+            "direction": {
+              "type": "string"
+            },
+            "concept": {
+              "type": "string"
+            },
+            "colors": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/color"
+              }
+            },
+            "fonts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "traits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp",
+              "description": "卡片写的时间（可选）"
+            }
           }
         }
       ]
     },
-    "createdAt": { "$ref": "#/$defs/timestamp" },
-    "updatedAt": { "$ref": "#/$defs/timestamp" },
-    "artboard": { "$ref": "#/$defs/artboard" },
-    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset" } },
-    "fonts": { "type": "array", "items": { "$ref": "#/$defs/font" } },
-    "pages": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/page" } }
+    "createdAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "updatedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "artboard": {
+      "$ref": "#/$defs/artboard"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/asset"
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/font"
+      }
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    }
   },
-
   "$defs": {
     "projectId": {
       "description": "项目编号，同时是项目文件夹名。小写字母、数字、连字符。",
@@ -50,159 +134,836 @@
       "type": "string",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?(Z|[+-]\\d{2}:\\d{2})$"
     },
-    "pageId": { "type": "string", "pattern": "^page_[A-Za-z0-9_-]{1,64}$" },
-    "assetId": { "type": "string", "pattern": "^asset_[A-Za-z0-9_-]{1,64}$" },
-    "fontId": { "type": "string", "pattern": "^font_[A-Za-z0-9_-]{1,64}$" },
-    "editId": { "type": "string", "pattern": "^ed_[A-Za-z0-9_-]{4,}$" },
-    "markId": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+    "pageId": {
+      "type": "string",
+      "pattern": "^page_[A-Za-z0-9_-]{1,64}$"
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^asset_[A-Za-z0-9_-]{1,64}$"
+    },
+    "fontId": {
+      "type": "string",
+      "pattern": "^font_[A-Za-z0-9_-]{1,64}$"
+    },
+    "editId": {
+      "type": "string",
+      "pattern": "^ed_[A-Za-z0-9_-]{4,}$"
+    },
+    "markId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+    },
     "color": {
       "description": "#rrggbb 或 #rrggbbaa",
       "type": "string",
       "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
     },
-    "colorOrNull": { "oneOf": [{ "$ref": "#/$defs/color" }, { "type": "null" }] },
-    "px": { "type": "number" },
-    "positivePx": { "type": "number", "exclusiveMinimum": 0 },
-
+    "colorOrNull": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/color"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "px": {
+      "type": "number"
+    },
+    "positivePx": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
     "artboard": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["width", "height"],
+      "required": [
+        "width",
+        "height"
+      ],
       "properties": {
         "preset": {
           "description": "标签：slide-16x9 课件 1920×1080；web-desktop 1440×900；web-mobile 390×844；poster-a4；poster-a3；custom",
-          "enum": ["slide-16x9", "web-desktop", "web-mobile", "poster-a4", "poster-a3", "custom"]
+          "enum": [
+            "slide-16x9",
+            "web-desktop",
+            "web-mobile",
+            "poster-a4",
+            "poster-a3",
+            "custom"
+          ]
         },
-        "width": { "type": "integer", "minimum": 1 },
-        "height": { "type": "integer", "minimum": 1 }
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
-
     "asset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "file"],
+      "required": [
+        "id",
+        "kind",
+        "file"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/assetId" },
-        "kind": { "enum": ["image", "file"], "description": "image 图片；file 脚本、样式、视频等任何文件" },
-        "file": { "type": "string", "pattern": "^assets/([^/\\\\]+/)*[^/\\\\]+$", "description": "相对项目根，必须在 assets/ 下" },
-        "name": { "type": "string" },
-        "width": { "type": "integer", "minimum": 1 },
-        "height": { "type": "integer", "minimum": 1 },
-        "pendingLayout": { "type": "boolean" },
-        "addedAt": { "$ref": "#/$defs/timestamp" },
+        "id": {
+          "$ref": "#/$defs/assetId"
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "file"
+          ],
+          "description": "image 图片；file 脚本、样式、视频等任何文件"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^assets/([^/\\\\]+/)*[^/\\\\]+$",
+          "description": "相对项目根，必须在 assets/ 下"
+        },
+        "name": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pendingLayout": {
+          "type": "boolean"
+        },
+        "addedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
         "source": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "properties": {
-            "type": { "enum": ["upload", "paste", "library", "copied-from-project", "import"] },
-            "from": { "type": "string" }
+            "type": {
+              "enum": [
+                "upload",
+                "paste",
+                "library",
+                "copied-from-project",
+                "import"
+              ]
+            },
+            "from": {
+              "type": "string"
+            }
           }
         }
       }
     },
-
     "font": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "family", "file"],
+      "required": [
+        "id",
+        "family",
+        "file"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/fontId" },
-        "family": { "type": "string", "minLength": 1 },
-        "file": { "type": "string", "pattern": "^fonts/([^/\\\\]+/)*[^/\\\\]+$", "description": "相对项目根，必须在 fonts/ 下" },
-        "weight": { "oneOf": [{ "type": "integer", "minimum": 100, "maximum": 900 }, { "const": "variable" }] },
-        "style": { "enum": ["normal", "italic"] },
-        "license": { "type": "string" }
-      }
-    },
-
-    "page": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "name", "file"],
-      "properties": {
-        "id": { "$ref": "#/$defs/pageId" },
-        "name": { "type": "string" },
-        "file": { "type": "string", "pattern": "^pages/[^/\\\\]+\\.html$", "description": "固定为 pages/<页面编号>.html" },
-        "notes": { "type": "string" },
-        "motion": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["steps"],
-          "properties": { "steps": { "type": "integer", "minimum": 0 } }
+        "id": {
+          "$ref": "#/$defs/fontId"
         },
-        "edits": { "type": "array", "items": { "$ref": "#/$defs/edit" } },
-        "device": { "enum": ["desktop", "mobile"] },
-        "size": {
-          "type": "object", "additionalProperties": false, "required": ["width", "height"],
-          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        "family": {
+          "type": "string",
+          "minLength": 1
         },
-        "origin": {
-          "type": "object", "additionalProperties": false,
-          "properties": { "url": { "type": "string" }, "file": { "type": "string" }, "capturedAt": { "$ref": "#/$defs/timestamp" } }
+        "file": {
+          "type": "string",
+          "pattern": "^fonts/([^/\\\\]+/)*[^/\\\\]+$",
+          "description": "相对项目根，必须在 fonts/ 下"
+        },
+        "weight": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 900
+            },
+            {
+              "const": "variable"
+            }
+          ]
+        },
+        "style": {
+          "enum": [
+            "normal",
+            "italic"
+          ]
+        },
+        "license": {
+          "type": "string"
         }
       }
     },
-
-    "crop": {
-      "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"],
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "file"
+      ],
       "properties": {
-        "x": { "type": "number", "minimum": 0, "maximum": 1 },
-        "y": { "type": "number", "minimum": 0, "maximum": 1 },
-        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
-        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+        "id": {
+          "$ref": "#/$defs/pageId"
+        },
+        "name": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^pages/[^/\\\\]+\\.html$",
+          "description": "固定为 pages/<页面编号>.html"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "motion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "steps"
+          ],
+          "properties": {
+            "steps": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edit"
+          }
+        },
+        "device": {
+          "enum": [
+            "desktop",
+            "mobile"
+          ]
+        },
+        "size": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "width",
+            "height"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "origin": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string"
+            },
+            "capturedAt": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "project": {
+              "$ref": "#/$defs/projectId",
+              "description": "从哪个项目拼进来的（第 13 轮）"
+            },
+            "page": {
+              "$ref": "#/$defs/pageId",
+              "description": "来源项目里的页面编号"
+            },
+            "copiedAt": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        },
+        "draft": {
+          "type": "boolean",
+          "description": "草稿页：工作台从文案生成并改写的页面文件（第 13 轮）；agent 设计完去掉"
+        },
+        "annotations": {
+          "type": "array",
+          "description": "批注（第 13 轮）：用户在页面上画框写的一句话，只在编辑画布显示",
+          "items": {
+            "$ref": "#/$defs/annotation"
+          }
+        }
+      }
+    },
+    "crop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        }
       }
     },
     "box": {
-      "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"],
-      "properties": { "x": { "$ref": "#/$defs/px" }, "y": { "$ref": "#/$defs/px" }, "width": { "$ref": "#/$defs/px" }, "height": { "$ref": "#/$defs/px" } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "$ref": "#/$defs/px"
+        },
+        "y": {
+          "$ref": "#/$defs/px"
+        },
+        "width": {
+          "$ref": "#/$defs/px"
+        },
+        "height": {
+          "$ref": "#/$defs/px"
+        }
+      }
     },
     "sizeValue": {
-      "type": "object", "additionalProperties": false, "required": ["width", "height"],
-      "properties": { "width": { "$ref": "#/$defs/positivePx" }, "height": { "$ref": "#/$defs/positivePx" } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "$ref": "#/$defs/positivePx"
+        },
+        "height": {
+          "$ref": "#/$defs/positivePx"
+        }
+      }
     },
     "textValue": {
-      "type": "object", "additionalProperties": false, "required": ["html", "text"],
-      "properties": { "html": { "type": "string" }, "text": { "type": "string" } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "html",
+        "text"
+      ],
+      "properties": {
+        "html": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
     },
-
     "edit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "target", "kind", "before", "after"],
+      "required": [
+        "id",
+        "target",
+        "kind",
+        "before",
+        "after"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/editId" },
-        "target": { "$ref": "#/$defs/markId" },
-        "kind": { "enum": ["text", "fontSize", "move", "resize", "color", "background", "crop", "addImage"] },
-        "at": { "$ref": "#/$defs/timestamp" },
+        "id": {
+          "$ref": "#/$defs/editId"
+        },
+        "target": {
+          "$ref": "#/$defs/markId"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "fontSize",
+            "move",
+            "resize",
+            "color",
+            "background",
+            "crop",
+            "addImage",
+            "remove"
+          ]
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
         "before": true,
         "after": true
       },
       "allOf": [
-        { "if": { "properties": { "kind": { "const": "text" } } }, "then": { "properties": { "before": { "$ref": "#/$defs/textValue" }, "after": { "$ref": "#/$defs/textValue" } } } },
-        { "if": { "properties": { "kind": { "const": "fontSize" } } }, "then": { "properties": {
-          "before": { "type": "object", "additionalProperties": false, "required": ["fontSize"], "properties": { "fontSize": { "$ref": "#/$defs/positivePx" } } },
-          "after": { "type": "object", "additionalProperties": false, "required": ["fontSize"], "properties": { "fontSize": { "$ref": "#/$defs/positivePx" } } } } } },
-        { "if": { "properties": { "kind": { "const": "move" } } }, "then": { "properties": {
-          "before": { "$ref": "#/$defs/box" },
-          "after": { "type": "object", "additionalProperties": false, "required": ["dx", "dy"], "properties": { "dx": { "$ref": "#/$defs/px" }, "dy": { "$ref": "#/$defs/px" } } } } } },
-        { "if": { "properties": { "kind": { "const": "resize" } } }, "then": { "properties": { "before": { "$ref": "#/$defs/sizeValue" }, "after": { "$ref": "#/$defs/sizeValue" } } } },
-        { "if": { "properties": { "kind": { "const": "color" } } }, "then": { "properties": {
-          "before": { "type": "object", "additionalProperties": false, "required": ["color"], "properties": { "color": { "$ref": "#/$defs/colorOrNull" } } },
-          "after": { "type": "object", "additionalProperties": false, "required": ["color"], "properties": { "color": { "$ref": "#/$defs/color" } } } } } },
-        { "if": { "properties": { "kind": { "const": "background" } } }, "then": { "properties": {
-          "before": { "type": "object", "additionalProperties": false, "required": ["background"], "properties": { "background": { "$ref": "#/$defs/colorOrNull" } } },
-          "after": { "type": "object", "additionalProperties": false, "required": ["background"], "properties": { "background": { "$ref": "#/$defs/color" } } } } } },
-        { "if": { "properties": { "kind": { "const": "crop" } } }, "then": { "properties": {
-          "before": { "type": "object", "additionalProperties": false, "required": ["crop"], "properties": { "crop": { "oneOf": [{ "$ref": "#/$defs/crop" }, { "type": "null" }] } } },
-          "after": { "type": "object", "additionalProperties": false, "required": ["crop"], "properties": { "crop": { "oneOf": [{ "$ref": "#/$defs/crop" }, { "type": "null" }] } } } } } },
-        { "if": { "properties": { "kind": { "const": "addImage" } } }, "then": { "properties": {
-          "target": { "type": "string", "pattern": "^u_[A-Za-z0-9_-]+$" },
-          "before": { "type": "null" },
-          "after": { "type": "object", "additionalProperties": false, "required": ["asset", "x", "y", "width", "height"], "properties": {
-            "asset": { "$ref": "#/$defs/assetId" }, "x": { "$ref": "#/$defs/px" }, "y": { "$ref": "#/$defs/px" }, "width": { "$ref": "#/$defs/positivePx" }, "height": { "$ref": "#/$defs/positivePx" } } } } } }
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "text"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "$ref": "#/$defs/textValue"
+              },
+              "after": {
+                "$ref": "#/$defs/textValue"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "fontSize"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "fontSize"
+                ],
+                "properties": {
+                  "fontSize": {
+                    "$ref": "#/$defs/positivePx"
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "fontSize"
+                ],
+                "properties": {
+                  "fontSize": {
+                    "$ref": "#/$defs/positivePx"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "move"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "$ref": "#/$defs/box"
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "dx",
+                  "dy"
+                ],
+                "properties": {
+                  "dx": {
+                    "$ref": "#/$defs/px"
+                  },
+                  "dy": {
+                    "$ref": "#/$defs/px"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "resize"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "$ref": "#/$defs/sizeValue"
+              },
+              "after": {
+                "$ref": "#/$defs/sizeValue"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "color"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "color"
+                ],
+                "properties": {
+                  "color": {
+                    "$ref": "#/$defs/colorOrNull"
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "color"
+                ],
+                "properties": {
+                  "color": {
+                    "$ref": "#/$defs/color"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "background"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "background"
+                ],
+                "properties": {
+                  "background": {
+                    "$ref": "#/$defs/colorOrNull"
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "background"
+                ],
+                "properties": {
+                  "background": {
+                    "$ref": "#/$defs/color"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "crop"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "crop"
+                ],
+                "properties": {
+                  "crop": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/crop"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "crop"
+                ],
+                "properties": {
+                  "crop": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/crop"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "addImage"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "string",
+                "pattern": "^u_[A-Za-z0-9_-]+$"
+              },
+              "before": {
+                "type": "null"
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "asset",
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "asset": {
+                    "$ref": "#/$defs/assetId"
+                  },
+                  "x": {
+                    "$ref": "#/$defs/px"
+                  },
+                  "y": {
+                    "$ref": "#/$defs/px"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/positivePx"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/positivePx"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "remove"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "removed"
+                ],
+                "properties": {
+                  "removed": {
+                    "const": false
+                  }
+                }
+              },
+              "after": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "removed"
+                ],
+                "properties": {
+                  "removed": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
       ]
+    },
+    "annotationId": {
+      "type": "string",
+      "pattern": "^an_[A-Za-z0-9_-]{4,}$"
+    },
+    "annotation": {
+      "description": "批注：画框（没有 kind）或划线（kind: stroke）",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/annotationBox"
+        },
+        {
+          "$ref": "#/$defs/annotationStroke"
+        }
+      ]
+    },
+    "annotationBox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "x",
+        "y",
+        "width",
+        "height",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/annotationId"
+        },
+        "x": {
+          "$ref": "#/$defs/px"
+        },
+        "y": {
+          "$ref": "#/$defs/px"
+        },
+        "width": {
+          "$ref": "#/$defs/positivePx"
+        },
+        "height": {
+          "$ref": "#/$defs/positivePx"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "description": "画框批注（没有 kind）"
+    },
+    "annotationStroke": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "划线批注（第 15 轮）：用户用画笔画的线 / 箭头，点是页面 CSS 像素",
+      "required": [
+        "id",
+        "kind",
+        "points",
+        "color"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/annotationId"
+        },
+        "kind": {
+          "const": "stroke"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2000,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "arrow": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
     }
   }
 }
