@@ -971,6 +971,30 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
     edit.lastRect = '';
     return true;
   }
+  // 多选对齐（第 15 轮，参照 PowerPoint「对齐所选对象」）：按选中这几个元素的整体范围对齐，只挪能移动的；一次对齐 = 一步撤销
+  function alignSelection(mode) {
+    const E = edit;
+    if (E.sel.length < 2) return false;
+    const U = unionRect(E.sel, clientRect);
+    const list = [];
+    for (const el of E.sel.filter(movable)) {
+      const r = el.getBoundingClientRect(), m = moveOf(el);
+      let dx = 0, dy = 0;
+      if (mode === 'left') dx = U.x - r.left;
+      else if (mode === 'centerX') dx = U.x + U.width / 2 - (r.left + r.width / 2);
+      else if (mode === 'right') dx = U.x + U.width - r.right;
+      else if (mode === 'top') dy = U.y - r.top;
+      else if (mode === 'centerY') dy = U.y + U.height / 2 - (r.top + r.height / 2);
+      else if (mode === 'bottom') dy = U.y + U.height - r.bottom;
+      else return false;
+      if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) continue;
+      beforeOf(el, 'move');
+      list.push([el, 'move', { dx: r2((m.dx || 0) + dx), dy: r2((m.dy || 0) + dy) }]);
+    }
+    commitMany(list);
+    E.lastRect = '';
+    return true;
+  }
   // 删除：记进修改单（remove），画面上藏起来，不改 agent 的源码；可以撤销
   function removeSelection() {
     const E = edit;
@@ -1415,6 +1439,7 @@ img[data-vw-id] { -webkit-user-drag: none; }`;
         }
         // 父页面的菜单 / 键盘（焦点在父页面时）：删除选中的、方向键微调、全选、从画布外拖出的框选
         case 'remove': if (edit) removeSelection(); break;
+        case 'align': if (edit) alignSelection(m.mode); break;
         case 'pointer': { // 父页面转来的、发生在页面范围外的移动 / 松开（坐标已换成这个页面的视口坐标）
           if (!edit || !edit.drag) break;
           const ev = { clientX: Number(m.x) || 0, clientY: Number(m.y) || 0, pointerId: edit.drag.id, shiftKey: !!m.shiftKey, buttons: m.kind === 'up' ? 0 : 1, type: m.kind === 'up' ? 'pointerup' : 'forwarded', button: 0 };

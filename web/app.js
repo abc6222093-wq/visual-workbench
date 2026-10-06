@@ -346,7 +346,7 @@ const inspectorToggleButton = () => ibtn("toggle-inspector", S.inspectorCollapse
 const headTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "列表" : "时间轴", "layers");
 const toolGridButton = () => tbtn("page-grid", S.pageViewMode === "grid" ? "回到画布" : "网格", "maximize");
 const toolTimelineButton = () => tbtn("page-timeline", S.pageViewMode === "timeline" ? "页面列表" : "时间轴", "layers");
-const annotateButton = () => tbtn("annotate", "批注", "type", annotations.mode ? "is-on" : "", `aria-pressed="${annotations.mode ? "true" : "false"}"`);
+const annotateButton = () => tbtn("annotate", "批注", "type", annotations.mode ? "is-on" : "", `aria-pressed="${annotations.mode ? "true" : "false"}"`) + tbtn("annotate-pen", "画笔", "pen", annotations.pen ? "is-on" : "", `aria-pressed="${annotations.pen ? "true" : "false"}" title="在页面上画线、画箭头、圈出地方（给 agent 看）"`);
 const focusButton = () => ibtn("focus", S.focus ? "minimize" : "maximize", S.focus ? "退出专注模式" : "专注模式", `aria-pressed="${S.focus ? "true" : "false"}"`);
 const focusExitBar = () => `<div class="ed-bar ed-focus-exit" ${glassAttr("focus-exit:panel")}>${ibtn("focus", "minimize", "退出专注模式", 'aria-pressed="true"')}</div>`;
 const footHTML = () => `<div class="ed-screens" role="group" aria-label="画布显示第几屏" hidden></div><span class="ed-screens__note" data-screens-note hidden></span><span class="ed-spacer"></span><span class="ed-foot__size">${footText()}</span>`;
@@ -875,6 +875,8 @@ function markValue(kind) {
 function pageBgMark() { const marks = (F?.ready?.marks || []).filter((m) => m.page && (m.caps || []).includes("background")); return marks.find((m) => m.main) || marks[0] || null; }
 function quickbarHTML() {
   if (drafts.active) return drafts.toolbarHTML(esc);
+  const annot = annotations.toolbarHTML(esc); // 画笔模式 / 选中一条线：颜色、箭头
+  if (annot) return annot;
   const mark = S.mark;
   if (!mark) {
     const bg = pageBgMark();
@@ -886,13 +888,16 @@ function quickbarHTML() {
   if (caps.has("text")) { const size = markValue("fontSize"); parts.push(`<label class="g-field qt-field" title="字号（像素）"><span>字号</span><input type="number" min="1" max="2000" step="1" data-q="fontSize" value="${size == null ? "" : Math.round(Number(size) * 100) / 100}" aria-label="字号"></label>`); }
   if (caps.has("color")) parts.push(`<label class="g-field qt-field qt-color" title="文字颜色"><span>文字颜色</span><input type="color" data-q="color" value="${toHex(markValue("color"), "#000000")}" aria-label="文字颜色"></label>`);
   if (caps.has("background")) parts.push(`<label class="g-field qt-field qt-color" title="底色"><span>底色</span><input type="color" data-q="background" value="${toHex(markValue("background"), "#ffffff")}" aria-label="底色"></label>`);
+  // 多选：对齐按钮（按选中这几个的整体范围对齐）
+  if ((mark.ids || []).length >= 2) parts.unshift(`<div class="qt-align" role="group" aria-label="对齐">${ALIGN_BUTTONS.map(([mode, ic, label]) => `<button class="ed-tbtn qt-btn qt-icon" data-action="align" data-align="${mode}" title="${label}" aria-label="${label}">${icon(ic, 16)}</button>`).join("")}</div>`);
   if (isUserImage(mark.id) && (mark.ids || []).length <= 1) parts.push(`<button class="ed-tbtn qt-btn ed-tbtn--danger" data-action="delete-user-image" title="删除这张图">${icon("trash", 16)}<span>删除图片</span></button>`);
   return parts.length ? `<div class="qt-inner" data-mark="${esc(mark.id)}">${parts.join("")}</div>` : "";
 }
+const ALIGN_BUTTONS = [["left", "alignLeft", "左对齐"], ["centerX", "alignCenterX", "水平居中"], ["right", "alignRight", "右对齐"], ["top", "alignTop", "顶端对齐"], ["centerY", "alignCenterY", "垂直居中"], ["bottom", "alignBottom", "底端对齐"]];
 function refreshQuickToolbar() {
   const bar = $(".ed-quickbar");
   if (!bar) return;
-  const html = quickbarHTML(), key = drafts.active ? JSON.stringify(["draft", drafts.pageId, drafts.canMerge()]) : JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps]);
+  const html = quickbarHTML(), key = (annotations.pen || annotations.toolbarHTML(esc)) && !drafts.active ? JSON.stringify(["annot", html]) : drafts.active ? JSON.stringify(["draft", drafts.pageId, drafts.canMerge()]) : JSON.stringify([S.mark?.id || pageBgMark()?.id, S.mark?.caps, (S.mark?.ids || []).length >= 2]);
   const hide = !html;
   if (bar.hidden !== hide) { bar.hidden = hide; queueMicrotask(() => syncGlass(app)); }
   if (hide) { bar.replaceChildren(); bar._key = null; return; }
@@ -1386,8 +1391,16 @@ const EXPORT_KINDS = [
   ["html", "放映版 HTML", "一个网页文件，双击就能在浏览器里放映（带动效）", "play"],
   ["images", "每页图片", "每一页存成一张 PNG 图片", "image"],
   ["pdf", "PDF", "所有页面合成一个 PDF 文件", "copy"],
+  ["pptx-image", "PPTX 图片版", "每页一张高清图铺满幻灯片，和原稿一模一样，不能改字", "images"],
+  ["pptx-editable", "PPTX 可改字版", "背景和装饰是图片，文字是 PowerPoint 里能改的文本框（动画不搬）", "type"],
   ["handoff", "交接包（改动清单 + 对比图）", "改前 = agent 写的样子，改后 = 加上你的修改；给写前端的 agent", "link"],
 ];
+// 用途（参考 Canva 的「打印 PDF / 标准 PDF」）：放映版、图片、PDF、PPTX 都分两种
+const EXPORT_PURPOSES = [
+  ["web", "线上浏览版", "文件小，手机也能流畅打开（图片按显示尺寸压缩，字体只留用到的字）"],
+  ["print", "印刷版", "高清（按 300 dpi 换算的尺寸，图片不压缩），文件比较大"],
+];
+const exportRequest = (kind, purpose) => (kind.startsWith("pptx-") ? { kind: "pptx", pptxMode: kind.slice(5), purpose } : { kind, purpose });
 function formatBytes(n) {
   if (!Number.isFinite(n) || n < 1024) return `${Math.max(0, Math.round(n || 0))} B`;
   const units = ["KB", "MB", "GB"];
@@ -1396,12 +1409,22 @@ function formatBytes(n) {
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 function exportDialog() {
-  const kind = S.exportKind;
-  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
+  const kind = S.exportKind, purpose = S.exportPurpose || "web";
+  modal(`<h2>导出</h2><p class="g-sheet__note">导出的文件放在数据目录的 exports 文件夹里，不会改动项目</p><div class="g-sheet__list" role="radiogroup" aria-label="导出类型" id="export-kinds">${EXPORT_KINDS.map(([k, label, desc, ic]) => `<button class="g-row g-row--tall ${k === kind ? "selected" : ""}" data-action="export-kind" data-kind="${k}" role="radio" aria-checked="${k === kind}"><span class="g-row__icon">${icon(ic, 15)}</span><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><h3 class="ed-heading ex-purpose__head" ${kind === "handoff" ? "hidden" : ""}>用途</h3><div class="g-sheet__list ex-purpose" role="radiogroup" aria-label="用途" id="export-purposes" ${kind === "handoff" ? "hidden" : ""}>${EXPORT_PURPOSES.map(([k, label, desc]) => `<button class="g-row ${k === purpose ? "selected" : ""}" data-action="export-purpose" data-purpose="${k}" role="radio" aria-checked="${k === purpose}"><span class="g-row__text"><strong>${label}</strong><small>${desc}</small></span></button>`).join("")}</div><div class="g-sheet__actions">${gbtn("close", "取消")}${gbtn("export-start", "开始导出", { icon: "upload", cls: "g-btn--prism" })}</div>`);
+}
+function chooseExportPurpose(purpose) {
+  if (!EXPORT_PURPOSES.some(([k]) => k === purpose)) return;
+  S.exportPurpose = purpose;
+  document.querySelectorAll('[data-action="export-purpose"]').forEach((row) => {
+    const on = row.dataset.purpose === purpose;
+    row.classList.toggle("selected", on);
+    row.setAttribute("aria-checked", on ? "true" : "false");
+  });
 }
 function chooseExportKind(kind) {
   if (!EXPORT_KINDS.some(([k]) => k === kind)) return;
   S.exportKind = kind;
+  for (const node of document.querySelectorAll("#export-purposes, .ex-purpose__head")) node.hidden = kind === "handoff"; // 交接包不分用途
   document.querySelectorAll('[data-action="export-kind"]').forEach((row) => {
     const on = row.dataset.kind === kind;
     row.classList.toggle("selected", on);
@@ -1422,7 +1445,8 @@ function showExportProgress(sheet, { current, total, label } = {}) {
 }
 async function startExport(button) {
   if (S.exporting) return;
-  const kind = S.exportKind, label = EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind, sheet = button.closest(".g-sheet");
+  const kind = S.exportKind, sheet = button.closest(".g-sheet");
+  const label = `${EXPORT_KINDS.find(([k]) => k === kind)?.[1] || kind}${kind === "handoff" ? "" : `（${EXPORT_PURPOSES.find(([k]) => k === (S.exportPurpose || "web"))?.[1]}）`}`;
   S.exporting = true;
   const controls = [...sheet.querySelectorAll("button")];
   controls.forEach((c) => (c.disabled = true));
@@ -1457,7 +1481,8 @@ async function startExport(button) {
       // 等进度流连上（最多 1 秒）再发导出，开头几页的进度不会漏
       await new Promise((done) => { const t = setTimeout(done, 1000); stream.addEventListener("open", () => { clearTimeout(t); done(); }, { once: true }); stream.addEventListener("error", () => { clearTimeout(t); done(); }, { once: true }); });
     }
-    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(base, "POST", progressId ? { kind, progressId } : { kind });
+    const body = exportRequest(kind, S.exportPurpose || "web");
+    const result = kind === "handoff" ? await api(`${path()}/handoff`, "POST", {}) : await api(base, "POST", progressId ? { ...body, progressId } : body);
     if (!sheet.isConnected) notice(`${label}已导出到：${result.outDir}`);
     else if (kind === "handoff") handoffResult(result);
     else exportResult(result, label);
@@ -1485,10 +1510,10 @@ async function cancelExport(button) {
   try { await api(`${path()}/export/cancel/${id}`, "POST", {}); }
   catch (err) { button.disabled = false; notice(err.message); }
 }
-function exportResult({ outDir, files }, label) {
+function exportResult({ outDir, files, notes = [] }, label) {
   const target = files.length === 1 ? files[0].path : outDir;
   const total = files.reduce((n, f) => n + (f.bytes || 0), 0);
-  modal(`<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p><div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", runtimeSettings.revealLabel, { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`);
+  modal(`<h2>${esc(label)}已导出</h2><p class="g-sheet__note">保存在：<br><span id="export-path" style="overflow-wrap:anywhere;user-select:text">${esc(outDir)}</span></p><div class="g-sheet__list" id="export-files">${files.map((f) => `<div class="g-row g-row--static"><span class="g-row__icon">${icon(/\.(png|jpe?g|webp)$/i.test(f.name) ? "image" : "copy", 15)}</span><span class="g-row__text">${esc(f.name)}</span><span class="g-row__meta">${formatBytes(f.bytes)}</span></div>`).join("") || '<p class="g-sheet__empty">没有生成文件</p>'}</div><p class="g-sheet__note" style="margin:10px 0 0">共 ${files.length} 个文件 · ${formatBytes(total)}</p>${notes.map((n) => `<p class="g-sheet__note" data-export-note>${esc(n)}</p>`).join("")}<div class="g-sheet__actions">${gbtn("close", "关闭")}${gbtn("reveal", runtimeSettings.revealLabel, { icon: "library", cls: "g-btn--prism", extra: `data-path="${esc(target)}"` })}</div>`);
 }
 function handoffResult({ outDir, files = [], agentText = "" }) {
   S.handoffText = agentText;
@@ -1632,6 +1657,9 @@ function refreshPageViews() {
 
 // ---------- 点击 ----------
 app.addEventListener("click", async (e) => {
+  // 画笔工具条（web/annotations.js 的 toolbarHTML）：颜色、箭头、写一句话、删除
+  const pen = e.target.closest?.(".ed-quickbar [data-annot-color], .ed-quickbar [data-action^='annot-']");
+  if (pen) { annotations.toolbarAction(pen); return; }
   const b = e.target.closest("[data-action]");
   if (!b) return;
   const a = b.dataset.action, id = b.dataset.id;
@@ -1653,6 +1681,7 @@ app.addEventListener("click", async (e) => {
       case "redo": redo(); break;
       case "add-page": { const box = b.getBoundingClientRect(); addPageMenu(box.left, box.bottom + 6); break; }
       case "annotate": annotations.toggle(); break;
+      case "annotate-pen": annotations.togglePen(); break;
       case "draft-split": await drafts.split(); break;
       case "draft-merge": await drafts.mergeNext(); break;
       case "delete-user-image": if (S.mark) await deleteUserImage(S.mark.id); break;
@@ -1684,8 +1713,10 @@ app.addEventListener("click", async (e) => {
         refreshLayout();
         break;
       case "focus": setFocus(!S.focus); break;
+      case "align": F?.frame?.send({ vw: "align", mode: b.dataset.align }); break;
       case "export": exportDialog(); break;
       case "export-kind": chooseExportKind(b.dataset.kind); break;
+      case "export-purpose": chooseExportPurpose(b.dataset.purpose); break;
       case "copy-handoff": await navigator.clipboard.writeText(S.handoffText || ""); notice("已复制，开新的 agent 对话时直接粘贴"); break;
       case "export-start": await startExport(b); break;
       case "export-cancel": await cancelExport(b); break;
@@ -1827,7 +1858,12 @@ const annotations = createAnnotations({
   scale: () => S.scale || 1,
   changed,
   notice,
-  onMode: (on) => { const b = $('.ed-tools [data-action="annotate"]'); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); } if (on) clearMark(); },
+  onMode: (on) => {
+    const b = $('.ed-tools [data-action="annotate"]'); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); }
+    const pen = $('.ed-tools [data-action="annotate-pen"]'); if (pen) { pen.setAttribute("aria-pressed", String(annotations.pen)); pen.classList.toggle("is-on", annotations.pen); }
+    if (on || annotations.pen) clearMark();
+    refreshQuickToolbar();
+  },
 });
 const projectManagement = createProjectManagement({ api, confirm: confirmAction, modal, closeModal, notice, refresh: home, onOpen: open, onDeleted: async () => {} });
 const homeUI = createHome({ api, S, app, $, esc, shell, head, modal, closeModal, confirm: confirmAction, notice, open, home, glassAttr, homeThumbs, liven, syncGlass, projectManagement: () => projectManagement });

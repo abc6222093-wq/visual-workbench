@@ -294,3 +294,7 @@ html .ed-work > .ed-quickbar[hidden] { display: none; }
 .vw-show__hint { position: fixed; right: 16px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); font: 13px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; opacity: 0; transition: opacity .4s; pointer-events: none; }
 .vw-show__hint.show { opacity: 1; }
 .ed-marquee-shield { position: absolute; inset: 0; z-index: 29; cursor: default; }
+/* 第 15 轮：多选对齐按钮（工具条里一组图标按钮） */
+.ed-quickbar .qt-align { display: flex; gap: 2px; flex: none; }
+.ed-quickbar .qt-icon { width: 30px; padding: 0; justify-content: center; }
+.ex-purpose__head {margin:14px 0 6px}
