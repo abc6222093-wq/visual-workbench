@@ -107,8 +107,13 @@ export function draftOperation({ dir, project, body: b, after, writer }) {
   if (b.op === 'draft-split') {
     const page = draftPage(project, b.pageId);
     const before = blocksOf(b.blocksBefore), rest = blocksOf(b.blocksAfter);
-    const id = newPageId(new Set(project.pages.map((p) => p.id)));
-    const next = blankPageEntry({ id, name: `${page.name || '草稿'}（续）`, project });
+    // 撤销合并时客户端带回原来那一页的编号、名称、备注（nextId 没被占用才用）
+    const taken = new Set(project.pages.map((p) => p.id));
+    const id = typeof b.nextId === 'string' && /^page_[0-9a-f]{8}$/.test(b.nextId) && !taken.has(b.nextId) ? b.nextId : newPageId(taken);
+    const nextName = typeof b.nextName === 'string' && b.nextName.trim() ? b.nextName.slice(0, 200) : `${page.name || '草稿'}（续）`;
+    const next = blankPageEntry({ id, name: nextName, project });
+    if (typeof b.nextNotes === 'string' && b.nextNotes.trim()) next.notes = b.nextNotes;
+    if (b.pageNotes === null) delete page.notes; else if (typeof b.pageNotes === 'string') page.notes = b.pageNotes;
     if (page.device) { next.device = page.device; if (page.size) next.size = structuredClone(page.size); }
     next.draft = true;
     writer.write(page.file, draftPageHtml({ name: page.name, blocks: before, artboard: project.artboard }));
@@ -121,7 +126,8 @@ export function draftOperation({ dir, project, body: b, after, writer }) {
     const next = project.pages[project.pages.indexOf(page) + 1];
     if (!next) throw fail(400, '这是最后一页，没有下一页可以合并');
     if (next.draft !== true) throw fail(400, '下一页不是草稿页，不能合并');
-    const blocks = [...readDraftBlocks(dir, page), ...readDraftBlocks(dir, next)];
+    // blocks：撤销分页 / 重做合并时客户端给出合并后的确切内容
+    const blocks = b.blocks !== undefined ? blocksOf(b.blocks) : [...readDraftBlocks(dir, page), ...readDraftBlocks(dir, next)];
     writer.write(page.file, draftPageHtml({ name: page.name, blocks, artboard: project.artboard }));
     const notes = [page.notes, next.notes].filter((n) => typeof n === 'string' && n.trim()).join('\n\n');
     if (notes) page.notes = notes; else delete page.notes;

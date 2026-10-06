@@ -81,6 +81,8 @@ window.addEventListener('keydown', event => {
   if (playback.handleKey(event.key)) event.preventDefault();
 });
 // 点在画面外（黑边）也推进；画面内的点击由页面运行时转过来
-viewport.addEventListener('click', event => { if (event.target === viewport || event.target === stage) playback?.next(); });
-viewport.addEventListener('contextmenu', event => { event.preventDefault(); if (event.target === viewport || event.target === stage) playback?.next(); });
+// 同一手势（右键、Ctrl+单击、触控板双指点按）只推进一次：去重在 playback.tap 里
+const outside = event => event.target === viewport || event.target === stage;
+viewport.addEventListener('click', event => { if (outside(event)) playback?.tap('click', event); });
+viewport.addEventListener('contextmenu', event => { event.preventDefault(); if (outside(event)) playback?.tap('context'); });
 start();

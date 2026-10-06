@@ -54,6 +54,52 @@ export function createHome(deps) {
     },
   });
 
+  // 总览「复制给 agent」：请整理文件夹走服务端 brief；从零开始做设计在这里拼（取 /api/health、/api/settings）
+  async function copyHomeBrief(intent) {
+    const text = intent === "organize" ? (await api("/api/brief/organize")).text : await scratchBrief();
+    await navigator.clipboard.writeText(text);
+    notice("已复制，开新的 agent 对话时直接粘贴");
+  }
+  async function scratchBrief() {
+    const [{ repoDir }, { dataDir }] = await Promise.all([api("/api/health"), api("/api/settings")]);
+    const win = /^[A-Za-z]:\\|\\\\/.test(dataDir || repoDir || "");
+    const j = (...xs) => xs.join(win ? "\\" : "/");
+    const d = new Date(), today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const proj = j(dataDir, "projects", "<项目编号>");
+    return [
+      "请在「视觉工作台」里从零开始做一个新设计。",
+      "",
+      `工作台代码文件夹：${repoDir}`,
+      `数据目录：${dataDir}`,
+      `规则：${j(repoDir, "CLAUDE.md")}（Claude Code）或 ${j(repoDir, "AGENTS.md")}（Codex）`,
+      `格式：${j(repoDir, "docs", "format.md")}、${j(repoDir, "schema", "project.schema.json")}（格式 v3：每页一个 HTML 文件）`,
+      `示例：${j(repoDir, "examples", "sample-deck")}（照着写）`,
+      "",
+      "新项目：",
+      `- 放在 ${proj}（project.json + pages/ + assets/ + fonts/）；编号用小写字母、数字和短横线`,
+      `- 项目名按「日期 + 简短名」，日期用今天，例如「${today} 水曜会话课表」`,
+      "",
+      "开工前：",
+      "1. 读规则文件、format.md 和 schema，不要凭记忆；看一遍示例项目。",
+      "",
+      "做页面：",
+      "- 每页 pages/<页面编号>.html 是完整的 HTML 文档，样式、脚本随意；库复制进 assets/，用 ../assets/x.js 引用。",
+      "- 不引用任何网络地址（字体、CDN、图片、外部链接都不行）。",
+      "- 标出用户可以动的地方：data-vw-id=\"<稳定编号>\" data-vw=\"<能力>\"。文字 text move resize color；图片 move resize crop；纯色色块 move resize background；整页背景只标 background。",
+      "- data-vw-id 一页内唯一，以后改版面也不改。",
+      `- 常用字体（站酷小薇、思源宋体 SC / JP、思源黑体 SC / JP）从 ${j(dataDir, "library", "fonts", "<key>")} 复制进项目 fonts/ 并登记（key：zcool-xiaowei、source-han-serif-sc、source-han-serif-jp、source-han-sans-sc、source-han-sans-jp），不要上网下载。`,
+      "- 有动效用 vw.motion({ init, step, leave, dispose }) 登记，并在 project.json 的 pages[].motion.steps 写点击次数；没有动效省略 motion。",
+      "",
+      "做完：",
+      "1. 在 project.json 写设计卡片 designCard（方向、概念、配色、字体与字号、特征、at），格式见 docs/format.md §17。",
+      `2. 在 ${repoDir} 里运行，两项都要通过：`,
+      `   npm run validate -- ${proj}`,
+      `   npm run check-motion -- ${proj}`,
+      "",
+      "设计内容：",
+    ].join("\n");
+  }
+
   async function show() {
     const [list, folderInfo] = await Promise.all([
       api("/api/projects"),
@@ -88,7 +134,7 @@ export function createHome(deps) {
     };
     const count = `${here ? view.projects.length : list.length} 个项目`;
     const restoreBtn = backup?.at ? `<button class="g-btn" data-action="organize-restore">退回整理前（${esc(formatBackupTime(backup.at))}）</button>` : "";
-    const actions = `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button>${restoreBtn}<button class="g-btn" data-action="folder-new">新建文件夹</button><button class="g-btn" data-action="import-html">导入 HTML / 网页</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`;
+    const actions = `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button>${restoreBtn}<button class="g-btn" data-action="home-brief">复制给 agent</button><button class="g-btn" data-action="folder-new">新建文件夹</button><button class="g-btn" data-action="import-html">导入 HTML / 网页</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`;
     const header = `<header class="ed-top"><div class="ed-titlebox">${breadcrumbHtml(here, esc)}<span class="ed-count ed-count--bg">${count}</span></div><div class="ed-spacer"></div>${actions}</header>`;
     const empty = here && !view.projects.length ? `<p class="hm-folder-empty">这个文件夹是空的。在项目上右键「移到…」，或把项目卡片拖到文件夹上。</p>` : "";
     shell(
@@ -238,6 +284,11 @@ export function createHome(deps) {
       case "folder-root": await enterFolder(""); return true;
       case "folder-new": folders.create(); return true;
       case "organize-restore": await folders.restore(S.homeBackup); return true;
+      case "home-brief": {
+        const box = b.getBoundingClientRect();
+        showContextMenu({ x: box.left, y: box.bottom + 6, items: [{ action: "scratch", label: "从零开始做设计" }, { action: "organize", label: "请整理文件夹" }], onAction: (intent) => copyHomeBrief(intent).catch((err) => notice(err.message)) });
+        return true;
+      }
       case "design-card": {
         const item = S.homeProjects.find((p) => p.id === id);
         if (item) openDesignCard({ project: { id: item.id, name: item.name, designCard: item.designCard ?? item.project?.designCard }, modal, closeModal, notice });

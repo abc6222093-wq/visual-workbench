@@ -1,7 +1,8 @@
 // 草稿页编辑（第 13 轮，docs/round13-contract.md §5）：当前页是草稿页时，在画布上盖一层和页面同尺寸、同缩放、
 // 同样式（draftCss）的 contenteditable 表单。每块一个 <p data-vw-level>。用户的改动算成新的 blocks，
 // 600ms 不动后发 op 'draft-update'，服务端重写草稿页文件。分页（Ctrl/Cmd + Enter）发 'draft-split'，
-// 和下一页合并发 'draft-merge'。撤销 / 重做：每页一份块历史，撤销就发 draft-update 回到上一份。
+// 和下一页合并发 'draft-merge'。撤销 / 重做：每页一份块历史，撤销就发 draft-update 回到上一份；
+// 分页、合并另记一份操作栈（ops），这一页的文字撤销到头（分页 / 合并之后的起点）再撤就撤回那次分页 / 合并。
 import { DRAFT_LEVELS, draftCss, blocksFromDraftHtml, normalizeBlocks, isDraftLevel } from './draft-model.js';
 
 const SAVE_DELAY = 600;
@@ -44,6 +45,9 @@ export function createDraftEditor(deps) {
   const { getProject, getPageId, holder, viewOf, fetchText, pagesOp, request, notice = () => {}, onState = () => {}, selectPage = () => {}, status = () => {}, touch = () => {} } = deps;
   const histories = new Map(); // pageId → { stack: [{ blocks, caret }], index }
   const pending = new Set(); // 正在发的保存
+  const ops = { undo: [], redo: [], busy: false }; // 分页 / 合并：{ kind, pageId, … , hist: 操作前相关页的块历史 }
+  const cloneHist = h => (h ? { stack: h.stack.slice(), index: h.index } : null);
+  const freshHist = blocks => ({ stack: [{ blocks, caret: null }], index: 0 });
   let cur = null; // { pageId, file, layer, main, timer, lastSaved, loading, token, caret, saving, again }
   let loadToken = 0;
   let focusOnLoad = null;
@@ -160,6 +164,7 @@ export function createDraftEditor(deps) {
   function remember(blocks, caret = null) {
     const h = history(cur.pageId);
     if (h.index >= 0 && same(h.stack[h.index].blocks, blocks)) return;
+    if (h.index >= 0) ops.redo.length = 0; // 新的文字改动：分页 / 合并的重做作废（第一次读进来不算）
     h.stack.splice(h.index + 1);
     h.stack.push({ blocks, caret });
     if (h.stack.length > 100) h.stack.shift();
@@ -213,7 +218,7 @@ export function createDraftEditor(deps) {
     if (!active()) return false;
     if (cur.timer) { clearTimeout(cur.timer); cur.timer = null; remember(readBlocks(), selectionPos()?.s || null); }
     const h = history(cur.pageId), to = h.index + dir;
-    if (to < 0 || to >= h.stack.length) return true;
+    if (to < 0 || to >= h.stack.length) { if ((dir < 0 ? ops.undo : ops.redo).length && !ops.busy) structural(dir).catch(err => notice(err.message)); return true; }
     h.index = to;
     const snap = h.stack[to];
     render(snap.blocks);
@@ -309,12 +314,15 @@ export function createDraftEditor(deps) {
     if (!before.length) before = [{ level: 'body', text: '' }];
     clearTimeout(state.timer); state.timer = null;
     while (pending.size) await Promise.all([...pending]);
+    if (cur === state) remember(blocks);
+    const hist = cloneHist(histories.get(state.pageId));
     const out = await pagesOp('draft-split', { pageId: state.pageId, blocksBefore: normalizeBlocks(before), blocksAfter: normalizeBlocks(after) });
     if (!out) return;
     state.lastSaved = before;
-    if (cur === state) remember(before);
-    touch(state.file);
     const next = out.added?.[0] || (out.pageIds || [])[0];
+    if (next) record({ kind: 'split', pageId: state.pageId, newId: next, blocks: normalizeBlocks(blocks), before: normalizeBlocks(before), after: normalizeBlocks(after), hist: { [state.pageId]: hist } });
+    histories.set(state.pageId, freshHist(before));
+    touch(state.file);
     if (next) { focusOnLoad = { b: 0, o: 0 }; selectPage(next); }
     else reload();
   }
@@ -322,11 +330,58 @@ export function createDraftEditor(deps) {
     if (!active()) return;
     const state = cur;
     await flush();
+    const pages = project().pages, i = pages.findIndex(p => p.id === state.pageId), nx = pages[i + 1];
+    // 记下合并前两页的样子（撤销时按原编号、名称、备注拆回去）
+    let a = null, b = null;
+    try { a = normalizeBlocks(blocksFromDraftHtml(await fetchText(pages[i]))); b = normalizeBlocks(blocksFromDraftHtml(await fetchText(nx))); } catch {}
+    if (cur === state) a = normalizeBlocks(readBlocks());
+    const hist = { [state.pageId]: cloneHist(histories.get(state.pageId)), [nx?.id]: cloneHist(histories.get(nx?.id)) };
     const out = await pagesOp('draft-merge', { pageId: state.pageId });
     if (!out) return;
+    if (a && b && nx) {
+      const merged = [...a, ...b];
+      record({ kind: 'merge', pageId: state.pageId, nextId: nx.id, nextName: nx.name, nextNotes: nx.notes ?? null, pageNotes: pages[i].notes ?? null, a, b, merged, hist });
+      histories.set(state.pageId, freshHist(merged));
+    } else histories.delete(state.pageId);
+    histories.delete(nx?.id);
     touch(state.file);
     if (cur === state) focusOnLoad = cur.caret?.s || null;
     deps.refresh?.(); // 页面栏少了一页；时间戳变了，sync 会重新读这一页
+  }
+  function record(op) { ops.undo.push(op); if (ops.undo.length > 50) ops.undo.shift(); ops.redo.length = 0; }
+  // 撤销 / 重做一次分页或合并：服务端照原样拆回 / 并回，块历史换回操作前 / 后的那份，跳到相关的页
+  async function structural(dir) {
+    const from = dir < 0 ? ops.undo : ops.redo, to = dir < 0 ? ops.redo : ops.undo, op = from.at(-1);
+    if (!op || ops.busy) return;
+    ops.busy = true;
+    onState();
+    try {
+      await flush();
+      const pages = project()?.pages || [], i = pages.findIndex(p => p.id === op.pageId);
+      const otherId = op.kind === 'split' ? op.newId : op.nextId;
+      const hasPair = i >= 0 && pages[i].draft && pages[i + 1]?.id === otherId && pages[i + 1]?.draft;
+      const merging = (op.kind === 'split') === (dir < 0); // 撤销分页 / 重做合并 = 并起来
+      if (merging ? !hasPair : (i < 0 || !pages[i].draft || pages.some(p => p.id === otherId))) { from.pop(); notice('页面已经变了，这一步撤不回来了'); return; }
+      const now = { [op.pageId]: cloneHist(histories.get(op.pageId)), [otherId]: cloneHist(histories.get(otherId)) };
+      const out = merging
+        ? await pagesOp('draft-merge', { pageId: op.pageId, blocks: op.kind === 'split' ? op.blocks : op.merged })
+        : await pagesOp('draft-split', op.kind === 'split'
+          ? { pageId: op.pageId, blocksBefore: op.before, blocksAfter: op.after, nextId: op.newId }
+          : { pageId: op.pageId, blocksBefore: op.a, blocksAfter: op.b, nextId: op.nextId, nextName: op.nextName, nextNotes: op.nextNotes ?? '', pageNotes: op.pageNotes });
+      if (!out) return;
+      from.pop();
+      if (op.kind === 'split' && !merging) op.newId = out.added?.[0] || out.pageIds?.[0] || op.newId;
+      if (op.kind === 'merge' && !merging) op.nextId = out.added?.[0] || out.pageIds?.[0] || op.nextId;
+      for (const [id, h] of Object.entries(op.hist)) { if (h) histories.set(id, h); else histories.delete(id); }
+      op.hist = now;
+      to.push(op);
+      const target = op.kind === 'split' && !merging ? op.newId : op.pageId; // 重做分页跳到新页，其余回到原页
+      const file = pageOf(op.pageId)?.file;
+      if (file) touch(file);
+      if (cur && cur.pageId === target) { focusOnLoad = cur.caret?.s || null; reload(); }
+      else { focusOnLoad = { b: 0, o: 0 }; selectPage(target); }
+      deps.refresh?.();
+    } finally { ops.busy = false; onState(); }
   }
   function canMerge() {
     const pages = project()?.pages || [], i = pages.findIndex(p => p.id === cur?.pageId);
@@ -423,11 +478,11 @@ export function createDraftEditor(deps) {
     get pageId() { return cur?.pageId || null; },
     get level() { return cur?.level || null; },
     get overflow() { return active() ? cur.overflow ?? 0 : null; },
-    get canUndo() { if (!active()) return false; const h = history(cur.pageId); return h.index > 0 || !!cur.timer; },
-    get canRedo() { if (!active()) return false; const h = history(cur.pageId); return h.index < h.stack.length - 1; },
+    get canUndo() { if (!active()) return false; const h = history(cur.pageId); return h.index > 0 || !!cur.timer || (!ops.busy && ops.undo.length > 0); },
+    get canRedo() { if (!active()) return false; const h = history(cur.pageId); return h.index < h.stack.length - 1 || (!ops.busy && ops.redo.length > 0); },
     get main() { return cur?.main || null; },
     levelLabel,
     destroy() { unmountKeep(); },
-    reset() { unmountKeep(); histories.clear(); },
+    reset() { unmountKeep(); histories.clear(); ops.undo.length = 0; ops.redo.length = 0; },
   };
 }

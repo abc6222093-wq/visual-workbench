@@ -65,6 +65,8 @@ function startPlayback() {
   return playback.ready;
 }
 const advance = () => playback?.next();
+// 鼠标手势推进走 playback.tap：同一手势（右键 / Ctrl+单击 / 双指点按）只推进一次
+const tap = (kind, event) => playback?.tap(kind, event);
 const back = () => { if (playback && playback.getState().index === 0) say('已经是第一页'); else playback?.prev(); };
 
 const shield = document.createElement('div');
@@ -79,17 +81,18 @@ function touchDevice() {
 let down = null;
 // 发生在页面 iframe 上的事件由页面运行时转成 nav（Chromium 不会把它们冒到这里；WebKit 可能会），这里不重复推进
 const onFrame = event => event.target && event.target.tagName === 'IFRAME';
-stage.addEventListener('pointerdown', event => { if (event.button > 0 || onFrame(event)) return; down = { x: event.clientX, y: event.clientY }; });
+stage.addEventListener('pointerdown', event => { if (event.button > 0 || onFrame(event)) return; down = { x: event.clientX, y: event.clientY, ctrlKey: event.ctrlKey }; });
 stage.addEventListener('pointercancel', () => { down = null; });
 stage.addEventListener('pointerup', event => {
   if (!down) return;
   const dx = event.clientX - down.x;
   const dy = event.clientY - down.y;
+  const ctrlKey = down.ctrlKey;
   down = null;
   if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) { if (dx < 0) advance(); else back(); }
-  else if (Math.hypot(dx, dy) < 24) advance();
+  else if (Math.hypot(dx, dy) < 24) tap('click', { ctrlKey });
 });
-stage.addEventListener('contextmenu', event => { event.preventDefault(); if (!onFrame(event)) advance(); });
+stage.addEventListener('contextmenu', event => { event.preventDefault(); if (!onFrame(event)) tap('context'); });
 addEventListener('keydown', event => {
   if (event.metaKey || event.ctrlKey || event.altKey || !playback) return;
   if (event.key === 'f' || event.key === 'F') {

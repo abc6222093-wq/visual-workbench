@@ -43,7 +43,7 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
   }
   function onFrameMessage(frame, msg) {
     if (!current || frame !== current.frame || destroyed) return;
-    if (msg.vw === 'nav') { if (msg.dir < 0) prev(); else next(); }
+    if (msg.vw === 'nav') { if (msg.dir < 0) prev(); else tap(msg.button === 'right' ? 'context' : 'click', { iframe: true }); }
     else if (msg.vw === 'key') handleKey(msg.key);
   }
   function state() {
@@ -112,6 +112,23 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
     if (i < 0 || i >= pages.length) return Promise.resolve(false);
     return guard(() => leaveTo(i, i < index ? -1 : 1, atEnd));
   }
+  // 鼠标手势推进：同一手势只推进一次。WebKit 里右键 / Ctrl+单击 / 触控板双指点按会同时出 contextmenu 和 click，
+  // 页面 iframe 内外还可能各报一次（运行时转来的 nav + 父页面自己的事件）。contextmenu 之后 400ms 内的 click 都算同一手势；
+  // 带 Ctrl 或非左键的 click 不推进；同一次 click 在 iframe 内外各报一次时（80ms 内）只算一次。两次独立左键照常翻两页
+  let lastContext = -1e9, lastClick = null;
+  function tap(kind, { ctrlKey = false, button = 0, iframe = false } = {}) {
+    const now = performance.now();
+    if (kind === 'context') {
+      const dup = now - lastContext < 400;
+      lastContext = now;
+      return dup ? false : (next(), true);
+    }
+    if (ctrlKey || button !== 0 || now - lastContext < 400) return false;
+    if (lastClick && lastClick.iframe !== iframe && now - lastClick.t < 80) { lastClick = null; return false; }
+    lastClick = { t: now, iframe };
+    next();
+    return true;
+  }
   // 方向键 / 空格 / 回车翻页；网页页面的上下键、空格、翻页键留给页面滚动
   function handleKey(key) {
     const web = frameSize(project, pages[index]).kind === 'web';
@@ -129,5 +146,5 @@ export function createPlayback({ project, container, pageId, startAtEnd = false,
   }
   busy = true;
   const ready = show(index, { atEnd: startAtEnd }).finally(() => { busy = false; });
-  return { ready, next, prev, goTo, handleKey, getState: state, destroy, isBusy: () => busy, get current() { return current?.frame || null; } };
+  return { ready, next, prev, goTo, tap, handleKey, getState: state, destroy, isBusy: () => busy, get current() { return current?.frame || null; } };
 }
