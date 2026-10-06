@@ -1,35 +1,35 @@
-# 当前移交 · 第 13 轮（整理和复用）
+# 当前移交 · 第 14 轮（基本操作补齐）
 
-分支 `claude/round13-organize`（基于已合并第 12 轮的 `main` 531390c；**没有合并进 main**，等用户验收后统筹窗口安排）。规则见 `CLAUDE.md`（= `AGENTS.md`），格式见 `docs/format.md`（v3，本轮加 §15–§19），内部约定见 `docs/round12-contract.md` 和 `docs/round13-contract.md`（§14 是做完后的最终形状），桌面应用见 `docs/desktop.md`。
+分支 `claude/round13-organize`（第 13 轮的分支上继续；**没有合并进 main**）。规则见 `CLAUDE.md`（= `AGENTS.md`），格式见 `docs/format.md`，内部约定见 `docs/round12-contract.md`、`docs/round13-contract.md`，桌面应用见 `docs/desktop.md`。本轮只补基本操作，不加新功能。
 
 ## 本轮做了什么
-- **第 12 轮验收没通过的两处 + 一处遗留**：
-  - 0a「第 N 屏」一定看得见：屏按钮挪到画布下方一排大标签；没写 `motion.steps` 但有 `vw.motion` 的页由工作台在隐藏 iframe 里快进数出屏数并提醒「请 agent 在 project.json 写上 motion.steps」；只有页面自带动画、没有分屏的页写一句说明；页面栏显示「N 屏」。用户以前看不到的原因：她的两个项目（44 页导入的旧 HTML、11 页 v2 课件）没有任何页写 `steps`、也没有页用 `vw.motion`，旧 HTML 的动画是页面自己的 CSS / JS 动画，而旧按钮只在 `steps ≥ 1` 时出现，且在工具条里很小。
-  - 0b 文字：第一下点击选中整个文字框（框 + 把手，按住就拖、方向键微调），已选中再点一下（或双击）才出光标；改字期间手感不变。
-  - 0c 放映预加载的下一页用 `hold` 启动，翻过去才跑 `init`，入场动画从头播；导出的放映版同样。
-- **草稿分页**（`web/draft-model.js` 纯逻辑 + `src/drafts.js` + `web/drafts.js`）：从文案新建 / 添加草稿页 / 拖入 .md .txt；草稿页 = 工作台生成并改写的页面文件（`draft: true`）；画布上像 Word 一样改、层级下拉、Cmd+Enter 分页、合并、属性栏「文字超出页面 N px」；「复制给 agent → 请设计」。
-- **拼页 + 统一风格**：「添加页面 → 从其他项目…」；跨项目复制写 `origin.project / page / copiedAt`；「复制给 agent → 请统一风格」附本项目设计卡片。
-- **设计卡片**：总览图标 + 弹窗 + 「复制给 agent」；规则文档写明每次做完设计必写；示例项目已有一张。
-- **文件夹与命名**：`workbench-state.json` 的 `folders`；总览新建 / 重命名 / 删除 / 拖放 / 右键移到… / 面包屑；`npm run organize`（begin / list / folder / move / rename / restore）+ `organize-backup.json` + 总览「退回整理前」；「复制给 agent → 请整理文件夹」。
-- **批注**：`pages[].annotations`，画布工具条「批注」拖框写字，只在编辑画布显示（导出文件的内嵌项目数据也去掉了 annotations）；`npm run annotations`；三种 brief 每页末尾列批注。
-- **拖进来导入**：总览拖 HTML / 文件夹 / zip 直接导入成新项目；编辑器页面栏拖入或右键「导入为页面…」插进当前项目（原文件进 `import/<时间>/`）。
-- **本地常用字体库**：`src/fonts/catalog.js` 五套官方直链（简体是 Adobe 仓库的 CN 文件）；`npm run fonts -- install / status`；已经装进用户的数据目录 `library/fonts/`（62 MB，含许可证，清单 `fonts.json`）；编辑画布 / 放映页 / 导出渲染页注入同名字族的完整字体（Chromium 分段回退，实测字集外的字落到完整字体）；导出放映版按最终文字子集化嵌入；「数据文件夹」弹窗显示字体库状态。
-- 文档：PLAN（路线图、「整理和复用」一节）、CLAUDE/AGENTS、README、format.md、两份内部约定、import-html.md。
-- 桌面应用已重新制作并安装（0.2.0，壳没变），`--smoke` 通过；真机验证脚本 60 项全部正常。
+- **编辑画布的基本操作**（`web/page-runtime.js` 编辑部分重写，逻辑照第 11 轮 `web/editor-hit-test.js`、`element-operations.js`、`app.js` 的 selectCanvas / startMarquee / nudge 搬过来）：
+  - 点选：从这一点上从上到下找有标记的元素；整页背景层（只带底色能力、铺满页面）当空白；看不见的（透明）不算；原页面写了 `pointer-events:none` 的元素按几何位置补上（取最小的框）。
+  - 多选：Shift / Cmd + 点加选减选；页内空白处拖框选（完全框住才选）；画布四周空白处拖框选（父页面盖透明挡板画框，坐标换算后交给运行时）；Cmd+A 全选；外层和里层都选中时只留外层。
+  - 移动：单个、多个一起拖；方向键 1px、Shift 10px（多选一起）。
+  - 缩放：拖角等比（文字字号一起等比，Shift 自由）；拖左右边改宽度（文字高度跟内容走时不钉高度）；拖上下边改高度；多选拖角整体等比。先叠尺寸再量实际的框、用位移把对边钉住（流式布局也对）。元素伸出页面时把手收进页面里；很窄的一边把手挪到框外。
+  - 删除：Delete / Backspace / 右键「删除」，修改单记 `remove`（`before {removed:false}` → `after {removed:true}`，画面上 `visibility:hidden !important`），不改源码；贴的图直接去掉 addImage。不再弹确认。改字时 Backspace 只删字。
+  - 一次操作改的几处（多选拖动、缩放的尺寸 + 位置 + 字号、一起删除、裁切）用 `edit-batch` 一条消息告诉父页面，撤销一步撤回。
+  - 拖动中鼠标出了页面范围：运行时发 `drag on/off`，父页面把外面的移动 / 松开转进来（消息 `pointer`）。
+  - 工具条：多选时字号 / 颜色 / 底色一起改（`set` 带 `targets`）；「页面底色」改看得见的那层整页背景（marks 里的 `main`）。
+- **旧项目标记自动升级**（`src/upgrade-marks.js`，打开项目时在 `GET /api/projects/<id>` 里做）：`marksRule` 不到 2 时先自动存版（「按新规则补标记前自动存版」），再按新规则补：文字 `text move resize color`、图片 `move resize crop`、色块 `move resize background`、整页背景只 `background`，没标的纯色色块补标 `b<n>`；只在源码上改 / 插属性，不动设计。导入和 v2 转换同步新规则并写 `marksRule: 2`。打开项目时界面丢掉这个项目的页面文本缓存（总览缩略图取的是升级前的）。
+- 草稿页：去掉「文字超出页面 N px」（只留虚线）；分页、合并进撤销 / 重做（`web/drafts.js` 操作栈，`src/drafts.js` 可选参数）。
+- 放映：同一手势只推进一次（`playback.tap`；运行时 Ctrl+单击不发 click 的 nav）；桌面应用里点「放映」在应用窗口内全屏放映（`playInApp`），Esc 或放完再点一下回到编辑器原来的页面，不再开系统浏览器。
+- 总览「复制给 agent」：从零开始做设计 / 请整理文件夹。
+- 规则文档：CLAUDE / AGENTS / format.md 写明文字、图片、色块都标 move resize，修改单 `remove` 的含义。
+- Mac 桌面应用重新制作并装进 `~/Applications`（壳代码没变，仍是 0.2.0）。
 
 ## 已知限制与未做
-- 草稿页的「分页」「合并」不进撤销历史（撤销只管页内文字）；正在保存草稿时同时改页名，页名可能被服务端返回覆盖（`pagesOp` 原有问题）。
-- 「导入为页面」不支持网址来源（界面没给入口，服务端支持）。
-- 放映时 `motion.steps` 缺失的页仍按 0 步放映（数屏只用于编辑画布和提醒）；要分屏放映请 agent 写上 steps。
-- 字体回退：多字符串开着 kerning 时宽度比完整字体约宽 1%。
-- 在文件夹里点「新建项目」，新项目不会自动放进当前文件夹。
-- 画布上的层（草稿 / 批注）刚出现的一两帧里点击会被送进下面的隔离 iframe（真人操作碰不到，测试里等两帧）。
+- 文字拖角时只等比改元素自己的字号：页面里写死 px 的行高、子元素自己的 px 字号不跟着变。
+- 退回到升级前的版本后，下次打开会再升级一次；44 页的项目第一次打开要多等约 10 秒，没有进度提示。
+- 色块补标靠「标签名 + 第几个 + id/class」对应源码，对不上的跳过（少标，不会标错）。静态排版下的尺寸为准：靠动效铺满页面的条（例如会议项目第 11 页第 1 屏的色带）会被当成色块。
+- 放映去重没有在 WebKit（Safari 内核）里实测（本机没装 Playwright 的 WebKit）。
+- 因为界面改动跳过的 5 个旧测试（见报告），等用户对界面满意后统一补测试。
 - Windows 电脑本轮不更新。
 
 ## 下一步
-- 用户在 Mac 上验收（程序坞里的「视觉工作台」已是新版），统筹窗口决定何时合并进 main、何时更新 Windows。
-- 第 14 轮按 PLAN：印刷版和线上版两种导出、PPTX 导出。
+- 用户在 Mac 上用自己的项目验收基本操作清单 1–11 和 A–F。
+- 满意后补测试（跳过的 5 个 + 新操作），再由统筹窗口决定合并进 main、更新 Windows。
 
 ## 需要用户决定
-- 放映时要不要也用工作台数出的屏数（现在只在编辑画布用，放映按 agent 写的 steps）。建议：不用，让 agent 写上 steps 更稳。
-- 草稿页「分页 / 合并」要不要进撤销。建议：第 14 轮顺手做。
+- 第 1 屏被动效铺满的色带算色块（能拖）还是整页背景（只能改色）。现在按静态排版算色块。
