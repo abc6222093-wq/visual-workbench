@@ -1,6 +1,6 @@
 // 第 13 轮：草稿页编辑（docs/round13-contract.md §5）。真实服务 + 真实浏览器：
 // 「从文案添加草稿页…」→ 页面栏「草稿」标记、画布上盖草稿表单；打字 / 回车 / 层级 / 粘贴 / 段首退格 → draft-update 改写页面文件；
-// Ctrl+Enter 分页（draft-split）、和下一页合并（draft-merge）；撤销回到上一份；属性栏「文字超出页面 N px」；拖 .md 进页面栏。
+// Ctrl+Enter 分页（draft-split）、和下一页合并（draft-merge）；撤销回到上一份；页面下边的虚线（第 14 轮去掉了「文字超出页面 N px」）；拖 .md 进页面栏。
 import test from 'node:test';import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';import {join,dirname} from 'node:path';
 import {startWorkbench,openProject,v3Project,painted} from './round12-editor-fixture.js';
@@ -17,7 +17,7 @@ async function waitBlocks(files,id,test,ms=8000){const t0=Date.now();let last;wh
 const caret=(page,b,o)=>page.evaluate(([b,o])=>{const p=document.querySelectorAll('.vw-draft-layer main > p')[b];const main=p.parentNode;main.focus();const walker=document.createTreeWalker(p,NodeFilter.SHOW_TEXT);let left=o,node,hit=null;while((node=walker.nextNode())){if(left<=node.data.length){hit=[node,left];break;}left-=node.data.length;}const r=document.createRange();if(hit)r.setStart(hit[0],hit[1]);else r.setStart(p,0);r.collapse(true);const s=getSelection();s.removeAllRanges();s.addRange(r);},[b,o]);
 const TEXT=`# 课表\n## Page 1 ｜ 封面\n【核心信息】\n大标题：水曜会话\n副标题：十月班\n## Page 2 ｜ 流程\n【核心信息】\n小标题：今天的流程\n① 打招呼\n② 自由会话\n【动效】\n逐条出现\n`;
 
-test('round13 草稿页：从文案添加、改字、回车、层级、粘贴、合并段落、分页、合并页面、撤销、超出页面的数值',{skip:'第 14 轮界面改动：去掉了「文字超出页面 N px」提示（B 项），等用户对界面满意后补测试'},async t=>{
+test('round13 草稿页：从文案添加、改字、回车、层级、粘贴、合并段落、分页、合并页面、撤销、页面下边的虚线（不再有「文字超出页面 N px」提示）',async t=>{
  const {page,errors,files}=await startWorkbench(t,{projects:[v3Project({pages:['第1页']})],prefix:'vw-round13-drafts-'});
  await openProject(page);
  // 「添加页面」菜单 → 从文案添加草稿页…
@@ -42,7 +42,10 @@ test('round13 草稿页：从文案添加、改字、回车、层级、粘贴、
  await page.waitForSelector('.ed-quickbar:not([hidden]) select[data-draft-level]');
  assert.deepEqual(await page.locator('select[data-draft-level] option').allTextContents(),['大标题','副标题','小标题','正文','注释','引用','页眉','页脚']);
  assert.equal(await page.locator('.ed-quickbar [data-action="draft-merge"]').isDisabled(),false);
- assert.match(await page.locator('[data-draft-overflow]').textContent(),/^文字超出页面 0 px$/);
+ // 第 14 轮去掉了「文字超出页面 N px」提示，只留页面下边的虚线（草稿层 ::after）
+ assert.equal(await page.locator('[data-draft-overflow]').count(),0,'不再有超出页面的提示');
+ const edge=()=>page.locator('.vw-draft-layer').evaluate(l=>{const cs=getComputedStyle(l,'::after');return {style:cs.borderTopStyle,top:cs.top,h:l.getBoundingClientRect().height};});
+ assert.equal((await edge()).style,'dashed','页面下边是虚线');
 
  // 1. 打字：在大标题后面加字 → 节流后 draft-update 改写页面文件
  await caret(page,0,4);await page.keyboard.type('·秋');
@@ -72,7 +75,9 @@ test('round13 草稿页：从文案添加、改字、回车、层级、粘贴、
  // 7. 超出页面：贴很多行（贴在「十月班甲乙」后面：第一行接在这一段，其余每行一段）
  await caret(page,2,5);
  await page.evaluate(()=>{const dt=new DataTransfer();dt.setData('text/plain',Array.from({length:30},(_, i)=>`第 ${i} 行`).join('\n'));document.querySelector('.vw-draft-layer main').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));});
- await page.waitForFunction(()=>/^文字超出页面 [1-9]\d* px$/.test(document.querySelector('[data-draft-overflow]')?.textContent||''));
+ // 超出页面的文字照常显示（能滚出去），虚线仍在页面下边、没有数值提示
+ await page.waitForFunction(()=>{const m=document.querySelector('.vw-draft-layer main');return m&&m.scrollHeight>1080;});
+ assert.equal((await edge()).style,'dashed');assert.equal(await page.locator('[data-draft-overflow]').count(),0);
  await waitBlocks(files,d1.id,b=>b.length===32);
  await saved(page);
  // 8. Ctrl+Enter 分页：光标处切开，新页插在后面并成为当前页
@@ -98,7 +103,8 @@ test('round13 草稿页：从文案添加、改字、回车、层级、粘贴、
  // 10. 回到普通页：草稿层拿掉，iframe 显示
  await page.locator('.page-list .ed-page[data-page-id="page_p01"] .ed-page__open').click();
  await page.waitForSelector('.vw-draft-layer',{state:'detached'});
- await page.waitForSelector('#artboard[data-ready="1"]');
+ // 第 16 轮换页双缓冲：旧页的 iframe 留到新页画好才去掉，等只剩一个
+ await page.waitForFunction(()=>document.querySelector('#artboard')?.dataset.ready==='1'&&document.querySelectorAll('#artboard > iframe').length===1);
  assert.equal(await page.locator('#artboard > iframe').evaluate(f=>getComputedStyle(f).visibility),'visible');
  assert.deepEqual(errors,[]);
 });
