@@ -14,11 +14,40 @@
 .hm-selbar {position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border:1px solid rgba(255,255,255,.4);border-radius:16px;background:var(--panel-bg,rgba(244,245,249,.95));backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 12px 44px #0003;color:var(--g-ink);font:600 13px/1 var(--g-font);white-space:nowrap}
 .hm-selbar[hidden] {display:none}
 .hm-selbar__count b {font-variant-numeric:tabular-nums}
-/* 第 13 轮：文件夹卡片（像访达的文件夹：大图标 + 名字 + 项目数），尺寸沿用 .hm-card */
+/* 第 17 轮：玻璃文件夹——左上角带小标签的 📁 形状（后片 + 露出来的几张缩略图 + 前片），薄透明玻璃、白色亮边、柔和投影；
+   形状和项目缩略图同为 16:10（web/folders.js 里的 160×100 路径）；名字和「N 个项目」与项目卡片一致 */
 .hm-cell--folder > .hm-card {flex:none}
-.hm-folder__thumb {background:rgba(255,255,255,.35);color:#7a9fd8}
-.hm-folder__thumb .g-icon {width:38%;height:auto;max-height:70%;fill:rgba(140,175,230,.28)}
+.hm-cell--folder > .hm-card.hm-folder {background:transparent;box-shadow:none}
+.hm-cell--folder > button.hm-card.hm-folder:hover {background:rgba(255,255,255,.3);box-shadow:inset 0 0 0 1px rgba(255,255,255,.7),3px 10px 18px -10px rgba(60,52,92,.32)}
+.hm-folder__art {position:relative;width:100%;aspect-ratio:16/10}
+.hm-folder__art > span,.hm-folder__rim {position:absolute;inset:0;display:block}
+.hm-folder__art > .hm-folder__shadow {inset:22% 4% 2% 5%;border-radius:10%;background:rgba(60,52,92,.26);filter:blur(12px);transform:translate(2%,7%)}
+.hm-folder__back,.hm-folder__front {-webkit-mask:var(--hm-mask) 0 0/100% 100% no-repeat;mask:var(--hm-mask) 0 0/100% 100% no-repeat}
+.hm-folder__back {--hm-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100' preserveAspectRatio='none'%3E%3Cpath d='M4 19Q4 11 12 11H48Q53 11 56.5 14.5L60 18H148Q156 18 156 26V88Q156 96 148 96H12Q4 96 4 88Z'/%3E%3C/svg%3E");background:linear-gradient(180deg,rgba(226,234,250,.78),rgba(246,248,255,.5));backdrop-filter:blur(10px) saturate(1.3);-webkit-backdrop-filter:blur(10px) saturate(1.3)}
+.hm-folder__front {--hm-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100' preserveAspectRatio='none'%3E%3Cpath d='M4 41Q4 33 12 33H148Q156 33 156 41V88Q156 96 148 96H12Q4 96 4 88Z'/%3E%3C/svg%3E");background:linear-gradient(180deg,rgba(240,244,253,.82),rgba(226,233,250,.6));backdrop-filter:blur(5px) saturate(1.2);-webkit-backdrop-filter:blur(5px) saturate(1.2)}
+.hm-folder__rim {width:100%;height:100%;overflow:visible;pointer-events:none}
+.hm-folder__rim path {fill:none;stroke:rgba(255,255,255,.96);stroke-width:1.4;vector-effect:non-scaling-stroke}
+.hm-folder__rim path.hm-folder__edge {stroke:rgba(70,80,130,.22);stroke-width:2.6}
+.hm-folder__rim .hm-folder__shine {stroke:rgba(255,255,255,.75);stroke-width:1}
+/* 露出来的缩略图：像文件从文件夹里露出一截 */
+.hm-folder__art > .hm-folder__paper {inset:auto;width:44%;aspect-ratio:16/10;border-radius:4px;overflow:hidden;background:#fff;box-shadow:0 0 0 .5px rgba(60,52,92,.14),0 4px 10px -4px rgba(60,52,92,.4)}
+.hm-folder__paper .miniature {position:absolute;inset:0;overflow:hidden;contain:strict}
+.hm-folder__art.has-1 > .hm-folder__paper--0 {left:28%;top:7%;transform:rotate(-2deg)}
+.hm-folder__art.has-2 > .hm-folder__paper--0 {left:16%;top:10%;transform:rotate(-6deg)}
+.hm-folder__art.has-2 > .hm-folder__paper--1 {left:40%;top:6%;transform:rotate(4deg)}
+.hm-folder__art.has-3 > .hm-folder__paper--0 {left:10%;top:12%;transform:rotate(-8deg)}
+.hm-folder__art.has-3 > .hm-folder__paper--1 {left:28%;top:5%;transform:rotate(-1deg)}
+.hm-folder__art.has-3 > .hm-folder__paper--2 {left:46%;top:10%;transform:rotate(7deg)}
+/* 拖到文件夹正中 = 放进文件夹：整个文件夹亮起来、稍微放大（和排序的插入线一眼分得清） */
 .hm-cell--folder > .hm-card.is-drop-target,.hm-crumb.is-drop-target {outline:2px solid var(--accent,#6294ef);outline-offset:2px;background:rgba(110,150,230,.16)}
+.hm-cell--folder > .hm-card.is-drop-target {transform:scale(1.04)}
+.hm-card.is-drop-target .hm-folder__front {background:linear-gradient(180deg,rgba(176,200,246,.78),rgba(130,165,235,.52))}
+/* 拖到两张卡片之间 = 排序：一条竖的插入线 */
+.hm-grid {position:relative}
+.hm-insert {position:absolute;z-index:5;width:4px;margin-left:-2px;border-radius:4px;background:var(--accent,#6294ef);box-shadow:0 0 0 3px rgba(98,148,239,.18),0 0 14px rgba(98,148,239,.55);pointer-events:none}
+.hm-insert::before,.hm-insert::after {content:"";position:absolute;left:50%;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--accent,#6294ef)}
+.hm-insert::before {top:-5px}
+.hm-insert::after {bottom:-5px}
 .hm-folder-empty {margin:28px 6px;color:var(--g-ink-3);font-size:12.5px}
 /* 面包屑「项目总览 › 文件夹名」：第一级是可点的文字按钮 */
 .hm-crumbs {display:flex;align-items:center;gap:8px}
@@ -31,8 +60,9 @@
 .hm-card__chips {display:flex;flex-wrap:wrap;gap:4px;max-width:55%}
 .hm-chip {display:inline-flex;align-items:center;gap:3px;height:19px;padding:0 6px;border-radius:6px;font-size:10.5px;font-weight:600;color:var(--g-ink-2);background:rgba(255,255,255,.6)}
 .hm-chip--draft {color:var(--g-pink-ink,#8a2f62);background:rgba(var(--g-pink-rgb,236,120,182),.22)}
-/* 设计卡片图标：母版开关左边，有卡片就常显 */
-.hm-cell > .hm-design {position:absolute;top:16px;right:56px}
+/* 设计卡片图标：母版开关左边；和另外两个按钮一样，鼠标放到卡片上才出现（第 17 轮） */
+.hm-cell > .hm-design {position:absolute;top:16px;right:56px;opacity:0;transition:opacity .15s ease}
+.hm-cell:hover > .hm-design,.hm-cell > .hm-design:focus-visible {opacity:1}
 /* 拖文件进来：整块面板出现「松开导入」 */
 .hm-panel {position:relative}
 .hm-drop-hint {position:absolute;inset:6px;z-index:30;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:2px dashed var(--accent,#6294ef);border-radius:22px;background:rgba(235,242,255,.82);color:var(--g-ink);pointer-events:none}

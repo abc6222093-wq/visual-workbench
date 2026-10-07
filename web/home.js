@@ -7,6 +7,14 @@ import { icon } from "./ui/icons.js";
 import { openModalGlass } from "./ui/glass.js";
 import { showContextMenu } from "./context-menu.js";
 import { breadcrumbHtml, createFolderActions, folderCardHtml, folderIcon, folderView, formatBackupTime, mountFolderDrops, moveMenuItems } from "./folders.js";
+
+// 卡片的排序键（和服务端 workbench-state.json 的 order 一致）：项目 "p:<编号>"，文件夹 "f:<名字>"
+const keyOf = (x) => (x.isFolder ? `f:${x.name}` : `p:${x.id}`);
+/** 按用户拖出来的顺序排；没登记的排在后面，保持原来的先后。 */
+export function orderItems(items, saved = []) {
+  const at = new Map(saved.map((k, i) => [k, i]));
+  return items.map((x, i) => [x, at.has(keyOf(x)) ? at.get(keyOf(x)) : saved.length + i]).sort((a, b) => a[1] - b[1]).map(([x]) => x);
+}
 import { openDesignCard, renderDesignCardIcon } from "./design-card.js";
 
 export const PRESETS = [
@@ -101,19 +109,25 @@ export function createHome(deps) {
   }
 
   async function show() {
-    const [list, folderInfo] = await Promise.all([
+    const [list, folderInfo, orderInfo] = await Promise.all([
       api("/api/projects"),
       api("/api/folders").catch(() => null), // 接口没上线时按项目上的 folder 字段推出文件夹
+      api("/api/order").catch(() => null), // 用户拖出来的卡片顺序
     ]);
     let backup = folderInfo?.backup;
     if (backup === undefined) backup = (await api("/api/organize").catch(() => null))?.backup ?? null;
     S.homeProjects = list;
     S.homeFolders = folderInfo?.folders || [];
     S.homeBackup = backup;
+    S.homeOrder = orderInfo?.order || {};
     S.masters = list.filter((x) => x.master).map((x) => ({ id: x.id, name: x.name }));
     if (S.homeFolder && !folderView(list, S.homeFolders, "").all.some((f) => f.name === S.homeFolder)) S.homeFolder = "";
     const here = S.homeFolder || "";
     const view = folderView(list, S.homeFolders, here);
+    // 用户拖出来的顺序（第 17 轮）：根上文件夹和项目一起排；文件夹里只有项目
+    const items = orderItems([...view.folders.map((f) => ({ ...f, isFolder: true })), ...view.projects], S.homeOrder[here] || []);
+    S.homeKeys = items.map(keyOf);
+    const inFolder = (name) => orderItems(list.filter((p) => p.folder === name), S.homeOrder[name] || []);
     // 缩略图框是 16:10，作品按自己的比例居中放进去（竖版海报不会被裁）
     const fit = (item) => {
       const first = item.project.pages?.[0];
@@ -133,19 +147,26 @@ export function createHome(deps) {
       return `<div class="hm-cell${dc ? " has-design" : ""}" data-project-id="${esc(item.id)}"><button class="hm-card" data-action="open" data-id="${esc(item.id)}"><div class="hm-card__thumb"><div class="hm-card__art" style="${fit(item)}" data-thumb="${i}"></div></div><div class="hm-card__info"><strong>${esc(item.name)}</strong><small>${item.project.pages.length} 页 · ${new Date(item.updatedAt).toLocaleDateString("zh-CN")}</small>${chips(item)}</div><span class="hm-card__tag">${item.master ? "系列母版" : item.legacy ? "旧格式 · 打开时转换" : esc(item.project.artboard?.preset || "")}</span></button>${dc}<button class="ed-add hm-master ${item.master ? "is-on" : ""}" data-action="master" data-id="${esc(item.id)}" data-on="${item.master ? 1 : 0}" title="${item.master ? "取消系列母版" : "设为系列母版"}" aria-label="${item.master ? "取消系列母版" : "设为系列母版"}" aria-pressed="${item.master ? "true" : "false"}">${icon("bookmark", 15)}</button><div class="hm-project-actions">${[["project-rename", "重命名"], ["project-duplicate", "复制项目"], ["project-delete", "删除项目"]].map(([action, label]) => `<button class="g-btn" data-action="${action}" data-id="${esc(item.id)}">${label}</button>`).join("")}</div></div>`;
     };
     const count = `${here ? view.projects.length : list.length} 个项目`;
-    const restoreBtn = backup?.at ? `<button class="g-btn" data-action="organize-restore">退回整理前（${esc(formatBackupTime(backup.at))}）</button>` : "";
-    const actions = `<button class="g-btn" data-action="close-workbench">关闭工作台</button><button class="g-btn" data-action="project-trash">回收站</button><button class="g-btn" data-action="data-settings">数据文件夹</button>${restoreBtn}<button class="g-btn" data-action="home-brief">复制给 agent</button><button class="g-btn" data-action="folder-new">新建文件夹</button><button class="g-btn" data-action="import-html">导入 HTML / 网页</button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`;
+    const restoreBtn = backup?.at ? `<button class="ed-play" data-action="organize-restore">${icon("undo", 15)}<span>退回整理前（${esc(formatBackupTime(backup.at))}）</span></button>` : "";
+    // 顶部（第 17 轮）：复制给 agent、导入旧项目、新建项目，同一种玻璃胶囊；回收站、数据文件夹在左边边栏；关闭工作台去掉（桌面应用关窗口就是正常关闭）
+    const actions = `${restoreBtn}<button class="ed-play" data-action="home-brief">${icon("copy", 15)}<span>复制给 agent</span></button><button class="ed-play" data-action="import-html">${icon("import", 15)}<span>导入旧项目</span></button><button class="ed-play" data-action="new">${icon("plus", 15)}<span>新建项目</span></button>`;
     const header = `<header class="ed-top"><div class="ed-titlebox">${breadcrumbHtml(here, esc)}<span class="ed-count ed-count--bg">${count}</span></div><div class="ed-spacer"></div>${actions}</header>`;
     const empty = here && !view.projects.length ? `<p class="hm-folder-empty">这个文件夹是空的。在项目上右键「移到…」，或把项目卡片拖到文件夹上。</p>` : "";
     shell(
       "home",
-      `${header}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${view.folders.map((f) => folderCardHtml(f, esc)).join("")}${view.projects.map(card).join("")}<button class="hm-card hm-card--add" data-action="new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建项目</span></button></div>${empty}</div><div class="hm-drop-hint" aria-hidden="true"><span>${icon("upload", 22)}松开导入</span><small>HTML、文件夹、.zip 导入成项目；.md / .txt 文案按草稿分页新建</small></div></section>`,
+      `${header}<section class="hm-panel" ${glassAttr("home:panel")} data-glass-frost><div class="hm-scroll ed-scroll"><div class="hm-grid">${items.map((x) => (x.isFolder ? folderCardHtml(x, esc, inFolder(x.name).filter((p) => !p.legacy && p.project.pages?.[0]?.file).length) : card(x))).join("")}${here ? "" : `<button class="hm-card hm-card--add" data-action="folder-new"><span class="ed-add" aria-hidden="true">${icon("plus", 18)}</span><span>新建文件夹</span></button>`}</div>${empty}</div><div class="hm-drop-hint" aria-hidden="true"><span>${icon("upload", 22)}松开导入</span><small>HTML、文件夹、.zip 导入成项目；.md / .txt 文案按草稿分页新建</small></div></section>`,
     );
     list.forEach((x, i) => { const first = x.project.pages?.[0]; if (first && !x.legacy && first.file) $(`[data-thumb="${i}"]`)?.append(homeThumbs.make(x.project, first)); });
+    // 文件夹里露出来的缩略图：这个文件夹（按用户的顺序）前几个能显示的项目
+    for (const slot of app.querySelectorAll("[data-thumb-folder]")) {
+      const shown = inFolder(slot.dataset.thumbFolder).filter((p) => !p.legacy && p.project.pages?.[0]?.file);
+      const item = shown[Number(slot.dataset.thumbIndex)];
+      if (item) slot.append(homeThumbs.make(item.project, item.project.pages[0]));
+    }
     const scroll = app.querySelector(".hm-scroll");
     if (scroll) {
       S.homeSel = mountHomeSelection(scroll, { canMove: true, onOpen: (id) => open(id), onAction: (action, ids, at) => homeAction(action, ids, at) });
-      mountFolderDrops(scroll.closest(".ed-main") || app, { selectedIds: () => S.homeSel?.selected || [], onMove: (ids, folder) => folders.move(ids, folder) });
+      mountFolderDrops(scroll.closest(".ed-main") || app, { selectedIds: () => S.homeSel?.selected || [], onMove: (ids, folder) => folders.move(ids, folder), onReorder: (keys, before) => reorder(keys, before).catch((err) => notice(err.message)) });
       scroll.addEventListener("contextmenu", folderMenu);
       mountImportDrop(scroll);
     }
@@ -153,6 +174,18 @@ export function createHome(deps) {
     syncGlass(app);
   }
 
+  // 拖动排序（第 17 轮）：把拖的这几张卡片（保持它们原来的先后）插到 before 前面（null = 最后），存进 workbench-state.json 的 order
+  async function reorder(keys, before) {
+    const here = S.homeFolder || "", current = S.homeKeys || [];
+    const moving = current.filter((k) => keys.includes(k)), rest = current.filter((k) => !keys.includes(k));
+    if (!moving.length) return;
+    const at = before == null ? rest.length : rest.indexOf(before);
+    rest.splice(at < 0 ? rest.length : at, 0, ...moving);
+    if (rest.join("\n") === current.join("\n")) return;
+    const out = await api("/api/order", "PUT", { folder: here, items: rest });
+    S.homeOrder = out.order || S.homeOrder;
+    await show();
+  }
   // 文件夹卡片右键：打开、重命名、删除
   function folderMenu(e) {
     const cell = e.target.closest?.(".hm-cell--folder"); if (!cell) return;

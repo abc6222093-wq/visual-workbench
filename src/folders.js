@@ -83,6 +83,36 @@ function allProjects(dataDir) {
   return out;
 }
 
+// ---------- 总览里卡片的顺序（用户拖动排序，第 17 轮）----------
+// workbench-state.json 的 order：{ "": [根上的卡片], "<文件夹名>": [文件夹里的项目] }；卡片键 "p:<项目编号>" / "f:<文件夹名>"。
+// 没登记的卡片排在后面（按原来的顺序），登记了但已经不存在的忽略。
+const ORDER_KEY = /^(p:[a-z0-9][a-z0-9-]{1,63}|f:[^\\/\x00-\x1f\x7f]{1,60})$/;
+export function readOrder(dataDir) {
+  const raw = readState(dataDir).order;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [folder, items] of Object.entries(raw)) if (Array.isArray(items)) out[folder] = [...new Set(items.filter((k) => typeof k === 'string' && ORDER_KEY.test(k)))];
+  return out;
+}
+export function writeOrder(dataDir, folder, items) {
+  const where = typeof folder === 'string' ? folder : '';
+  if (where && where !== cleanFolderName(where)) throw fail(400, '文件夹名称不对');
+  if (!Array.isArray(items) || items.length > 5000 || !items.every((k) => typeof k === 'string' && ORDER_KEY.test(k))) throw fail(400, '顺序不对');
+  if (where && items.some((k) => k.startsWith('f:'))) throw fail(400, '文件夹里不能再放文件夹');
+  writeState(dataDir, { order: { ...readOrder(dataDir), [where]: [...new Set(items)] } });
+  return readOrder(dataDir);
+}
+// 文件夹改名 / 删除时顺序跟着改：根上的 "f:旧名" 换成新名（删除时去掉），这个文件夹自己的顺序换键名（删除时并到根的末尾）
+function renameInOrder(dataDir, from, to) {
+  const order = readOrder(dataDir);
+  const root = (order[''] || []).flatMap((k) => (k === `f:${from}` ? (to ? [`f:${to}`] : []) : [k]));
+  const inner = order[from];
+  delete order[from];
+  if (inner && to) order[to] = inner;
+  else if (inner) root.push(...inner.filter((k) => !root.includes(k)));
+  writeState(dataDir, { order: { ...order, '': root } });
+}
+
 /** 文件夹列表 [{ name, count }]：登记的文件夹（含空的）+ 项目里写了但没登记的。 */
 export function listFolders(dataDir) {
   const names = readFolders(dataDir);
@@ -118,6 +148,7 @@ export function renameFolder(dataDir, oldName, newName, { onWrite } = {}) {
   if (to === from) return listFolders(dataDir);
   const list = readFolders(dataDir);
   writeFolders(dataDir, list.includes(from) ? list.map((n) => (n === from ? to : n)) : [...list, to]);
+  renameInOrder(dataDir, from, to);
   const now = new Date().toISOString();
   for (const { id, project } of allProjects(dataDir)) {
     if (folderOf(project) !== from) continue;
@@ -130,6 +161,7 @@ export function deleteFolder(dataDir, name, { onWrite } = {}) {
   const value = typeof name === 'string' ? name : '';
   if (!listFolders(dataDir).some((f) => f.name === value)) throw fail(404, `找不到文件夹「${value}」`);
   writeFolders(dataDir, readFolders(dataDir).filter((n) => n !== value));
+  renameInOrder(dataDir, value, '');
   const now = new Date().toISOString();
   for (const { id, project } of allProjects(dataDir)) {
     if (folderOf(project) !== value) continue;

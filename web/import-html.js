@@ -1,4 +1,4 @@
-// 总览「导入 HTML / 网页」弹窗（第 12 轮：保留原网页，标出可改的文字和图片）：选项目类型（课件 / 网页）→ 选单个 .html / 文件夹 / .zip，或（网页）输入网址 →
+// 总览「导入旧项目」弹窗（原名「导入 HTML / 网页」）（第 12 轮：保留原网页，标出可改的文字和图片）：选项目类型（课件 / 网页）→ 选单个 .html / 文件夹 / .zip，或（网页）输入网址 →
 // 项目名称、画板（课件尽量从 HTML 自动识别；网页固定电脑端 1440×900 / 手机端 390×844 窗口）→ 分块读文件、上传建任务 →
 // 轮询进度（可取消）→ 完成摘要与「打开项目」。按页切开在服务端后台浏览器里做，这里只负责选文件和显示进度，工作台不会卡住。
 // 第 13 轮：filesFromDataTransfer 把拖进来的文件 / 文件夹 / .zip 变成 [{ path, file }]；openImportDialog 可以带预选文件（files）、
@@ -90,7 +90,7 @@ export function openImportDialog({ api, modal, closeModal = () => {}, notice = (
   ensureStyle();
   const into = typeof intoProject === 'string' && intoProject ? intoProject : null;
   const presetOptions = IMPORT_PRESETS.map(p => `<option value="${p[0]}">${p[1]} · ${p[2]} × ${p[3]}</option>`).join('');
-  const host = modal(`<h2>${into ? '导入为页面' : '导入 HTML / 网页'}</h2><div class="import-html${into ? ' import-html--into' : ''}">
+  const host = modal(`<h2>${into ? '导入为页面' : '导入旧项目'}</h2><div class="import-html${into ? ' import-html--into' : ''}">
     <form class="import-html__form">
       <p class="g-sheet__note" data-note-into hidden>把 HTML 文件、文件夹或 .zip 按页切开，插到当前页后面：保留原网页，标出可改的文字和图片，画板和这个项目一样。原文件原样复制一份，不会被修改。</p>
       <fieldset class="import-html__kind" data-kind-field><legend>项目类型</legend>

@@ -16,7 +16,7 @@ import { copyPages, copyPagesInto, rollbackWritten, blankPageHtml, blankPageEntr
 import { createProjectWatcher } from './watch.js';
 import { readMasters, setMaster, createFromMaster, blankPage } from './master.js';
 import { agentBrief, organizeBrief, BRIEF_INTENTS } from './brief.js';
-import { listFolders, createFolder, renameFolder, deleteFolder, ensureFolder, readBackup, beginOrganize, restoreOrganize } from './folders.js';
+import { listFolders, createFolder, renameFolder, deleteFolder, ensureFolder, readBackup, beginOrganize, restoreOrganize, readOrder, writeOrder } from './folders.js';
 import { DRAFT_OPS, createFileWriter, draftOperation, draftProjectPages } from './drafts.js';
 import { fontsApi } from './fonts/library.js';
 import { exportHandoff, defaultHandoffDir } from './export/changes.js';
@@ -309,6 +309,9 @@ export function createServer({ dataDir, port=4173, agentIdleMs=15000, watchPollM
     if(req.method==='GET'&&url.pathname==='/api/projects') { const masters=new Set(masterList()); return json(res,200,listProjects(dataDir).map(id=>{ const project=readProject(projectPath(dataDir,id)).project; return {id,name:project.name,updatedAt:project.updatedAt,master:masters.has(id),folder:typeof project.folder==='string'?project.folder:'',...(project.designCard&&typeof project.designCard==='object'?{designCard:project.designCard}:{}),drafts:Array.isArray(project.pages)?project.pages.filter(p=>p?.draft===true).length:0,...(isLegacyProject(project)?{legacy:true}:{}),project}; })); }
     // 文件夹与整理（第 13 轮，src/folders.js）
     if(req.method==='GET'&&url.pathname==='/api/folders') { const backup=readBackup(dataDir); return json(res,200,{folders:listFolders(dataDir),backup:backup?{at:backup.at}:null}); }
+    // 总览卡片的顺序（第 17 轮）：GET → { order }；PUT { folder: ''（根）或文件夹名, items: ['p:<编号>' | 'f:<文件夹名>', …] }
+    if(req.method==='GET'&&url.pathname==='/api/order') return json(res,200,{order:readOrder(dataDir)});
+    if(req.method==='PUT'&&url.pathname==='/api/order') { const b=await checkedBody(req); return json(res,200,{order:writeOrder(dataDir,b.folder||'',b.items)}); }
     if(req.method==='POST'&&url.pathname==='/api/folders') { const b=await checkedBody(req); return json(res,201,{folders:createFolder(dataDir,b.name)}); }
     if(parts[0]==='api'&&parts[1]==='folders'&&parts.length===3&&(req.method==='PATCH'||req.method==='DELETE')) {
       let name; try { name=decodeURIComponent(parts[2]); } catch { throw fail(400,'文件夹名称不对'); }

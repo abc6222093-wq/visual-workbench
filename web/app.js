@@ -135,7 +135,7 @@ function shell(active, body) {
   const nav = (a, name, title) => `<button class="ed-ibtn ${active === a ? "is-on" : ""}" data-action="${a}" title="${title}" aria-label="${title}" ${active === a ? 'aria-current="page"' : ""}>${icon(name, 18)}</button>`;
   const focus = active === "editor" && S.focus ? " is-focus" : "";
   showDesktopNotice();
-  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="用户">用</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
+  app.innerHTML = `<div class="ed-shell${focus}"><aside class="ed-rail"><div class="ed-logo g-disc-badge" title="视觉工作台">${mascot({ size: 38, disc: true, label: "视觉工作台" })}</div><nav class="ed-dock">${nav("home", "grid", "项目总览")}${nav("library", "library", "公共素材库")}${ibtn("background", "image", "更换背景")}${ibtn("project-trash", "trash", "回收站")}${ibtn("data-settings", "hardDrive", "数据文件夹")}</nav><div class="ed-rail__spacer"></div><div class="ed-avatar" title="用户">用</div></aside><main class="ed-main">${body}</main></div><div id="modal-root"></div>`;
 }
 // 旧版桌面应用（没有右键菜单等）：顶部一条可关闭的提示，关掉后这次打开不再出现
 function showDesktopNotice() {
